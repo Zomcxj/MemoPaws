@@ -124,16 +124,15 @@ class NavSidebar(QWidget):
     def _get_toggle_button_style(self, t) -> str:
         return f"""
             QPushButton {{
-                background: {t.bg_neutral_button};
+                background: transparent;
                 color: {t.text_secondary};
-                border: 1px solid {t.border_subtle};
+                border: none;
                 border-radius: 8px;
                 padding: 0;
-                font-size: 14px;
-                font-weight: bold;
-                text-align: left;
+                margin: 0;
             }}
-            QPushButton:hover {{ background: {_hover(t)}; color: {t.accent}; }}
+            QPushButton:hover {{ background: rgba(255,255,255,0.08); }}
+            QPushButton:pressed {{ background: rgba(255,255,255,0.12); }}
         """
 
     def _get_nav_button_style(self, active: bool) -> str:
