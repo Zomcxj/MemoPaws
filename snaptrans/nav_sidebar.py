@@ -88,10 +88,10 @@ class NavSidebar(QWidget):
         toggle_row.setContentsMargins(13, 0, 0, 0)
         toggle_row.setSpacing(0)
         self.btn_toggle_nav = QPushButton()
-        self.btn_toggle_nav.setFixedSize(20, 20)
+        self.btn_toggle_nav.setFixedSize(24, 24)
         self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
-            os.path.join(icons_dir, "collapse.svg"), 16, ic)))
-        self.btn_toggle_nav.setIconSize(QSize(16, 16))
+            os.path.join(icons_dir, "collapse.svg"), 18, ic)))
+        self.btn_toggle_nav.setIconSize(QSize(18, 18))
         self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t))
         self.btn_toggle_nav.setToolTip("折叠侧边栏")
         self.btn_toggle_nav.clicked.connect(self._toggle_nav)
@@ -195,7 +195,8 @@ class NavSidebar(QWidget):
         # 先更新图标和文字
         if self._nav_expanded:
             self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
-                os.path.join(icons_dir, "collapse.svg"), 16, ic)))
+                os.path.join(icons_dir, "collapse.svg"), 18, ic)))
+            self.btn_toggle_nav.setIconSize(QSize(18, 18))
             self.btn_toggle_nav.setToolTip("折叠侧边栏")
             # 立即显示文字
             for btn, (icon_filename, page_key) in zip(self._nav_buttons, self._nav_items):
@@ -204,7 +205,8 @@ class NavSidebar(QWidget):
                     os.path.join(icons_dir, icon_filename), 18, ic)))
         else:
             self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
-                os.path.join(icons_dir, "expand.svg"), 16, ic)))
+                os.path.join(icons_dir, "panel-left.svg"), 18, ic)))
+            self.btn_toggle_nav.setIconSize(QSize(18, 18))
             self.btn_toggle_nav.setToolTip("展开侧边栏")
             # 折叠时先清空文字，避免动画过程中文字溢出
             for btn, (icon_filename, _page_key) in zip(self._nav_buttons, self._nav_items):
@@ -232,10 +234,10 @@ class NavSidebar(QWidget):
             btn.setIcon(QIcon(_load_svg_icon(
                 os.path.join(icons_dir, icon_filename), 18, ic)))
             btn.setIconSize(QSize(18, 18))
-        toggle_icon = "collapse.svg" if self._nav_expanded else "expand.svg"
+        toggle_icon = "collapse.svg" if self._nav_expanded else "panel-left.svg"
         self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
-            os.path.join(icons_dir, toggle_icon), 16, ic)))
-        self.btn_toggle_nav.setIconSize(QSize(16, 16))
+            os.path.join(icons_dir, toggle_icon), 18, ic)))
+        self.btn_toggle_nav.setIconSize(QSize(18, 18))
 
     def apply_theme(self):
         t = self._get_theme()
