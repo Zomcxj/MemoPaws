@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.mcp{}
+SnapTrans_debug.log
+_current.png
+docs/plans/
+build/
+dist/
+*.spec
+test_icon.png
+AGENTS.md
+AGENTS.md

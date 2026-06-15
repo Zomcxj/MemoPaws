@@ -1,0 +1,20 @@
+# SnapTrans 运行依赖
+# 安装：pip install -r requirements.txt
+
+# ── UI 框架 ──
+PySide6>=6.5.0
+
+# ── 图像处理 ──
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# ── 网络请求（AI 识别/翻译/在线翻译）──
+httpx>=0.25.0
+
+# ── 本地 OCR ──
+rapidocr>=1.3.0
+onnxruntime>=1.15.0         
+
+# ── 打包工具（仅构建时需要）──
+# pyinstaller>=6.0.0
