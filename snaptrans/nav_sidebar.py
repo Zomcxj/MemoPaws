@@ -81,18 +81,18 @@ class NavSidebar(QWidget):
         self._nav_anim.valueChanged.connect(self._on_nav_anim_update)
         self.nav_frame.setObjectName("navFrame")
         nav_layout = QVBoxLayout(self.nav_frame)
-        nav_layout.setContentsMargins(8, 16, 8, 16)
+        nav_layout.setContentsMargins(6, 16, 8, 16)
         nav_layout.setSpacing(0)
 
         toggle_row = QHBoxLayout()
-        toggle_row.setContentsMargins(13, 0, 0, 0)
+        toggle_row.setContentsMargins(0, 0, 0, 0)
         toggle_row.setSpacing(0)
         self.btn_toggle_nav = QPushButton()
-        self.btn_toggle_nav.setFixedSize(24, 24)
+        self.btn_toggle_nav.setFixedHeight(42)
         self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
-            os.path.join(icons_dir, "collapse.svg"), 18, ic)))
+            os.path.join(icons_dir, "panel-left.svg"), 18, ic)))
         self.btn_toggle_nav.setIconSize(QSize(18, 18))
-        self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t))
+        self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t, self._nav_expanded))
         self.btn_toggle_nav.setToolTip("折叠侧边栏")
         self.btn_toggle_nav.clicked.connect(self._toggle_nav)
         toggle_row.addWidget(self.btn_toggle_nav)
@@ -121,34 +121,54 @@ class NavSidebar(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(self.nav_frame)
 
-    def _get_toggle_button_style(self, t) -> str:
-        return f"""
-            QPushButton {{
-                background: transparent;
-                color: {t.text_secondary};
-                border: none;
-                border-radius: 8px;
-                padding: 0;
-                margin: 0;
-            }}
-            QPushButton:hover {{ background: rgba(255,255,255,0.08); }}
-            QPushButton:pressed {{ background: rgba(255,255,255,0.12); }}
-        """
+    def _get_toggle_button_style(self, t, expanded: bool) -> str:
+        if expanded:
+            return f"""
+                QPushButton {{
+                    background: {t.bg_active};
+                    color: {t.text_secondary};
+                    border: 2px solid transparent;
+                    border-radius: 8px;
+                    padding: 12px 8px 12px 12px;
+                    margin: 0;
+                    text-align: left;
+                }}
+                QPushButton:pressed {{
+                    background: {t.border_subtle};
+                }}
+            """
+        else:
+            return f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {t.text_secondary};
+                    border: 2px solid transparent;
+                    border-radius: 8px;
+                    padding: 12px 8px 12px 12px;
+                    margin: 0;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    background: {t.bg_active};
+                }}
+                QPushButton:pressed {{
+                    background: {t.border_subtle};
+                }}
+            """
 
     def _get_nav_button_style(self, active: bool) -> str:
         t = self._get_theme()
-        pad, fsize, align = "12px 8px 12px 12px", "13px", "left"
+        pad, fsize, align = "8px 8px 8px 12px", "13px", "left"
         if active:
             return f"""
                 QPushButton {{
                     background: {t.bg_active};
                     color: {t.accent};
-                    border: none;
-                    border-radius: 12px;
+                    border: 2px solid {t.accent};
+                    border-radius: 10px;
                     padding: {pad};
                     font-size: {fsize};
                     text-align: {align};
-                    line-height: 42px;
                 }}
             """
         else:
@@ -156,16 +176,18 @@ class NavSidebar(QWidget):
                 QPushButton {{
                     background: transparent;
                     color: {t.text_muted};
-                    border: none;
+                    border: 2px solid transparent;
                     border-radius: 10px;
                     padding: {pad};
                     font-size: {fsize};
                     text-align: {align};
-                    line-height: 42px;
                 }}
                 QPushButton:hover {{
-                    background: rgba(255,255,255,0.04);
+                    background: {t.bg_active};
                     color: {t.text_secondary};
+                }}
+                QPushButton:pressed {{
+                    background: {t.border_subtle};
                 }}
             """
 
@@ -194,7 +216,7 @@ class NavSidebar(QWidget):
         # 先更新图标和文字
         if self._nav_expanded:
             self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
-                os.path.join(icons_dir, "collapse.svg"), 18, ic)))
+                os.path.join(icons_dir, "panel-left.svg"), 18, ic)))
             self.btn_toggle_nav.setIconSize(QSize(18, 18))
             self.btn_toggle_nav.setToolTip("折叠侧边栏")
             # 立即显示文字
@@ -213,7 +235,7 @@ class NavSidebar(QWidget):
                 btn.setIcon(QIcon(_load_svg_icon(
                     os.path.join(icons_dir, icon_filename), 18, ic)))
 
-        self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t))
+        self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t, self._nav_expanded))
         for btn in self._nav_buttons:
             btn.setStyleSheet(self._get_nav_button_style(btn.isChecked()))
 
@@ -233,7 +255,7 @@ class NavSidebar(QWidget):
             btn.setIcon(QIcon(_load_svg_icon(
                 os.path.join(icons_dir, icon_filename), 18, ic)))
             btn.setIconSize(QSize(18, 18))
-        toggle_icon = "collapse.svg" if self._nav_expanded else "panel-left.svg"
+        toggle_icon = "panel-left.svg"
         self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
             os.path.join(icons_dir, toggle_icon), 18, ic)))
         self.btn_toggle_nav.setIconSize(QSize(18, 18))
@@ -243,7 +265,7 @@ class NavSidebar(QWidget):
         for btn in self._nav_buttons:
             btn.setStyleSheet(self._get_nav_button_style(btn.isChecked()))
         self._force_refresh_icons()
-        self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t))
+        self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t, self._nav_expanded))
 
     def apply_language(self, lang: str):
         labels = self._page_labels.get(lang, self._page_labels["zh"])

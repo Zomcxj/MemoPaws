@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QSpinBox, QComboBox, QFrame, QApplication, QMessageBox,
     QScrollArea,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect
+from PySide6.QtWidgets import QWidget
 
 from .themes import (
     DARK, LIGHT,
@@ -38,6 +39,49 @@ def load_svg_icon(svg_path: str, size: int = 20, color: str = None):
     renderer.render(painter)
     painter.end()
     return pixmap
+
+
+class AnimatedSegmentedControl:
+    """带滑动指示器动画的分段按钮控制器"""
+
+    def __init__(self, container, btn_left, btn_right):
+        self.container = container
+        self.btn_left = btn_left
+        self.btn_right = btn_right
+        self.accent_color = ""
+
+        # 滑动指示器，作为 container 的子 widget，放在按钮下方
+        self.indicator = QWidget(container)
+        self.indicator.lower()
+
+        # 动画
+        self.anim = QPropertyAnimation(self.indicator, b"geometry")
+        self.anim.setDuration(180)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def set_accent(self, color):
+        self.accent_color = color
+        self.indicator.setStyleSheet(
+            f"background: {color}; border-radius: 8px;"
+        )
+
+    def update_position(self, animated=True):
+        """根据当前 checked 状态更新指示器位置"""
+        btn = self.btn_left if self.btn_left.isChecked() else self.btn_right
+        is_left = btn == self.btn_left
+        w = btn.width() or self.btn_left.width()
+        h = self.container.height() or 32
+        x = 0 if is_left else w
+        target = QRect(x, 0, w, h)
+        cur = self.indicator.geometry()
+
+        if animated and cur.isValid() and cur != target:
+            self.anim.stop()
+            self.anim.setStartValue(cur)
+            self.anim.setEndValue(target)
+            self.anim.start()
+        else:
+            self.indicator.setGeometry(target)
 
 
 class SettingsPage(QWidget):
@@ -151,7 +195,8 @@ class SettingsPage(QWidget):
         self.btn_theme_light.clicked.connect(lambda: self._set_theme(False))
         seg_layout_theme.addWidget(self.btn_theme_light)
 
-        self._update_theme_seg_style()
+        self._theme_seg_ctrl = AnimatedSegmentedControl(
+            self._theme_seg, self.btn_theme_dark, self.btn_theme_light)
         theme_main_row.addWidget(self._theme_seg)
         theme_layout.addLayout(theme_main_row)
         layout.addWidget(theme_group)
@@ -211,6 +256,8 @@ class SettingsPage(QWidget):
         self.btn_lang_zh.clicked.connect(lambda: self._on_set_language("zh"))
         seg_layout.addWidget(self.btn_lang_zh)
 
+        self._lang_seg_ctrl = AnimatedSegmentedControl(
+            self._lang_seg, self.btn_lang_en, self.btn_lang_zh)
         self._update_lang_seg_style()
         lang_main_row.addWidget(self._lang_seg)
         lang_layout.addLayout(lang_main_row)
@@ -439,6 +486,7 @@ class SettingsPage(QWidget):
 
         config = self._load_config()
         is_tray = config.get("close_behavior") == "tray"
+        self._close_behavior = "tray" if is_tray else "exit"
 
         self._close_seg = QFrame()
         self._close_seg.setFixedHeight(32)
@@ -470,6 +518,8 @@ class SettingsPage(QWidget):
         self.close_btn_tray.clicked.connect(lambda: self._set_close_behavior("tray"))
         close_seg_layout.addWidget(self.close_btn_tray)
 
+        self._close_seg_ctrl = AnimatedSegmentedControl(
+            self._close_seg, self.close_btn_exit, self.close_btn_tray)
         self._update_close_seg_style()
         close_main_row.addWidget(self._close_seg)
         close_layout.addLayout(close_main_row)
@@ -508,6 +558,16 @@ class SettingsPage(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(scroll)
+
+        # 延迟初始化：等布局计算完毕后再定位三个指示器并应用初始样式
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._init_seg_indicators)
+
+    def _init_seg_indicators(self):
+        """布局就绪后一次性设置分段按钮的初始状态（样式 + 指示器位置）"""
+        self._update_theme_seg_style()
+        self._update_lang_seg_style()
+        self._update_close_seg_style()
 
     # ── 样式刷新 ──
 
@@ -691,10 +751,12 @@ class SettingsPage(QWidget):
         is_en = self._get_current_lang() == "en"
         self.btn_lang_en.setChecked(is_en)
         self.btn_lang_zh.setChecked(not is_en)
-        active_ss = f"QPushButton {{ background: {t.accent}; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
-        inactive_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
-        self.btn_lang_en.setStyleSheet(active_ss if is_en else inactive_ss)
-        self.btn_lang_zh.setStyleSheet(active_ss if not is_en else inactive_ss)
+        btn_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
+        active_text_ss = f"QPushButton {{ background: transparent; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
+        self.btn_lang_en.setStyleSheet(active_text_ss if is_en else btn_ss)
+        self.btn_lang_zh.setStyleSheet(active_text_ss if not is_en else btn_ss)
+        self._lang_seg_ctrl.set_accent(t.accent)
+        self._lang_seg_ctrl.update_position(animated=True)
 
     def _update_theme_seg_style(self):
         """刷新主题分段按钮的选中样式"""
@@ -704,14 +766,20 @@ class SettingsPage(QWidget):
         is_dark = self._is_dark()
         self.btn_theme_dark.setChecked(is_dark)
         self.btn_theme_light.setChecked(not is_dark)
-        active_ss = f"QPushButton {{ background: {t.accent}; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
-        inactive_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
-        self.btn_theme_dark.setStyleSheet(active_ss if is_dark else inactive_ss)
-        self.btn_theme_light.setStyleSheet(active_ss if not is_dark else inactive_ss)
+        btn_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
+        active_text_ss = f"QPushButton {{ background: transparent; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
+        self.btn_theme_dark.setStyleSheet(active_text_ss if is_dark else btn_ss)
+        self.btn_theme_light.setStyleSheet(active_text_ss if not is_dark else btn_ss)
+        self._theme_seg_ctrl.set_accent(t.accent)
+        self._theme_seg_ctrl.update_position(animated=True)
 
     def _set_close_behavior(self, behavior: str):
         self._close_behavior = behavior
         self._update_close_seg_style()
+        # 立即持久化到配置文件，无需等用户点"保存"
+        config = self._load_config()
+        config["close_behavior"] = behavior
+        self._save_config(config)
 
     def _update_close_seg_style(self):
         """刷新关闭行为分段按钮的选中样式"""
@@ -721,10 +789,12 @@ class SettingsPage(QWidget):
         is_tray = getattr(self, '_close_behavior', 'exit') == 'tray'
         self.close_btn_exit.setChecked(not is_tray)
         self.close_btn_tray.setChecked(is_tray)
-        active_ss = f"QPushButton {{ background: {t.accent}; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
-        inactive_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
-        self.close_btn_exit.setStyleSheet(inactive_ss if is_tray else active_ss)
-        self.close_btn_tray.setStyleSheet(active_ss if is_tray else inactive_ss)
+        btn_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
+        active_text_ss = f"QPushButton {{ background: transparent; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
+        self.close_btn_exit.setStyleSheet(active_text_ss if not is_tray else btn_ss)
+        self.close_btn_tray.setStyleSheet(active_text_ss if is_tray else btn_ss)
+        self._close_seg_ctrl.set_accent(t.accent)
+        self._close_seg_ctrl.update_position(animated=True)
         # 更新文字
         _lang = self._get_current_lang()
         self.btn_theme_dark.setText("Dark" if _lang == "en" else "暗色")
