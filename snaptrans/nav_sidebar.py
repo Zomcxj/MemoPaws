@@ -54,8 +54,8 @@ class NavSidebar(QWidget):
         self._nav_expanded = True
 
         self._page_labels = {
-            "zh": {"设置": "设置", "贴图识别": "贴图识别", "剪切板": "剪切板", "备忘录": "备忘录"},
-            "en": {"设置": "Settings", "贴图识别": "Recognition", "剪切板": "Clipboard", "备忘录": "Notes"},
+            "zh": {"设置": "设置", "贴图识别": "贴图识别", "剪切板": "剪切板", "备忘录": "备忘录", "密钥": "密钥"},
+            "en": {"设置": "Settings", "贴图识别": "Recognition", "剪切板": "Clipboard", "备忘录": "Notes", "密钥": "Keys"},
         }
 
         self._setup_ui()

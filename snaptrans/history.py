@@ -9,27 +9,17 @@ from typing import Optional, Callable, List, Any
 class HistoryManager:
     """历史记录管理器，独立于 UI"""
 
-    def __init__(self, get_config_path: Callable[[], str]):
+    def __init__(self, get_config_path: Callable[[], str] = None):
         """
         初始化历史记录管理器
-        
-        Args:
-            get_config_path: 回调函数，返回配置文件路径
         """
-        self._get_config_path = get_config_path
-        self._history_file = self._derive_history_path(get_config_path())
         self.history_data: List[dict] = []
     
-    @staticmethod
-    def _derive_history_path(config_path: str) -> str:
-        """从配置文件路径推导历史记录文件路径"""
-        # 去掉 .json 后缀，加 _history.json
-        if config_path.endswith('.json'):
-            base = config_path[:-5]
-        else:
-            base = config_path
-        return f"{base}_history.json"
-    
+    @property
+    def _history_file(self) -> str:
+        from .utils import HISTORY_FILE
+        return HISTORY_FILE
+
     def load(self) -> List[dict]:
         """加载历史记录"""
         if os.path.exists(self._history_file):
@@ -54,13 +44,7 @@ class HistoryManager:
             pass
     
     def add_record(self, action_type: str, text: str, **extra):
-        """添加操作历史记录
-        
-        Args:
-            action_type: 显示前缀，如 "识别(本地)" / "翻译(英文)" / "翻译失败(AI)"
-            text: 记录文本
-            extra: 可选，存额外字段 (ocr_text, source, target, mode_name)
-        """
+        """添加操作历史记录"""
         record = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "type": action_type,
@@ -68,13 +52,29 @@ class HistoryManager:
         }
         record.update(extra)
         self.history_data.insert(0, record)
-        self.history_data = self.history_data[:100]
+        # 读取配置中的最大条数
+        max_items = 100
+        try:
+            from .utils import CONFIG_FILE
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                max_items = int(cfg.get("history_max_items", 100))
+        except Exception:
+            pass
+        self.history_data = self.history_data[:max_items]
         self.save()
     
     def clear(self):
         """清空历史记录"""
         self.history_data.clear()
         self.save()
+
+    def delete_record(self, index: int):
+        """删除指定索引的历史记录"""
+        if 0 <= index < len(self.history_data):
+            self.history_data.pop(index)
+            self.save()
     
     @staticmethod
     def parse_translate_record(text: str) -> tuple:

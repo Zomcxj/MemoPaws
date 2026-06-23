@@ -10,12 +10,110 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLabel,
     QLineEdit, QTextEdit, QListWidget, QListWidgetItem,
     QPushButton, QCheckBox, QFileDialog, QMessageBox,
-    QAbstractItemView, QSplitter
+    QAbstractItemView, QSplitter, QTextBrowser
 )
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QSize, QRegularExpression, QTimer
+from PySide6.QtGui import QIcon, QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 
-from .utils import MEMO_FILE, ensure_config_dir
+from .utils import get_config_dir, get_memo_dir, ensure_config_dir
+
+
+class MarkdownHighlighter(QSyntaxHighlighter):
+    """Markdown 语法高亮器"""
+
+    STATE_NORMAL = 0
+    STATE_CODE_BLOCK = 1
+
+    def __init__(self, parent=None, is_dark_fn=None):
+        super().__init__(parent)
+        self._is_dark_fn = is_dark_fn
+        self._rules = []
+        self._code_block_fmt = QTextCharFormat()
+        self._code_marker_fmt = QTextCharFormat()
+        self._build_rules()
+
+    def _build_rules(self):
+        self._rules.clear()
+        dark = self._is_dark_fn() if self._is_dark_fn else True
+
+        h_color = "#E8875C" if dark else "#C05C2E"
+        bold_color = "#F0E6D3" if dark else "#1A1A1A"
+        italic_color = "#B8B8B8" if dark else "#555555"
+        code_inline_color = "#A8D8A8" if dark else "#2E7D32"
+        link_color = "#6FA3EF" if dark else "#1565C0"
+        quote_color = "#999999" if dark else "#888888"
+        list_color = "#D4A76A" if dark else "#8D6E2F"
+        hr_color = "#666666" if dark else "#BBBBBB"
+        code_marker_color = "#888888" if dark else "#AAAAAA"
+        code_content_bg = QColor("#1E1E1E" if dark else "#F5F5F5")
+        code_content_fg = QColor("#D4D4D4" if dark else "#333333")
+
+        def fmt(color, bold=False, italic=False):
+            f = QTextCharFormat()
+            f.setForeground(QColor(color))
+            if bold:
+                f.setFontWeight(QFont.Weight.DemiBold)
+            if italic:
+                f.setFontItalic(True)
+            return f
+
+        # 代码块标记行 ```lang
+        self._code_marker_fmt.setForeground(QColor(code_marker_color))
+        self._code_marker_fmt.setFontItalic(True)
+
+        # 代码块内容：背景 + 前景色
+        self._code_block_fmt.setForeground(code_content_fg)
+        self._code_block_fmt.setBackground(code_content_bg)
+
+        # 标题
+        self._rules.append((QRegularExpression(r"^#{1,6}\s+.+$"), fmt(h_color, bold=True)))
+        # 粗体
+        self._rules.append((QRegularExpression(r"\*\*[^*]+\*\*"), fmt(bold_color, bold=True)))
+        self._rules.append((QRegularExpression(r"__[^_]+__"), fmt(bold_color, bold=True)))
+        # 斜体
+        self._rules.append((QRegularExpression(r"(?<!\*)\*(?!\*)[^*]+\*(?!\*)"), fmt(italic_color, italic=True)))
+        self._rules.append((QRegularExpression(r"(?<!_)_(?!_)[^_]+_(?!_)"), fmt(italic_color, italic=True)))
+        # 行内代码
+        self._rules.append((QRegularExpression(r"`[^`\n]+`"), fmt(code_inline_color)))
+        # 链接
+        self._rules.append((QRegularExpression(r"\[([^\]]+)\]\([^\)]+\)"), fmt(link_color)))
+        # 图片
+        self._rules.append((QRegularExpression(r"!\[([^\]]*)\]\([^\)]+\)"), fmt(link_color)))
+        # 引用
+        self._rules.append((QRegularExpression(r"^>\s+.+$"), fmt(quote_color, italic=True)))
+        # 无序列表
+        self._rules.append((QRegularExpression(r"^[\s]*[-*+]\s"), fmt(list_color, bold=True)))
+        # 有序列表
+        self._rules.append((QRegularExpression(r"^[\s]*\d+\.\s"), fmt(list_color, bold=True)))
+        # 分隔线
+        self._rules.append((QRegularExpression(r"^[-*]{3,}\s*$"), fmt(hr_color)))
+
+    def highlightBlock(self, text):
+        stripped = text.strip()
+
+        # 代码块标记行：``` 开头
+        if stripped.startswith("```"):
+            self.setFormat(0, len(text), self._code_marker_fmt)
+            # 切换状态：进入或退出代码块
+            if self.previousBlockState() == self.STATE_CODE_BLOCK:
+                self.setCurrentBlockState(self.STATE_NORMAL)
+            else:
+                self.setCurrentBlockState(self.STATE_CODE_BLOCK)
+            return
+
+        # 代码块内容行
+        if self.previousBlockState() == self.STATE_CODE_BLOCK:
+            self.setFormat(0, len(text), self._code_block_fmt)
+            self.setCurrentBlockState(self.STATE_CODE_BLOCK)
+            return
+
+        # 普通行：应用内联规则
+        self.setCurrentBlockState(self.STATE_NORMAL)
+        for pattern, fmt in self._rules:
+            it = pattern.globalMatch(text)
+            while it.hasNext():
+                match = it.next()
+                self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
 
 
 class ZoomableTextEdit(QTextEdit):
@@ -171,6 +269,7 @@ class MemoPage(QWidget):
                  on_append_status,
                  is_dark,
                  show_message=None,
+                 get_memo_path=None,
                  ):
         super().__init__(parent)
         self._get_config_path = get_config_path
@@ -180,6 +279,7 @@ class MemoPage(QWidget):
         self._on_append_status = on_append_status
         self._is_dark = is_dark
         self._show_message = show_message
+        self._get_memo_path = get_memo_path
 
         self.memo_data = []
         self._memo_editing = True
@@ -187,6 +287,12 @@ class MemoPage(QWidget):
         self._memo_current_idx = -1
         self._memo_original = None
         self._memo_md_source = ""
+        self._memo_is_dirty = False
+
+        # 草稿自动保存定时器（每 30 秒）
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setInterval(30000)
+        self._auto_save_timer.timeout.connect(self._auto_save_draft)
 
         self._init_ui()
 
@@ -259,6 +365,24 @@ class MemoPage(QWidget):
 
         left_layout.addLayout(memo_btn_grid)
 
+        # 搜索框
+        self.memo_search_input = QLineEdit()
+        self.memo_search_input.setPlaceholderText("搜索备忘录...")
+        self.memo_search_input.setFixedHeight(28)
+        self.memo_search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {t.bg_input};
+                color: {t.text_primary};
+                border: 1px solid {t.border_subtle};
+                border-radius: 6px;
+                padding: 0 8px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {t.accent}; }}
+        """)
+        self.memo_search_input.textChanged.connect(self._filter_memo_list)
+        left_layout.addWidget(self.memo_search_input)
+
         # 列表
         self.memo_list = QListWidget()
         self.memo_list.setStyleSheet(get_status_list_stylesheet(t))
@@ -309,13 +433,74 @@ class MemoPage(QWidget):
         self.memo_time_label.setStyleSheet(_memo_time_ss)
         right_layout.addWidget(self.memo_time_label)
 
-        # 内容
+        # 标签输入
+        tag_row = QHBoxLayout()
+        tag_row.setSpacing(4)
+        tag_lbl = QLabel("标签:")
+        tag_lbl.setStyleSheet(f"font-size:11px; color:{t.text_muted}; border:none; background:transparent;")
+        tag_row.addWidget(tag_lbl)
+        self.memo_tags_input = QLineEdit()
+        self.memo_tags_input.setPlaceholderText("逗号分隔，如：工作,重要")
+        self.memo_tags_input.setFixedHeight(24)
+        self.memo_tags_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {t.bg_input};
+                color: {t.text_primary};
+                border: 1px solid {t.border_subtle};
+                border-radius: 4px;
+                padding: 0 6px;
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {t.accent}; }}
+        """)
+        self.memo_tags_input.editingFinished.connect(self._on_tags_changed)
+        tag_row.addWidget(self.memo_tags_input, 1)
+        right_layout.addLayout(tag_row)
+
+        # 内容区域（编辑器 + 预览分栏）
+        self._content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._content_splitter.setHandleWidth(2)
+        self._content_splitter.setStyleSheet(f"QSplitter::handle {{ background: {t.border_subtle}; }}")
+
+        # 编辑器
         self.memo_content_view = ZoomableTextEdit()
         self.memo_content_view.setReadOnly(False)
+        self._md_highlighter = MarkdownHighlighter(
+            self.memo_content_view.document(), is_dark_fn=self._is_dark)
         self.memo_content_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.memo_content_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.memo_content_view.setStyleSheet(get_text_edit_stylesheet(t))
-        right_layout.addWidget(self.memo_content_view, 1)
+        self._content_splitter.addWidget(self.memo_content_view)
+
+        # MD 预览面板（默认隐藏）
+        self._md_preview = QTextBrowser()
+        self._md_preview.setOpenExternalLinks(True)
+        self._md_preview.setStyleSheet(f"""
+            QTextBrowser {{
+                background: {t.bg_panel};
+                color: {t.text_primary};
+                border: none;
+                padding: 8px;
+                font-size: 13px;
+            }}
+        """)
+        self._md_preview.hide()
+        self._content_splitter.addWidget(self._md_preview)
+
+        # 等宽初始比例
+        self._content_splitter.setSizes([500, 500])
+        right_layout.addWidget(self._content_splitter, 1)
+
+        # 同步滚动
+        self.memo_content_view.verticalScrollBar().valueChanged.connect(
+            self._sync_scroll_to_preview)
+        self._md_preview.verticalScrollBar().valueChanged.connect(
+            self._sync_scroll_to_editor)
+        self._syncing_scroll = False
+
+        # 记录分栏状态
+        self._split_mode = False
+        self._split_threshold = 700  # 右面板宽度阈值
 
         # 操作按钮
         edit_row = QHBoxLayout()
@@ -365,7 +550,8 @@ class MemoPage(QWidget):
                 "id": int(time.time() * 1000),
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "title": "新备忘录",
-                "content": ""
+                "content": "",
+                "tags": []
             }
             self.memo_data.insert(0, record)
             self.save_memo()
@@ -379,6 +565,16 @@ class MemoPage(QWidget):
     def delete_memo(self):
         idx = self.memo_list.currentRow()
         if 0 <= idx < len(self.memo_data):
+            # 删除 .md 文件
+            memo = self.memo_data[idx]
+            fname = memo.get("_file", "")
+            if fname:
+                fpath = os.path.join(self._get_memo_dir(), fname)
+                try:
+                    if os.path.exists(fpath):
+                        os.remove(fpath)
+                except Exception:
+                    pass
             self.memo_data.pop(idx)
             self.save_memo()
             self._update_memo_list()
@@ -390,16 +586,44 @@ class MemoPage(QWidget):
     def _update_memo_list(self):
         self.memo_list.blockSignals(True)
         self.memo_list.clear()
+        keyword = self.memo_search_input.text().strip().lower() if hasattr(self, 'memo_search_input') else ""
         for m in self.memo_data:
             title = m.get("title", "备忘录") or "备忘录"
-            first_line = (m.get("content", "") or "").split("\n", 1)[0][:40]
+            content = m.get("content", "") or ""
+            tags = m.get("tags", [])
+            # 搜索过滤：标题、内容、标签
+            if keyword:
+                match = (keyword in title.lower()
+                         or keyword in content.lower()
+                         or any(keyword in t.lower() for t in tags))
+                if not match:
+                    continue
+            first_line = content.split("\n", 1)[0][:40]
             if not first_line:
                 first_line = "(空)"
-            item = QListWidgetItem(f"{title}\n{first_line}")
+            tag_str = " ".join(f"#{t}" for t in tags) if tags else ""
+            display = f"{title}\n{first_line}"
+            if tag_str:
+                display = f"{title}  {tag_str}\n{first_line}"
+            item = QListWidgetItem(display)
             item.setSizeHint(QSize(-1, 50))
             self.memo_list.addItem(item)
         self.memo_stat_label.setText(f"{len(self.memo_data)} 条")
         self.memo_list.blockSignals(False)
+
+    def _filter_memo_list(self):
+        """搜索框文本变化时刷新列表"""
+        self._update_memo_list()
+
+    def _on_tags_changed(self):
+        """标签输入框编辑完成时保存标签"""
+        if self._memo_current_idx < 0 or self._memo_current_idx >= len(self.memo_data):
+            return
+        text = self.memo_tags_input.text().strip()
+        tags = [t.strip() for t in text.replace("，", ",").split(",") if t.strip()]
+        self.memo_data[self._memo_current_idx]["tags"] = tags
+        self.save_memo()
+        self._update_memo_list()
 
     def _select_memo(self, idx: int):
         if idx < 0 or idx >= len(self.memo_data):
@@ -427,6 +651,8 @@ class MemoPage(QWidget):
         self.memo_title_input.setText(memo.get("title", ""))
         self.memo_time_label.setText(f"创建/修改：{memo.get('time', '')}")
         self._memo_md_source = memo.get("content", "")
+        tags = memo.get("tags", [])
+        self.memo_tags_input.setText(", ".join(tags))
         if self.memo_preview_toggle.isChecked():
             html = markdown_to_html(self._memo_md_source, self._get_theme())
             self.memo_content_view.setHtml(html)
@@ -452,6 +678,7 @@ class MemoPage(QWidget):
             memo["time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self._memo_md_source = new_content
             self.save_memo()
+            self._memo_is_dirty = False
             if 0 <= self._memo_current_idx < self.memo_list.count():
                 first_line = (new_content or "").split("\n", 1)[0][:40] or "(空)"
                 self.memo_list.blockSignals(True)
@@ -477,12 +704,73 @@ class MemoPage(QWidget):
             self.memo_content_view.setPlainText(self._memo_md_source)
             self.memo_content_view.setReadOnly(False)
 
+    def _check_split_mode(self):
+        """检查右面板宽度，自动切换分栏模式"""
+        right_frame = self._content_splitter.parentWidget()
+        if not right_frame:
+            return
+        w = right_frame.width()
+        if w >= self._split_threshold and not self._split_mode:
+            # 宽度足够，开启分栏
+            self._split_mode = True
+            self._md_preview.show()
+            self._update_md_preview()
+        elif w < self._split_threshold and self._split_mode:
+            # 宽度不足，关闭分栏
+            self._split_mode = False
+            self._md_preview.hide()
+
+    def _update_md_preview(self):
+        """更新 MD 预览内容"""
+        if not self._split_mode:
+            return
+        md_text = self.memo_content_view.toPlainText()
+        html = markdown_to_html(md_text, self._get_theme())
+        self._md_preview.setHtml(html)
+
+    def _sync_scroll_to_preview(self, value):
+        """编辑器滚动 → 同步预览"""
+        if self._syncing_scroll or not self._split_mode:
+            return
+        self._syncing_scroll = True
+        scrollbar = self._md_preview.verticalScrollBar()
+        max_val = scrollbar.maximum()
+        editor_max = self.memo_content_view.verticalScrollBar().maximum()
+        if editor_max > 0:
+            scrollbar.setValue(int(value * max_val / editor_max))
+        self._syncing_scroll = False
+
+    def _sync_scroll_to_editor(self, value):
+        """预览滚动 → 同步编辑器"""
+        if self._syncing_scroll or not self._split_mode:
+            return
+        self._syncing_scroll = True
+        scrollbar = self.memo_content_view.verticalScrollBar()
+        max_val = scrollbar.maximum()
+        preview_max = self._md_preview.verticalScrollBar().maximum()
+        if preview_max > 0:
+            scrollbar.setValue(int(value * max_val / preview_max))
+        self._syncing_scroll = False
+
     def _on_memo_text_changed(self):
         if self._memo_current_idx < 0:
             return
         if self.memo_preview_toggle.isChecked():
             return
         self._memo_md_source = self.memo_content_view.toPlainText()
+        self._memo_is_dirty = True
+        # 同步更新分栏预览
+        if self._split_mode:
+            self._update_md_preview()
+        # 启动自动保存定时器（文本变更后重置倒计时）
+        self._auto_save_timer.stop()
+        self._auto_save_timer.start()
+
+    def _auto_save_draft(self):
+        """定时自动保存草稿"""
+        if self._memo_is_dirty and self._memo_current_idx >= 0:
+            self._save_memo_edit(silent=True)
+            self._auto_save_timer.stop()
 
     def _import_memo(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -558,29 +846,142 @@ class MemoPage(QWidget):
             if self._show_message:
                 self._show_message(QMessageBox.Icon.Warning, "导出失败", str(e))
 
+    def _get_memo_dir(self) -> str:
+        """获取备忘录存储目录"""
+        if self._get_memo_path:
+            custom_path = self._get_memo_path()
+            if custom_path:
+                os.makedirs(custom_path, exist_ok=True)
+                return custom_path
+        memo_dir = get_memo_dir()
+        os.makedirs(memo_dir, exist_ok=True)
+        return memo_dir
+
+    def _sanitize_filename(self, title: str, memo_id: int) -> str:
+        """生成安全的文件名：{sanitized_title}_{id}.md"""
+        import re
+        safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title).strip()
+        safe = re.sub(r'_+', '_', safe).strip('_. ')
+        if not safe:
+            safe = "memo"
+        return f"{safe}_{memo_id}.md"
+
+    def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
+        """解析 YAML frontmatter，返回 (metadata_dict, content)"""
+        if not text.startswith("---"):
+            return {}, text
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            return {}, text
+        meta = {}
+        for line in parts[1].strip().split("\n"):
+            if ":" in line:
+                key, val = line.split(":", 1)
+                key = key.strip()
+                val = val.strip()
+                if key == "tags":
+                    meta[key] = [t.strip() for t in val.split(",") if t.strip()] if val else []
+                else:
+                    meta[key] = val
+        return meta, parts[2].strip()
+
+    def _build_frontmatter(self, memo: dict) -> str:
+        """生成 YAML frontmatter 字符串"""
+        title = memo.get("title", "备忘录")
+        time_str = memo.get("time", "")
+        tags = memo.get("tags", [])
+        tags_str = ", ".join(tags) if tags else ""
+        return f"---\ntitle: {title}\ntime: {time_str}\ntags: {tags_str}\n---\n\n"
+
     def load_memo(self):
-        if os.path.exists(MEMO_FILE):
+        """从 memo/ 目录扫描 .md 文件并解析，支持旧 JSON 格式迁移"""
+        memo_dir = self._get_memo_dir()
+
+        # 迁移旧 JSON 格式
+        legacy_memo_file = os.path.join(get_config_dir(), "memo.json")
+        if os.path.exists(legacy_memo_file):
             try:
-                with open(MEMO_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                with open(legacy_memo_file, "r", encoding="utf-8") as f:
+                    old_data = json.load(f)
+                if isinstance(old_data, list):
+                    for m in old_data:
+                        if "_file" not in m:
+                            m["_file"] = self._sanitize_filename(
+                                m.get("title", "memo"), m.get("id", 0))
+                        fname = m["_file"]
+                        fpath = os.path.join(memo_dir, fname)
+                        if not os.path.exists(fpath):
+                            frontmatter = self._build_frontmatter(m)
+                            content = m.get("content", "")
+                            with open(fpath, "w", encoding="utf-8") as f:
+                                f.write(frontmatter + content)
+                    # 迁移完成后删除旧文件
+                    os.remove(legacy_memo_file)
             except Exception:
-                return []
-        return []
+                pass
+
+        result = []
+        for fname in os.listdir(memo_dir):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(memo_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    text = f.read()
+                meta, content = self._parse_frontmatter(text)
+                # 从文件名提取 id
+                name_part = fname.rsplit(".", 1)[0]
+                try:
+                    file_id = int(name_part.rsplit("_", 1)[-1])
+                except (ValueError, IndexError):
+                    file_id = int(os.path.getmtime(fpath) * 1000)
+                result.append({
+                    "id": file_id,
+                    "time": meta.get("time", ""),
+                    "title": meta.get("title", name_part),
+                    "content": content,
+                    "tags": meta.get("tags", []),
+                    "_file": fname,
+                })
+            except Exception:
+                continue
+        # 按修改时间倒序（最新的在前）
+        result.sort(key=lambda m: m.get("time", ""), reverse=True)
+        # 确保每条都有 _file 字段
+        for m in result:
+            if "_file" not in m:
+                m["_file"] = self._sanitize_filename(m.get("title", "memo"), m.get("id", 0))
+        return result
 
     def save_memo(self):
+        """每条 memo 保存为独立 .md 文件"""
+        memo_dir = self._get_memo_dir()
         try:
-            ensure_config_dir()
-            with open(MEMO_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.memo_data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            for memo in self.memo_data:
+                fname = memo.get("_file")
+                if not fname:
+                    fname = self._sanitize_filename(memo.get("title", "memo"), memo.get("id", 0))
+                    memo["_file"] = fname
+                fpath = os.path.join(memo_dir, fname)
+                frontmatter = self._build_frontmatter(memo)
+                content = memo.get("content", "")
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(frontmatter + content)
+        except Exception as e:
+            logger.exception("保存备忘录失败: %s", e)
 
     def _clear_memo_detail(self):
         self._memo_current_idx = -1
         self.memo_title_input.clear()
         self.memo_time_label.clear()
         self.memo_content_view.clear()
+        self.memo_tags_input.clear()
         self._memo_md_source = ""
+
+    def resizeEvent(self, event):
+        """窗口大小变化时检查分栏模式"""
+        super().resizeEvent(event)
+        self._check_split_mode()
 
     def apply_theme(self):
         t = self._get_theme()
@@ -599,11 +1000,39 @@ class MemoPage(QWidget):
             }}
         """)
         self.memo_list.setStyleSheet(get_status_list_stylesheet(t))
+        self._md_highlighter._build_rules()
+        self._md_highlighter.rehighlight()
         self.memo_content_view.setStyleSheet(get_text_edit_stylesheet(t))
         if self.memo_preview_toggle.isChecked():
             html = markdown_to_html(self._memo_md_source, t)
             self.memo_content_view.setHtml(html)
         self.memo_preview_toggle.setStyleSheet(f"color: {t.text_muted};")
+        # 搜索框 + 标签输入框
+        _input_ss = f"""
+            QLineEdit {{
+                background: {t.bg_input};
+                color: {t.text_primary};
+                border: 1px solid {t.border_subtle};
+                border-radius: 6px;
+                padding: 0 8px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {t.accent}; }}
+        """
+        if hasattr(self, 'memo_search_input'):
+            self.memo_search_input.setStyleSheet(_input_ss)
+        if hasattr(self, 'memo_tags_input'):
+            self.memo_tags_input.setStyleSheet(f"""
+                QLineEdit {{
+                    background: {t.bg_input};
+                    color: {t.text_primary};
+                    border: 1px solid {t.border_subtle};
+                    border-radius: 4px;
+                    padding: 0 6px;
+                    font-size: 11px;
+                }}
+                QLineEdit:focus {{ border: 1px solid {t.accent}; }}
+            """)
 
     def apply_language(self, lang: str):
         self.memo_btn_save.setText("Save" if lang == "en" else "保存")
@@ -614,3 +1043,7 @@ class MemoPage(QWidget):
         self._memo_btn_delete.setText("Delete" if lang == "en" else "删除")
         if hasattr(self, 'memo_title_input'):
             self.memo_title_input.setPlaceholderText("Title" if lang == "en" else "标题")
+        if hasattr(self, 'memo_search_input'):
+            self.memo_search_input.setPlaceholderText("Search..." if lang == "en" else "搜索备忘录...")
+        if hasattr(self, 'memo_tags_input'):
+            self.memo_tags_input.setPlaceholderText("comma separated" if lang == "en" else "逗号分隔，如：工作,重要")

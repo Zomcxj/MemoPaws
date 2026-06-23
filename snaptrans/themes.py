@@ -195,7 +195,7 @@ def get_main_stylesheet(t: ThemeColors) -> str:
         }}
         QFrame#titleBar {{
             background: transparent;
-            border-bottom: 1px solid {t.border_subtle};
+            border: none;
         }}
     """
 

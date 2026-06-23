@@ -24,9 +24,8 @@ from PySide6.QtGui import (
 from PySide6.QtSvg import QSvgRenderer
 
 from .utils import (
-    APP_NAME, HISTORY_FILE, BUNDLE_DIR, get_icon_path,
-    set_title_bar_color,
-    CLIPBOARD_FILE, MEMO_FILE, CONFIG_FILE, ensure_config_dir
+    APP_NAME, BUNDLE_DIR, get_icon_path,
+    set_title_bar_color, get_config_dir, ensure_config_dir
 )
 from .themes import (
     DARK, LIGHT, ThemeColors,
@@ -323,7 +322,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         self.close_btn.clicked.connect(self.close)
         title_bar_layout.addWidget(self.close_btn)
         
-        title_bar.mousePressEvent = lambda e: setattr(self, '_drag_pos', e.globalPosition().toPoint() - self.frameGeometry().toRect().topLeft()) if e.button() == Qt.MouseButton.LeftButton else None
+        title_bar.mousePressEvent = lambda e: setattr(self, '_drag_pos', e.globalPosition().toPoint() - self.frameGeometry().topLeft()) if e.button() == Qt.MouseButton.LeftButton else None
         title_bar.mouseMoveEvent = lambda e: self.move(e.globalPosition().toPoint() - self._drag_pos) if e.buttons() & Qt.MouseButton.LeftButton and getattr(self, '_drag_pos', None) else None
         title_bar.mouseReleaseEvent = lambda e: setattr(self, '_drag_pos', None)
         title_bar.mouseDoubleClickEvent = lambda e: self._toggle_maximize()
@@ -344,18 +343,35 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             get_icons_dir=lambda: self._icons_dir,
             get_icon_clr=lambda: self._icon_clr,
             on_switch_page=lambda pk: self.content_stack.setCurrentIndex(
-                {"设置": 0, "贴图识别": 1, "剪切板": 2, "备忘录": 3}.get(pk, 1)
+                {"设置": 0, "贴图识别": 1, "剪切板": 2, "备忘录": 3, "密钥": 4}.get(pk, 1)
             ),
             nav_items=[
                 ("settings.svg", "设置"),
                 ("camera.svg", "贴图识别"),
                 ("clipboard.svg", "剪切板"),
                 ("memo.svg", "备忘录"),
+                ("key.svg", "密钥"),
             ],
         )
         
         # ── 右侧内容区 ──
         self.content_stack = QStackedWidget()
+        
+        # 快捷键管理器 + 文本替换管理器（在页面创建前初始化）
+        from .shortcut_manager import ShortcutManager
+        from .text_replacer import TextReplacerManager
+        self.shortcut_mgr = ShortcutManager(
+            self._get_config_path, self.save_config, self)
+        # 注册快捷键动作（在 SettingsPage 创建前，这样设置页能读到列表）
+        self.shortcut_mgr.register("capture", "Alt+X",
+                                   lambda: self.recognize_page.start_capture())
+        self.shortcut_mgr.register("canvas_fit", "Ctrl+F",
+                                   lambda: self.recognize_page.canvas.zoom_fit())
+        self.shortcut_mgr.register("new_memo", "Ctrl+N",
+                                   lambda: self.memo_page.add_memo())
+        self.text_replacer = TextReplacerManager(
+            self._get_config_path, self.save_config)
+        self.text_replacer.load()
         
         self.settings_page = SettingsPage(
             self,
@@ -375,6 +391,8 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
                 self.clipboard_page._update_clipboard_list(),
             ),
             show_message=lambda icon, title, text: self.show_themed_message(icon, title, text),
+            shortcut_mgr=self.shortcut_mgr,
+            text_replacer=self.text_replacer,
         )
         self.recognize_page = RecognizePage(
             self,
@@ -419,12 +437,23 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         self._memo_current_idx = -1
         self._memo_original = None
         self._memo_md_source = ""
-        
+
+        from .key_page import KeyPage
+        self.key_page = KeyPage(
+            self,
+            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
+            is_dark=lambda: self._current_theme_dark,
+            show_message=lambda icon, title, text: self.show_themed_message(icon, title, text),
+            get_icons_dir=lambda: self._icons_dir,
+            get_icon_clr=lambda: self._icon_clr,
+            get_current_lang=lambda: self._current_lang,
+        )
+
         self.content_stack.addWidget(self.settings_page)
         self.content_stack.addWidget(self.recognize_page)
         self.content_stack.addWidget(self.clipboard_page)
         self.content_stack.addWidget(self.memo_page)
-        
+        self.content_stack.addWidget(self.key_page)
         content_row.addWidget(self.nav_sidebar)
         content_row.addWidget(self.content_stack, 1)
         
@@ -434,10 +463,11 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         self.nav_sidebar.switch_page("贴图识别")
         central.show()
         
-        # 全局快捷键
-        self.shortcut_capture = QShortcut(QKeySequence("Alt+X"), self)
-        self.shortcut_capture.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self.shortcut_capture.activated.connect(lambda: self.recognize_page.start_capture())
+        # 整体拖拽：侧边栏空白区域可拖拽窗口
+        self.nav_sidebar.nav_frame.installEventFilter(self)
+        
+        # 全局快捷键（统一由 shortcut_mgr 管理）
+        self.shortcut_mgr.load_and_apply()
         
         if not self._current_theme_dark:
             self._apply_theme(False)
@@ -447,6 +477,22 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     
     def _rebuild_logo_row(self, centered: bool):
         pass
+    
+    # ── 窗口拖拽 ──
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if obj == self.nav_sidebar.nav_frame:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                return False
+            elif event.type() == QEvent.Type.MouseMove and event.buttons() & Qt.MouseButton.LeftButton:
+                if self._drag_pos:
+                    self.move(event.globalPosition().toPoint() - self._drag_pos)
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self._drag_pos = None
+                return False
+        return super().eventFilter(obj, event)
     
     # ══════════════════════════════════════════════
     #  剪切板页面
@@ -621,7 +667,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     
     def _get_config_path(self):
         ensure_config_dir()
-        return CONFIG_FILE
+        return os.path.join(get_config_dir(), "setting.json")
 
     def save_config(self, config):
         config_path = self._get_config_path()
@@ -636,8 +682,11 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
                 cfg = json.load(f)
             # 补全缺失字段
             cfg.setdefault("clipboard_max_items", 50)
+            cfg.setdefault("history_max_items", 100)
             cfg.setdefault("language", "zh")
             cfg.setdefault("close_behavior", "exit")
+            cfg.setdefault("shortcuts", {})
+            cfg.setdefault("text_replacements", [])
             return cfg
         return {
             "api_key": "",
@@ -647,6 +696,8 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             "theme": "dark",
             "language": "zh",
             "clipboard_max_items": 50,
+            "shortcuts": {},
+            "text_replacements": [],
         }
 
 

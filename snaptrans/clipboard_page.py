@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QIcon, QFont, QGuiApplication
 from PySide6.QtCore import Qt
 
-from .utils import CLIPBOARD_FILE, ensure_config_dir
+from .utils import get_config_dir, ensure_config_dir
 from .themes import DARK, LIGHT, get_status_list_stylesheet, get_clear_history_stylesheet
 from .clipboard_dialog import ClipboardEditDialog
 
@@ -241,8 +241,10 @@ class ClipboardPage(QWidget):
         clipboard = QGuiApplication.clipboard()
         text = clipboard.text().strip()
         if text and len(text) > 1:
-            if self._clipboard_data and self._clipboard_data[0].get("text") == text:
-                return
+            # 全量去重：检查所有条目
+            for existing in self._clipboard_data:
+                if existing.get("text", "").strip() == text:
+                    return
             record = {
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "text": text[:2000],
@@ -255,7 +257,6 @@ class ClipboardPage(QWidget):
             self._update_clipboard_list()
 
     def _get_clipboard_max(self) -> int:
-        from .utils import CONFIG_FILE
         try:
             with open(self._get_config_path(), "r", encoding="utf-8") as f:
                 config = json.load(f)
@@ -311,9 +312,10 @@ class ClipboardPage(QWidget):
             QGuiApplication.clipboard().setText(text)
 
     def load_clipboard(self):
-        if os.path.exists(CLIPBOARD_FILE):
+        clipboard_file = os.path.join(get_config_dir(), "clipboard.json")
+        if os.path.exists(clipboard_file):
             try:
-                with open(CLIPBOARD_FILE, "r", encoding="utf-8") as f:
+                with open(clipboard_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 for r in data:
                     if "locked" not in r:
@@ -322,7 +324,17 @@ class ClipboardPage(QWidget):
                 unlocked = [r for r in data if not r.get("locked")]
                 locked.sort(key=lambda r: r.get("time", ""), reverse=True)
                 unlocked.sort(key=lambda r: r.get("time", ""), reverse=True)
-                return locked + unlocked
+                # 去重：保留每条文本的最新一条
+                seen = set()
+                deduped = []
+                for r in locked + unlocked:
+                    t = r.get("text", "").strip()
+                    if t and t in seen:
+                        continue
+                    if t:
+                        seen.add(t)
+                    deduped.append(r)
+                return deduped
             except Exception:
                 return []
         return []
@@ -330,7 +342,8 @@ class ClipboardPage(QWidget):
     def save_clipboard(self):
         try:
             ensure_config_dir()
-            with open(CLIPBOARD_FILE, "w", encoding="utf-8") as f:
+            clipboard_file = os.path.join(get_config_dir(), "clipboard.json")
+            with open(clipboard_file, "w", encoding="utf-8") as f:
                 json.dump(self._clipboard_data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass

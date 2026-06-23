@@ -16,7 +16,7 @@ from .themes import (
     DARK, LIGHT,
     get_theme_button_stylesheet, _inner_shadow,
 )
-from .utils import set_title_bar_color
+from .utils import set_title_bar_color, get_root_path, get_config_dir, move_snaptrans_folder, save_anchor
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,9 @@ class SettingsPage(QWidget):
                  get_current_lang,
                  get_current_theme_dark,
                  on_save_clipboard,
-                 show_message):
+                 show_message,
+                 shortcut_mgr=None,
+                 text_replacer=None):
         super().__init__(parent)
         self._get_config_path = get_config_path
         self._get_theme = get_theme
@@ -115,6 +117,7 @@ class SettingsPage(QWidget):
         self._get_current_theme_dark = get_current_theme_dark
         self._on_save_clipboard = on_save_clipboard
         self._show_message = show_message
+        self._shortcut_mgr = shortcut_mgr
 
         self._create_ui()
 
@@ -381,7 +384,7 @@ class SettingsPage(QWidget):
         clip_layout.addLayout(clip_header_row)
 
         max_row = QHBoxLayout()
-        self.settings_max_label = QLabel("最大条数")
+        self.settings_max_label = QLabel("最大条数" if self._get_current_lang() == "zh" else "Max Items")
         self.settings_max_label.setStyleSheet(_init_sub_ss)
         self.settings_max_label.setFixedWidth(90)
         max_row.addWidget(self.settings_max_label, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -393,7 +396,7 @@ class SettingsPage(QWidget):
         self.settings_clip_max_input.setMinimumHeight(28)
         self.settings_clip_max_input.setMaximumHeight(28)
         max_row.addWidget(self.settings_clip_max_input)
-        self.settings_max_tip = QLabel("(总条数上限；超出时自动删除最旧的非锁定项)")
+        self.settings_max_tip = QLabel("(总条数上限；超出时自动删除最旧的非锁定项)" if self._get_current_lang() == "zh" else "(Max items; oldest unlocked items auto-deleted when exceeded)")
         self.settings_max_tip.setStyleSheet(_init_tip_ss)
         max_row.addWidget(self.settings_max_tip, 0, Qt.AlignmentFlag.AlignVCenter)
         max_row.addStretch()
@@ -402,7 +405,116 @@ class SettingsPage(QWidget):
 
         self._load_clip_setting_to_input()
 
-        # ── 快捷键 ──
+        # ── 操作历史设置 ──
+        hist_group = QFrame()
+        hist_group.setObjectName("card")
+        hist_group.setStyleSheet(f"""
+            QFrame#card {{
+                background: {_t.bg_panel};
+                border: 1px solid {_t.border_subtle};
+                border-radius: 12px;
+                padding: 16px;
+            }}
+        """)
+        hist_layout = QVBoxLayout(hist_group)
+        hist_header_row = QHBoxLayout()
+        hist_header_row.setSpacing(6)
+        self.hist_title_lbl = QLabel("操作历史" if self._get_current_lang() == "zh" else "History")
+        self.hist_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{_t.text_primary}; border:none; background:transparent;")
+        self.hist_title_lbl.setFixedHeight(24)
+        hist_header_row.addWidget(self.hist_title_lbl)
+        hist_header_row.addStretch()
+        hist_layout.addLayout(hist_header_row)
+
+        hist_max_row = QHBoxLayout()
+        self.hist_max_label = QLabel("最大条数" if self._get_current_lang() == "zh" else "Max Items")
+        self.hist_max_label.setStyleSheet(_init_sub_ss)
+        self.hist_max_label.setFixedWidth(90)
+        hist_max_row.addWidget(self.hist_max_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.settings_hist_max_input = QSpinBox()
+        self.settings_hist_max_input.setRange(10, 500)
+        self.settings_hist_max_input.setValue(100)
+        self.settings_hist_max_input.setSingleStep(10)
+        self.settings_hist_max_input.setFixedWidth(60)
+        self.settings_hist_max_input.setMinimumHeight(28)
+        self.settings_hist_max_input.setMaximumHeight(28)
+        hist_max_row.addWidget(self.settings_hist_max_input)
+        self.hist_max_tip = QLabel("(超出时自动删除最旧记录)" if self._get_current_lang() == "zh" else "(Oldest records auto-deleted when exceeded)")
+        self.hist_max_tip.setStyleSheet(_init_tip_ss)
+        hist_max_row.addWidget(self.hist_max_tip, 0, Qt.AlignmentFlag.AlignVCenter)
+        hist_max_row.addStretch()
+        hist_layout.addLayout(hist_max_row)
+        layout.addWidget(hist_group)
+
+        self._load_hist_setting_to_input()
+
+        # ── 备忘录存储路径 ──
+        memo_path_group = QFrame()
+        memo_path_group.setObjectName("card")
+        memo_path_group.setStyleSheet(f"""
+            QFrame#card {{
+                background: {_t.bg_panel};
+                border: 1px solid {_t.border_subtle};
+                border-radius: 12px;
+                padding: 16px;
+            }}
+        """)
+        memo_path_layout = QVBoxLayout(memo_path_group)
+        memo_path_header = QHBoxLayout()
+        memo_path_header.setSpacing(6)
+        self.memo_path_title_lbl = QLabel("Storage Directory")
+        self.memo_path_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{_t.text_primary}; border:none; background:transparent;")
+        self.memo_path_title_lbl.setFixedHeight(24)
+        self.memo_path_title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        memo_path_header.addWidget(self.memo_path_title_lbl)
+        memo_path_header.addStretch()
+        memo_path_layout.addLayout(memo_path_header)
+
+        path_row = QHBoxLayout()
+        path_row.setSpacing(8)
+        self.settings_memo_path_input = QLineEdit()
+        self.settings_memo_path_input.setPlaceholderText(get_root_path())
+        self.settings_memo_path_input.setFixedHeight(28)
+        self.settings_memo_path_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {_t.bg_input};
+                color: {_t.text_primary};
+                border: 1px solid {_t.border_subtle};
+                border-radius: 6px;
+                padding: 0 8px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {_t.accent}; }}
+        """)
+        path_row.addWidget(self.settings_memo_path_input, 1)
+
+        browse_btn = QPushButton("Browse" if self._get_current_lang() == "en" else "浏览")
+        browse_btn.setFixedSize(64, 28)
+        browse_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_t.bg_neutral_button};
+                color: {_t.text_secondary};
+                border: 1px solid {_t.border_subtle};
+                border-radius: 6px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{ background: {_t.bg_active}; }}
+        """)
+        self._memo_browse_btn = browse_btn
+        browse_btn.clicked.connect(self._browse_memo_path)
+        path_row.addWidget(browse_btn)
+        memo_path_layout.addLayout(path_row)
+
+        # 迁移提示
+        self.memo_path_tip = QLabel("留空则使用默认路径，切换后整个 .snaptrans 文件夹会移动")
+        self.memo_path_tip.setStyleSheet(_init_tip_ss)
+        memo_path_layout.addWidget(self.memo_path_tip)
+
+        layout.addWidget(memo_path_group)
+
+        self._load_memo_path_setting()
+
+        # ── 快捷键（可编辑）──
         shortcut_group = QFrame()
         shortcut_group.setObjectName("card")
         shortcut_group.setStyleSheet(f"""
@@ -424,42 +536,71 @@ class SettingsPage(QWidget):
         shortcut_header_row.addStretch()
         shortcut_layout.addLayout(shortcut_header_row)
 
-        shortcuts = [("截图识别", "Alt+X"), ("画布自适应", "Ctrl+F"), ("粘贴图片", "Ctrl+V")]
-        self._shortcut_name_labels = []
-        self._shortcut_key_labels = []
-        self._shortcut_chips = []
-        shortcut_h_row = QHBoxLayout()
-        shortcut_h_row.setSpacing(12)
-        for name, key in shortcuts:
-            chip = QFrame()
-            chip.setObjectName("shortcutChip")
-            from PySide6.QtWidgets import QSizePolicy
-            chip.setMinimumHeight(28)
-            chip.setMaximumHeight(28)
-            chip.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed))
-            chip.setStyleSheet(f"""
-                QFrame {{
-                    background: {_t.bg_neutral_button};
-                    border: 1px solid {_t.border_subtle};
-                    border-radius: 8px;
-                    padding: 0;
-                }}
-            """)
-            chip_lay = QHBoxLayout(chip)
-            chip_lay.setContentsMargins(10, 4, 10, 4)
-            chip_lay.setSpacing(8)
-            n = QLabel(name)
-            n.setStyleSheet(_init_sub_ss)
-            chip_lay.addWidget(n)
-            self._shortcut_name_labels.append(n)
-            k = QLabel(key)
-            k.setStyleSheet(f"font-size:12px; color:{_t.accent}; border:none; background:transparent; font-weight:bold;")
-            chip_lay.addWidget(k)
-            self._shortcut_key_labels.append(k)
-            shortcut_h_row.addWidget(chip)
-            self._shortcut_chips.append(chip)
-        shortcut_h_row.addStretch()
-        shortcut_layout.addLayout(shortcut_h_row)
+        self._shortcut_edit_rows = []
+        if self._shortcut_mgr:
+            for action, display_name, current_key in self._shortcut_mgr.get_all_actions():
+                row = QHBoxLayout()
+                row.setSpacing(8)
+                lbl = QLabel(display_name)
+                lbl.setStyleSheet(f"font-size:13px; color:{_t.text_secondary}; border:none; background:transparent;")
+                lbl.setFixedWidth(120)
+                row.addWidget(lbl)
+                edit = QLineEdit(current_key)
+                edit.setReadOnly(True)
+                edit.setFixedWidth(160)
+                edit.setFixedHeight(28)
+                edit.setStyleSheet(f"""
+                    QLineEdit {{
+                        background: {_t.bg_input};
+                        color: {_t.text_primary};
+                        border: 1px solid {_t.border_subtle};
+                        border-radius: 6px;
+                        padding: 0 8px;
+                        font-size: 12px;
+                        font-weight: bold;
+                    }}
+                    QLineEdit:focus {{
+                        border: 1px solid {_t.accent};
+                    }}
+                """)
+                edit.installEventFilter(self)
+                edit._shortcut_action = action
+                row.addWidget(edit)
+                reset_btn = QPushButton("Reset" if self._get_current_lang() == "en" else "重置")
+                reset_btn.setFixedSize(56, 28)
+                reset_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {_t.bg_neutral_button};
+                        color: {_t.text_secondary};
+                        border: 1px solid {_t.border_subtle};
+                        border-radius: 6px;
+                        font-size: 11px;
+                    }}
+                    QPushButton:hover {{
+                        background: {_t.bg_active};
+                    }}
+                """)
+                reset_btn._shortcut_action = action
+                reset_btn.clicked.connect(lambda checked=False, a=action, e=edit: self._reset_shortcut(a, e))
+                row.addWidget(reset_btn)
+                row.addStretch()
+                shortcut_layout.addLayout(row)
+                self._shortcut_edit_rows.append((action, lbl, edit, reset_btn))
+        else:
+            # 无管理器时静态展示
+            shortcuts = [("截图识别", "Alt+X"), ("画布自适应", "Ctrl+F"), ("粘贴图片", "Ctrl+V")]
+            for name, key in shortcuts:
+                row = QHBoxLayout()
+                row.setSpacing(8)
+                lbl = QLabel(name)
+                lbl.setStyleSheet(f"font-size:13px; color:{_t.text_secondary}; border:none; background:transparent;")
+                row.addWidget(lbl)
+                k = QLabel(key)
+                k.setStyleSheet(f"font-size:12px; color:{_t.accent}; border:none; background:transparent; font-weight:bold;")
+                row.addWidget(k)
+                row.addStretch()
+                shortcut_layout.addLayout(row)
+
         layout.addWidget(shortcut_group)
 
         # ── 关闭窗口行为（分段按钮）──
@@ -568,6 +709,8 @@ class SettingsPage(QWidget):
         self._update_theme_seg_style()
         self._update_lang_seg_style()
         self._update_close_seg_style()
+        self._update_lang_seg_style()
+        self._update_close_seg_style()
 
     # ── 样式刷新 ──
 
@@ -611,16 +754,33 @@ class SettingsPage(QWidget):
                 width: 16px;
             }}
         """)
+        if hasattr(self, 'settings_hist_max_input'):
+            self.settings_hist_max_input.setStyleSheet(f"""
+                QSpinBox {{
+                    background: {bg};
+                    color: {fg};
+                    border: 1px solid {border};
+                    border-radius: 8px;
+                    padding: 4px 8px;
+                    font-size: 13px;
+                    min-width: 50px;
+                    max-width: 60px;
+                }}
+                QSpinBox::up-button, QSpinBox::down-button {{
+                    background: {bg};
+                    border: none;
+                    width: 16px;
+                }}
+            """)
         label_ss_sub = f"font-size:13px; color:{label_color}; border:none; background:transparent;"
         label_ss_tip = f"font-size:12px; color:{tip_color}; border:none; background:transparent;"
         for lbl in (self.settings_key_label, self.settings_url_label,
-                     self.settings_model_label, self.settings_max_label):
+                     self.settings_model_label, self.settings_max_label,
+                     self.hist_max_label):
             lbl.setStyleSheet(label_ss_sub)
         self.settings_max_tip.setStyleSheet(label_ss_tip)
-        for lbl in self._shortcut_name_labels:
-            lbl.setStyleSheet(f"font-size:13px; color:{label_color}; border:none; background:transparent;")
-        for lbl in self._shortcut_key_labels:
-            lbl.setStyleSheet(f"font-size:12px; color:{accent_color}; border:none; background:transparent; font-weight:bold;")
+        if hasattr(self, 'hist_max_tip'):
+            self.hist_max_tip.setStyleSheet(label_ss_tip)
         self._update_theme_seg_style()
 
     def apply_theme(self):
@@ -644,23 +804,50 @@ class SettingsPage(QWidget):
         self.lang_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         self.api_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         self.clip_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
+        if hasattr(self, 'hist_title_lbl'):
+            self.hist_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         self.shortcut_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         self.close_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
+        if hasattr(self, 'memo_path_title_lbl'):
+            self.memo_path_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
 
-        # 刷新快捷键 chip
-        for chip in self._shortcut_chips:
-            chip.setStyleSheet(f"""
-                QFrame {{
-                    background: {t.bg_neutral_button};
-                    border: 1px solid {t.border_subtle};
-                    border-radius: 8px;
-                    padding: 0;
-                }}
-            """)
-        for lbl in self._shortcut_name_labels:
-            lbl.setStyleSheet(f"font-size:13px; color:{t.text_secondary}; border:none; background:transparent;")
-        for lbl in self._shortcut_key_labels:
-            lbl.setStyleSheet(f"font-size:12px; color:{t.accent}; border:none; background:transparent; font-weight:bold;")
+        # 快捷键输入框 + 重置按钮
+        _input_ss = f"""
+            QLineEdit {{
+                background: {t.bg_input};
+                color: {t.text_primary};
+                border: 1px solid {t.border_subtle};
+                border-radius: 6px;
+                padding: 0 8px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QLineEdit:focus {{ border: 1px solid {t.accent}; }}
+        """
+        _reset_ss = f"""
+            QPushButton {{
+                background: {t.bg_neutral_button};
+                color: {t.text_secondary};
+                border: 1px solid {t.border_subtle};
+                border-radius: 6px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{ background: {t.bg_active}; }}
+        """
+        if hasattr(self, '_shortcut_edit_rows'):
+            for row_data in self._shortcut_edit_rows:
+                if len(row_data) >= 3:
+                    row_data[2].setStyleSheet(_input_ss)
+                if len(row_data) >= 4:
+                    row_data[3].setStyleSheet(_reset_ss)
+
+        # 备忘录路径输入框 + 浏览按钮
+        if hasattr(self, 'settings_memo_path_input'):
+            self.settings_memo_path_input.setStyleSheet(_input_ss)
+        if hasattr(self, '_memo_browse_btn'):
+            self._memo_browse_btn.setStyleSheet(_reset_ss)
+        if hasattr(self, 'memo_path_tip'):
+            self.memo_path_tip.setStyleSheet(f"font-size:11px; color:{t.text_muted}; border:none; background:transparent;")
 
         # 主题分段按钮容器
         if hasattr(self, '_theme_seg'):
@@ -728,6 +915,15 @@ class SettingsPage(QWidget):
             self.settings_max_tip.setText(
                 "(Max records; oldest unlocked items auto-deleted when exceeded)" if lang == "en"
                 else "(总条数上限；超出时自动删除最旧的非锁定项)")
+        # 操作历史
+        if hasattr(self, 'hist_title_lbl'):
+            self.hist_title_lbl.setText("History" if lang == "en" else "操作历史")
+        if hasattr(self, 'hist_max_label'):
+            self.hist_max_label.setText("Max Items" if lang == "en" else "最大条数")
+        if hasattr(self, 'hist_max_tip'):
+            self.hist_max_tip.setText(
+                "(Oldest records auto-deleted when exceeded)" if lang == "en"
+                else "(超出时自动删除最旧记录)")
         # 关闭行为分段按钮
         if hasattr(self, 'close_btn_exit'):
             self.close_btn_exit.setText("Exit" if lang == "en" else "直接关闭")
@@ -735,11 +931,38 @@ class SettingsPage(QWidget):
         # 同步分段按钮选中状态
         self._update_close_seg_style()
         # 快捷键芯片名称
-        if hasattr(self, '_shortcut_name_labels'):
-            all_names = ["截图识别", "画布自适应", "粘贴图片"] if lang == "zh" else ["Screenshot", "Fit Canvas", "Paste Image"]
-            for i, lbl in enumerate(self._shortcut_name_labels):
-                if i < len(all_names):
-                    lbl.setText(all_names[i])
+        if hasattr(self, 'shortcut_title_lbl'):
+            self.shortcut_title_lbl.setText("Keyboard Shortcuts" if lang == "en" else "快捷键")
+        # Reset 按钮文字同步
+        if hasattr(self, '_shortcut_edit_rows'):
+            for row_data in self._shortcut_edit_rows:
+                if len(row_data) >= 4:
+                    row_data[3].setText("Reset" if lang == "en" else "重置")
+        # 快捷键标签名称同步
+        _shortcut_names_zh = {"capture": "截图识别", "canvas_fit": "画布自适应", "new_memo": "新建备忘录", "toggle_clipboard": "开关剪切板"}
+        _shortcut_names_en = {"capture": "Capture", "canvas_fit": "Canvas Fit", "new_memo": "New Memo", "toggle_clipboard": "Toggle Clipboard"}
+        if hasattr(self, '_shortcut_edit_rows'):
+            for row_data in self._shortcut_edit_rows:
+                if len(row_data) >= 2:
+                    action = row_data[0]
+                    name_map = _shortcut_names_en if lang == "en" else _shortcut_names_zh
+                    row_data[1].setText(name_map.get(action, action))
+        # 备忘录路径
+        if hasattr(self, 'memo_path_title_lbl'):
+            self.memo_path_title_lbl.setText("Storage Directory" if lang == "en" else "存储目录")
+        if hasattr(self, 'memo_path_tip'):
+            self.memo_path_tip.setText(
+                "Leave empty for default path, entire .snaptrans folder will be moved"
+                if lang == "en" else "留空则使用默认路径，切换后整个 .snaptrans 文件夹会移动")
+        if hasattr(self, '_memo_browse_btn'):
+            self._memo_browse_btn.setText("Browse" if lang == "en" else "浏览")
+        # 剪切板设置
+        if hasattr(self, 'settings_max_label'):
+            self.settings_max_label.setText("Max Items" if lang == "en" else "最大条数")
+        if hasattr(self, 'settings_max_tip'):
+            self.settings_max_tip.setText(
+                "(Max items; oldest unlocked items auto-deleted when exceeded)"
+                if lang == "en" else "(总条数上限；超出时自动删除最旧的非锁定项)")
         # 同步分段按钮选中状态
         self._update_lang_seg_style()
 
@@ -799,6 +1022,62 @@ class SettingsPage(QWidget):
         _lang = self._get_current_lang()
         self.btn_theme_dark.setText("Dark" if _lang == "en" else "暗色")
         self.btn_theme_light.setText("Light" if _lang == "en" else "亮色")
+
+    # ── 快捷键编辑 ──
+
+    def eventFilter(self, obj, event):
+        """拦截快捷键输入框的按键事件，录制快捷键"""
+        from PySide6.QtCore import QEvent
+        if (hasattr(obj, '_shortcut_action')
+                and isinstance(obj, QLineEdit)
+                and event.type() == QEvent.Type.KeyPress):
+            key = event.key()
+            mods = event.modifiers()
+            if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+                return False
+            parts = []
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                parts.append("Ctrl")
+            if mods & Qt.KeyboardModifier.AltModifier:
+                parts.append("Alt")
+            if mods & Qt.KeyboardModifier.ShiftModifier:
+                parts.append("Shift")
+            if mods & Qt.KeyboardModifier.MetaModifier:
+                parts.append("Meta")
+            from PySide6.QtGui import QKeySequence
+            seq = QKeySequence(key)
+            key_name = seq.toString()
+            if key_name:
+                parts.append(key_name)
+            combo = "+".join(parts)
+            obj.setText(combo)
+            if self._shortcut_mgr:
+                self._shortcut_mgr.update_shortcut(obj._shortcut_action, combo)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _reset_shortcut(self, action: str, edit: QLineEdit):
+        """重置某个快捷键为默认值"""
+        from .shortcut_manager import DEFAULT_SHORTCUTS
+        default_key = DEFAULT_SHORTCUTS.get(action, "")
+        edit.setText(default_key)
+        if self._shortcut_mgr:
+            self._shortcut_mgr.update_shortcut(action, default_key)
+
+    # ── 备忘录存储路径 ──
+
+    def _load_memo_path_setting(self):
+        """从配置加载存储目录"""
+        self.settings_memo_path_input.setText(get_root_path())
+
+    def _browse_memo_path(self):
+        """浏览选择备忘录存储目录"""
+        from PySide6.QtWidgets import QFileDialog
+        dir_path = QFileDialog.getExistingDirectory(self, "选择备忘录存储目录")
+        if dir_path:
+            self.settings_memo_path_input.setText(dir_path)
+
+    # ── 文本替换 CRUD ──
 
     # ── 配置加载/保存 ──
 
@@ -897,11 +1176,69 @@ class SettingsPage(QWidget):
         config["api_url"] = self._normalize_api_url(self.settings_url_input.text().strip())
         config["api_model"] = self.settings_model_input.text().strip() or "glm-4-flash"
         config["close_behavior"] = getattr(self, '_close_behavior', 'exit')
-        self._save_config(config)
-        self._ocr_manager.set_config(config)
-        self.settings_url_input.setText(config["api_url"])
-        self._save_clip_setting(config=config)
-        self._show_message(QMessageBox.Icon.Information, "提示", "配置已保存")
+        config["history_max_items"] = int(self.settings_hist_max_input.value())
+
+        # 存储目录
+        new_root = self.settings_memo_path_input.text().strip()
+        current_dir = get_config_dir()
+        current_root = os.path.dirname(current_dir)  # .snaptrans 的父目录
+
+        if new_root and new_root != current_root:
+            # 检查目标目录是否存在 .snaptrans
+            dst_snaptrans = os.path.join(new_root, ".snaptrans")
+            if os.path.exists(dst_snaptrans):
+                reply = QMessageBox.question(
+                    self,
+                    "目标目录已存在数据",
+                    f"{dst_snaptrans} 已存在\n\n如何处理？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if reply == QMessageBox.StandardButton.Cancel:
+                    return
+                elif reply == QMessageBox.StandardButton.Yes:
+                    move_mode = "merge"
+                else:
+                    move_mode = "overwrite"
+            else:
+                move_mode = "move"
+
+            # 直接移动
+            success = move_snaptrans_folder(current_root, new_root, mode=move_mode)
+            if not success:
+                self._show_message(QMessageBox.Icon.Warning, "错误", "移动文件夹失败")
+                return
+
+            # 保存锚点文件
+            save_anchor(new_root)
+
+            self._save_config(config)
+            self._ocr_manager.set_config(config)
+            self.settings_url_input.setText(config["api_url"])
+            self._save_clip_setting(config=config)
+
+            reply = QMessageBox.question(
+                self,
+                "重启生效",
+                "存储目录已修改，需要重启生效。\n\n是否立即重启？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                import sys
+                import subprocess
+                subprocess.Popen([sys.executable] + sys.argv)
+                sys.exit(0)
+        else:
+            self._save_config(config)
+            self._ocr_manager.set_config(config)
+            self.settings_url_input.setText(config["api_url"])
+            self._save_clip_setting(config=config)
+            self._show_message(QMessageBox.Icon.Information, "提示", "配置已保存")
+            self._ocr_manager.set_config(config)
+            self.settings_url_input.setText(config["api_url"])
+            self._save_clip_setting(config=config)
+            self._show_message(QMessageBox.Icon.Information, "提示", "配置已保存")
 
     def _load_clip_setting_to_input(self):
         config = self._load_config()
@@ -917,3 +1254,17 @@ class SettingsPage(QWidget):
         config["clipboard_max_items"] = int(self.settings_clip_max_input.value())
         self._save_config(config)
         self._on_save_clipboard()
+
+    def _load_hist_setting_to_input(self):
+        config = self._load_config()
+        try:
+            v = int(config.get("history_max_items", 100))
+        except Exception:
+            v = 100
+        self.settings_hist_max_input.setValue(max(10, min(500, v)))
+
+    def _save_hist_setting(self, config=None):
+        if config is None:
+            config = self._load_config()
+        config["history_max_items"] = int(self.settings_hist_max_input.value())
+        self._save_config(config)

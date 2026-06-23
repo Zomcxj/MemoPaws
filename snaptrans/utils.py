@@ -18,18 +18,210 @@ BUNDLE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.ab
 
 APP_NAME = "SnapTrans"
 
-# 所有 JSON 配置文件统一放在 ~/.SnapTrans/ 目录下
-CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".SnapTrans")
-CONFIG_FILE = os.path.join(CONFIG_DIR, "SnapTrans.json")
-HISTORY_FILE = os.path.join(CONFIG_DIR, "SnapTrans_history.json")
-CLIPBOARD_FILE = os.path.join(CONFIG_DIR, "SnapTrans_clipboard.json")
-MEMO_FILE = os.path.join(CONFIG_DIR, "SnapTrans_memo.json")
+# 锚点文件（单文件，只存数据目录指针）
+_ANCHOR_FILE = os.path.join(os.path.expanduser("~"), ".snaptrans.json")
+
+# 当前实际路径（启动时初始化）
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".snaptrans")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "setting.json")
+HISTORY_FILE = os.path.join(CONFIG_DIR, "history.json")
+CLIPBOARD_FILE = os.path.join(CONFIG_DIR, "clipboard.json")
+MEMO_DIR = os.path.join(CONFIG_DIR, "memo")
+LEGACY_MEMO_FILE = os.path.join(CONFIG_DIR, "memo.json")
+
+
+def _detect_config_dir() -> str:
+    """检测配置目录：读锚点文件，否则用默认目录"""
+    if not os.path.exists(_ANCHOR_FILE):
+        return os.path.join(os.path.expanduser("~"), ".snaptrans")
+    try:
+        import json
+        with open(_ANCHOR_FILE, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        data_dir = cfg.get("data_dir", "")
+        if data_dir and os.path.isdir(data_dir):
+            snaptrans_dir = os.path.join(data_dir, ".snaptrans")
+            if os.path.isdir(snaptrans_dir):
+                return snaptrans_dir
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), ".snaptrans")
+
+
+def _update_path_constants(config_dir: str):
+    """更新全局路径常量"""
+    global CONFIG_DIR, CONFIG_FILE, HISTORY_FILE, CLIPBOARD_FILE, MEMO_DIR, LEGACY_MEMO_FILE
+    CONFIG_DIR = config_dir
+    CONFIG_FILE = os.path.join(config_dir, "setting.json")
+    HISTORY_FILE = os.path.join(config_dir, "history.json")
+    CLIPBOARD_FILE = os.path.join(config_dir, "clipboard.json")
+    MEMO_DIR = os.path.join(config_dir, "memo")
+    LEGACY_MEMO_FILE = os.path.join(config_dir, "memo.json")
+
+
+def init_paths():
+    """启动时初始化路径"""
+    config_dir = _detect_config_dir()
+    _update_path_constants(config_dir)
+
+
+def save_anchor(data_dir: str):
+    """保存锚点文件"""
+    import json
+    os.makedirs(os.path.dirname(_ANCHOR_FILE), exist_ok=True)
+    with open(_ANCHOR_FILE, "w", encoding="utf-8") as f:
+        json.dump({"data_dir": data_dir}, f, ensure_ascii=False, indent=2)
+
+
+def get_root_path() -> str:
+    """返回用户设置的父目录（不含 .snaptrans）"""
+    return os.path.dirname(CONFIG_DIR)
+
+
+def get_config_dir() -> str:
+    """返回当前配置目录"""
+    return CONFIG_DIR
+
+
+def get_memo_dir() -> str:
+    """返回当前备忘录目录"""
+    return MEMO_DIR
+
+
+def get_root_path() -> str:
+    """返回用户设置的父目录（不含 .snaptrans）"""
+    return os.path.dirname(CONFIG_DIR)
+
+
+def move_snaptrans_folder(src_root: str, dst_root: str, mode: str = "move") -> bool:
+    """移动/复制 .snaptrans 文件夹
+
+    Args:
+        src_root: 源父目录（如 ~/.snaptrans 的父目录）
+        dst_root: 目标父目录
+        mode: "move" 移动, "merge" 合并, "overwrite" 覆盖
+
+    Returns:
+        是否成功
+    """
+    import shutil
+    src_dir = os.path.join(src_root, ".snaptrans")
+    dst_dir = os.path.join(dst_root, ".snaptrans")
+
+    if not os.path.isdir(src_dir):
+        return False
+
+    os.makedirs(dst_root, exist_ok=True)
+
+    # 保留默认配置文件（setting.json），不移动
+    keep_files = {"setting.json"}
+
+    if mode == "overwrite":
+        if os.path.exists(dst_dir):
+            shutil.rmtree(dst_dir)
+        os.makedirs(dst_dir, exist_ok=True)
+        for item in os.listdir(src_dir):
+            if item in keep_files:
+                continue
+            s = os.path.join(src_dir, item)
+            d = os.path.join(dst_dir, item)
+            if os.path.isfile(s):
+                shutil.copy2(s, d)
+            elif os.path.isdir(s):
+                shutil.copytree(s, d)
+    elif mode == "merge":
+        os.makedirs(dst_dir, exist_ok=True)
+        for item in os.listdir(src_dir):
+            if item in keep_files:
+                continue
+            s = os.path.join(src_dir, item)
+            d = os.path.join(dst_dir, item)
+            if os.path.isfile(s) and not os.path.exists(d):
+                shutil.copy2(s, d)
+            elif os.path.isdir(s) and not os.path.exists(d):
+                shutil.copytree(s, d)
+    else:  # move
+        os.makedirs(dst_dir, exist_ok=True)
+        for item in os.listdir(src_dir):
+            if item in keep_files:
+                continue
+            s = os.path.join(src_dir, item)
+            d = os.path.join(dst_dir, item)
+            if os.path.isfile(s):
+                shutil.move(s, d)
+            elif os.path.isdir(s):
+                shutil.move(s, d)
+
+    return True
 
 
 def ensure_config_dir():
     """确保配置目录存在"""
-    if not os.path.isdir(CONFIG_DIR):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    os.makedirs(MEMO_DIR, exist_ok=True)
+
+
+def migrate_legacy_config():
+    """迁移旧配置目录 ~/.SnapTrans/ 到 ~/.snaptrans/"""
+    legacy_dir = os.path.join(os.path.expanduser("~"), ".SnapTrans")
+    if not os.path.exists(legacy_dir):
+        return
+
+    import shutil
+
+    # 旧文件映射到新文件
+    migrations = [
+        ("SnapTrans.json", "setting.json"),
+        ("SnapTrans_keys.json", "keys.json"),
+        ("SnapTrans_history.json", "history.json"),
+        ("SnapTrans_clipboard.json", "clipboard.json"),
+    ]
+
+    for old_name, new_name in migrations:
+        old_path = os.path.join(legacy_dir, old_name)
+        new_path = os.path.join(CONFIG_DIR, new_name)
+        if os.path.exists(old_path) and not os.path.exists(new_path):
+            try:
+                shutil.copy2(old_path, new_path)
+            except Exception:
+                pass
+
+    # 迁移旧 memo.json 到新 memo/ 目录
+    old_memo_file = os.path.join(legacy_dir, "memo.json")
+    if os.path.exists(old_memo_file):
+        try:
+            import json
+            with open(old_memo_file, "r", encoding="utf-8") as f:
+                old_data = json.load(f)
+            if isinstance(old_data, list):
+                os.makedirs(MEMO_DIR, exist_ok=True)
+                for m in old_data:
+                    fname = m.get("_file", f"memo_{m.get('id', 0)}.md")
+                    fpath = os.path.join(MEMO_DIR, fname)
+                    if not os.path.exists(fpath):
+                        title = m.get("title", "memo")
+                        content = m.get("content", "")
+                        with open(fpath, "w", encoding="utf-8") as f:
+                            f.write(f"---\ntitle: {title}\nid: {m.get('id', 0)}\n---\n\n{content}")
+        except Exception:
+            pass
+
+    # 迁移 memo 子目录中的文件
+    legacy_memo_dir = os.path.join(legacy_dir, "memo")
+    if os.path.exists(legacy_memo_dir) and os.path.isdir(legacy_memo_dir):
+        for fname in os.listdir(legacy_memo_dir):
+            old_path = os.path.join(legacy_memo_dir, fname)
+            new_path = os.path.join(MEMO_DIR, fname)
+            if os.path.isfile(old_path) and not os.path.exists(new_path):
+                try:
+                    shutil.copy2(old_path, new_path)
+                except Exception:
+                    pass
+
+
+def migrate_pending_memo():
+    """已废弃，保留空函数兼容旧代码"""
+    pass
 
 
 def get_app_root():
@@ -37,7 +229,7 @@ def get_app_root():
     
     打包后为 exe 所在目录，开发环境为项目根目录。
     所有运行时数据（日志、缓存等）都应存放在此目录下，
-    只有配置文件（.SnapTrans.json）和历史记录保留在用户目录。
+    只有配置文件（setting.json）和历史记录保留在用户目录。
     """
     if getattr(sys, 'frozen', False):
         # PyInstaller 打包后：exe 所在目录

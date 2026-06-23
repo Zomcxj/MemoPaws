@@ -24,7 +24,7 @@ from .translator import SimpleTranslator
 from .canvas import CanvasWidget
 from .history import HistoryManager
 from .capture import ScreenCaptureOverlay
-from .utils import qpixmap_to_numpy, numpy_to_qpixmap, CONFIG_FILE, ensure_config_dir
+from .utils import qpixmap_to_numpy, numpy_to_qpixmap, ensure_config_dir
 from .ocr_translate import OCRTranslateMixin
 
 
@@ -143,6 +143,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self._ocr_mode_name = ""
         self._translate_source_text = ""
         self._translate_mode = ""
+        self._current_lang = "zh"
 
         self._build_ui()
 
@@ -242,6 +243,14 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self.btn_reset.clicked.connect(self.reset_image)
         toolbar.addWidget(self.btn_reset)
 
+        self.btn_clear = QPushButton("清空")
+        self.btn_clear.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "clear.svg"), 16, _icon_clr)))
+        self.btn_clear.setIconSize(QSize(16, 16))
+        self.btn_clear.setMinimumWidth(80)
+        self.btn_clear.setStyleSheet(_tb_btn_ss)
+        self.btn_clear.clicked.connect(self.clear_image)
+        toolbar.addWidget(self.btn_clear)
+
         self.btn_save_image = QPushButton("保存图片")
         self.btn_save_image.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "save.svg"), 16, _icon_clr)))
         self.btn_save_image.setIconSize(QSize(16, 16))
@@ -332,11 +341,14 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self.status_list.setMaximumHeight(280)
         self.status_list.itemClicked.connect(self._on_history_clicked)
         self.status_list.itemDoubleClicked.connect(self._on_history_clicked)
+        self.status_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.status_list.customContextMenuRequested.connect(self._on_history_context_menu)
         history_vbox.addWidget(self.status_list)
 
-        history_tip = QLabel("点击记录可恢复到识别/翻译结果框")
+        history_tip = QLabel("点击恢复 | 右键删除")
         _init_tip2_ss = f"font-size:11px; color:{_t_hist.text_muted}; border:none; background:transparent;"
         history_tip.setStyleSheet(_init_tip2_ss)
+        self._history_tip = history_tip
         history_vbox.addWidget(history_tip)
 
         canvas_history_splitter.addWidget(history_frame)
@@ -517,13 +529,107 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     def _start_capture_overlay(self):
         self.capture_overlay = ScreenCaptureOverlay()
         self.capture_overlay.captured.connect(self.on_capture_finished)
-        self.capture_overlay.show()
+        self.capture_overlay.copy_requested.connect(self._on_capture_copy)
+        self.capture_overlay.saved.connect(self._on_capture_save)
+        self.capture_overlay.ocr_requested.connect(self._on_capture_ocr)
+        self.capture_overlay.translate_requested.connect(self._on_capture_translate)
+        self.capture_overlay.showFullScreen()
+        self.capture_overlay.activateWindow()
+        self.capture_overlay.raise_()
 
-    def on_capture_finished(self, pixmap):
+    def on_capture_finished(self, pixmap, ocr_text="", trans_text=""):
         w = self.window()
         w.showNormal()
         QApplication.processEvents()
         self.canvas.load_pixmap(pixmap)
+        # 同步 OCR/翻译结果到界面
+        if ocr_text:
+            self.ocr_text.setPlainText(ocr_text)
+        if trans_text:
+            self.translate_text.setPlainText(trans_text)
+
+    def _on_capture_copy(self, pixmap):
+        """截图覆盖层：复制图片到剪切板，恢复主窗口但不抢焦点"""
+        QApplication.clipboard().setImage(pixmap.toImage())
+        self.window().showMinimized()
+
+    def _on_capture_save(self, pixmap):
+        """截图覆盖层：保存图片到文件，恢复主窗口但不抢焦点"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            None, "保存截图", "screenshot.png", "PNG Files (*.png)")
+        if file_path:
+            pixmap.save(file_path, "PNG")
+        self.window().showMinimized()
+
+    def _on_capture_ocr(self, pixmap):
+        """截图覆盖层：OCR 识别，结果显示在覆盖层"""
+        # 用线程异步执行，不阻塞 UI
+        import numpy as np
+        from PySide6.QtCore import QThread, Signal
+
+        class OCRWorker(QThread):
+            finished = Signal(str)
+            def __init__(self, ocr_manager, pixmap):
+                super().__init__()
+                self.ocr_manager = ocr_manager
+                self.pixmap = pixmap
+            def run(self):
+                arr = qpixmap_to_numpy(self.pixmap)
+                text = self.ocr_manager.run_ocr(arr)
+                self.finished.emit(text or "(无识别结果)")
+
+        def on_done(text):
+            if hasattr(self, 'capture_overlay') and self.capture_overlay:
+                self.capture_overlay.show_ocr_result(text)
+                self.capture_overlay.on_result_received()
+
+        self._ocr_worker = OCRWorker(self.ocr_manager, pixmap)
+        self._ocr_worker.finished.connect(on_done)
+        self._ocr_worker.start()
+
+    def _on_capture_translate(self, pixmap):
+        """截图覆盖层：先 OCR 再翻译，结果显示在覆盖层"""
+        from PySide6.QtCore import QThread, Signal
+
+        class TranslateWorker(QThread):
+            ocr_done = Signal(str)
+            translate_done = Signal(str, str)  # (ocr_text, translated)
+            def __init__(self, ocr_manager, translator, target, pixmap):
+                super().__init__()
+                self.ocr_manager = ocr_manager
+                self.translator = translator
+                self.target = target
+                self.pixmap = pixmap
+            def run(self):
+                import numpy as np
+                arr = qpixmap_to_numpy(self.pixmap)
+                text = self.ocr_manager.run_ocr(arr)
+                if not text:
+                    self.translate_done.emit("", "(无识别结果)")
+                    return
+                self.ocr_done.emit(text)
+                result = self.translator.translate(text, target_lang=self.target)
+                self.translate_done.emit(text, result or "(翻译失败)")
+
+        def on_ocr_done(text):
+            if hasattr(self, 'capture_overlay') and self.capture_overlay:
+                self.capture_overlay.show_ocr_result(text)
+                # OCR完成，切换到翻译框脉动
+                self.capture_overlay.stop_all_pulses()
+                self.capture_overlay._start_pulse_trans()
+
+        def on_translate_done(ocr_text, translated):
+            if hasattr(self, 'capture_overlay') and self.capture_overlay:
+                if ocr_text:
+                    self.capture_overlay.show_ocr_result(ocr_text)
+                self.capture_overlay.show_translate_result(translated)
+                self.capture_overlay.on_result_received()
+
+        target = getattr(self, 'translate_target', '英文')
+        self._translate_worker = TranslateWorker(self.ocr_manager, self.translator, target, pixmap)
+        self._translate_worker.ocr_done.connect(on_ocr_done)
+        self._translate_worker.translate_done.connect(on_translate_done)
+        self._translate_worker.start()
 
     def _on_image_dropped(self, file_path):
         pixmap = QPixmap(file_path)
@@ -568,6 +674,14 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     def reset_image(self):
         self.canvas.reset_image()
 
+    def clear_image(self):
+        """清空图片和识别结果"""
+        self.canvas.original_pixmap = None
+        self.canvas.display_pixmap = None
+        self.canvas.update_view()
+        self.ocr_text.clear()
+        self.translate_text.clear()
+
     # ══════════════════════════════════════════════
     #  历史记录
     # ══════════════════════════════════════════════
@@ -598,6 +712,24 @@ class RecognizePage(OCRTranslateMixin, QWidget):
             None,
             self._on_switch_to_page,
         )
+
+    def _on_history_context_menu(self, pos):
+        """右键菜单：删除单条历史记录"""
+        item = self.status_list.itemAt(pos)
+        if not item:
+            return
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        lang = self._current_lang
+        delete_action = menu.addAction("删除" if lang == "zh" else "Delete")
+        clear_action = menu.addAction("清空全部" if lang == "zh" else "Clear All")
+        action = menu.exec(self.status_list.mapToGlobal(pos))
+        if action == delete_action:
+            row = self.status_list.row(item)
+            self.history_manager.delete_record(row)
+            self.status_list.takeItem(row)
+        elif action == clear_action:
+            self.clear_history()
 
     def _append_status(self, msg: str):
         try:
@@ -643,6 +775,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
 
     def apply_language(self, lang: str):
         """刷新语言文字（被 MainWindow._apply_language 调用）"""
+        self._current_lang = lang
         self.btn_open.setText("Import" if lang == "en" else "导入")
         self.btn_capture.setText("Capture" if lang == "en" else "截图")
         self.tool_select.setText("Crop" if lang == "en" else "裁剪")
@@ -662,6 +795,8 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self.result_label_trans.setText("Translation Result" if lang == "en" else "翻译结果")
         self.history_label.setText("Operation History" if lang == "en" else "操作历史")
         self.btn_clear_history.setText("Clear" if lang == "en" else "清空")
+        if hasattr(self, '_history_tip'):
+            self._history_tip.setText("Click to restore | Right-click to delete" if lang == "en" else "点击恢复 | 右键删除")
         _zh_items = ["中文", "英文", "日文", "韩文", "法文", "德文", "西班牙文", "俄文"]
         _en_items = ["Chinese", "English", "Japanese", "Korean", "French", "German", "Spanish", "Russian"]
         _map_zh_to_en = dict(zip(_zh_items, _en_items))

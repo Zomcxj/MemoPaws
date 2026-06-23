@@ -22,12 +22,21 @@ print(f"日志文件: {log_path}", file=sys.stderr)
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont, QIcon
 
+from snaptrans.utils import get_app_root, get_icon_path, init_paths, migrate_legacy_config, migrate_pending_memo
 from snaptrans.main_window import MainWindow
 
 
 def main():
     """主函数"""
+    # 启动时初始化路径
+    init_paths()
+    # 迁移旧配置
+    migrate_legacy_config()
+    # 迁移待处理的存储目录
+    migrate_pending_memo()
+
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)  # 关闭窗口不退出，靠托盘图标保活
     app.setFont(QFont("Microsoft YaHei UI", 10))
     
     # 设置程序图标
