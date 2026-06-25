@@ -24,85 +24,9 @@ from .translator import SimpleTranslator
 from .canvas import CanvasWidget
 from .history import HistoryManager
 from .capture import ScreenCaptureOverlay
-from .utils import qpixmap_to_numpy, numpy_to_qpixmap, ensure_config_dir
+from .utils import qpixmap_to_numpy, numpy_to_qpixmap, ensure_config_dir, load_svg_icon
 from .ocr_translate import OCRTranslateMixin
-
-
-class BorderGlowWidget(QWidget):
-    """边框氛围进度条 — 在目标控件边框绘制呼吸灯效果"""
-
-    def __init__(self, parent=None, accent_color="#E8875C", radius=6):
-        super().__init__(parent)
-        self._opacity = 0.0
-        self._color = QColor(accent_color)
-        self._radius = radius
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._anim = QPropertyAnimation(self, b"glow_opacity")
-        self._anim.setDuration(1400)
-        self._anim.setLoopCount(-1)
-        self._anim.setStartValue(0.0)
-        self._anim.setKeyValueAt(0.4, 1.0)
-        self._anim.setKeyValueAt(0.6, 1.0)
-        self._anim.setEndValue(0.0)
-        self._anim.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self.hide()
-
-    def get_glow_opacity(self):
-        return self._opacity
-
-    def set_glow_opacity(self, v):
-        self._opacity = v
-        self.update()
-
-    glow_opacity = Property(float, get_glow_opacity, set_glow_opacity)
-
-    def set_accent(self, color: str):
-        self._color = QColor(color)
-
-    def start(self):
-        self.show()
-        self.raise_()
-        self._anim.start()
-
-    def stop(self):
-        self._anim.stop()
-        self.hide()
-
-    def paintEvent(self, event):
-        if self._opacity < 0.01:
-            return
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = self.rect()
-        # 3 层发光
-        for i in range(3):
-            alpha = int(self._opacity * (80 - i * 25))
-            pen = QPen(QColor(self._color.red(), self._color.green(),
-                              self._color.blue(), alpha))
-            pen.setWidth(1 + i * 2)
-            p.setPen(pen)
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            off = i * 2
-            p.drawRoundedRect(r.adjusted(off, off, -off, -off),
-                              self._radius, self._radius)
-        p.end()
-
-
-def _load_svg_icon(svg_path: str, size: int = 20, color: str = None):
-    """加载 SVG 图标"""
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg_data = f.read()
-    if color:
-        svg_data = svg_data.replace('currentColor', color)
-        svg_data = re.sub(r'fill="#ccc"', f'fill="{color}"', svg_data)
-    renderer = QSvgRenderer(svg_data.encode("utf-8"))
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    return pixmap
+from .border_glow_widget import BorderGlowWidget
 
 
 class RecognizePage(OCRTranslateMixin, QWidget):
@@ -175,7 +99,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         _tb_btn_ss = "QPushButton { padding: 4px 12px; font-size: 13px; }"
 
         self.btn_open = QPushButton("导入")
-        self.btn_open.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "import.svg"), 16, _icon_clr)))
+        self.btn_open.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "import.svg"), 16, _icon_clr)))
         self.btn_open.setIconSize(QSize(16, 16))
         self.btn_open.setMinimumWidth(80)
         self.btn_open.setStyleSheet(_tb_btn_ss)
@@ -183,7 +107,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         toolbar.addWidget(self.btn_open)
 
         self.btn_capture = QPushButton("截图")
-        self.btn_capture.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "capture.svg"), 16, _icon_clr)))
+        self.btn_capture.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "capture.svg"), 16, _icon_clr)))
         self.btn_capture.setIconSize(QSize(16, 16))
         self.btn_capture.setMinimumWidth(80)
         self.btn_capture.setStyleSheet(_tb_btn_ss)
@@ -191,7 +115,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         toolbar.addWidget(self.btn_capture)
 
         self.tool_select = QPushButton("裁剪")
-        self.tool_select.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "crop.svg"), 16, _icon_clr)))
+        self.tool_select.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "crop.svg"), 16, _icon_clr)))
         self.tool_select.setIconSize(QSize(16, 16))
         self.tool_select.setMinimumWidth(80)
         self.tool_select.setStyleSheet(_tb_btn_ss)
@@ -199,7 +123,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         toolbar.addWidget(self.tool_select)
 
         self.tool_rect = QPushButton("矩形")
-        self.tool_rect.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "rect.svg"), 16, _icon_clr)))
+        self.tool_rect.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "rect.svg"), 16, _icon_clr)))
         self.tool_rect.setIconSize(QSize(16, 16))
         self.tool_rect.setMinimumWidth(80)
         self.tool_rect.setStyleSheet(_tb_btn_ss)
@@ -220,7 +144,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         # 灰度/二值化/重置 紧跟线宽后面
         toolbar.addSpacing(8)
         self.btn_pre_gray = QPushButton("灰度")
-        self.btn_pre_gray.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "grayscale.svg"), 16, _icon_clr)))
+        self.btn_pre_gray.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "grayscale.svg"), 16, _icon_clr)))
         self.btn_pre_gray.setIconSize(QSize(16, 16))
         self.btn_pre_gray.setMinimumWidth(80)
         self.btn_pre_gray.setStyleSheet(_tb_btn_ss)
@@ -228,7 +152,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         toolbar.addWidget(self.btn_pre_gray)
 
         self.btn_pre_binary = QPushButton("二值化")
-        self.btn_pre_binary.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "binary.svg"), 16, _icon_clr)))
+        self.btn_pre_binary.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "binary.svg"), 16, _icon_clr)))
         self.btn_pre_binary.setIconSize(QSize(16, 16))
         self.btn_pre_binary.setMinimumWidth(80)
         self.btn_pre_binary.setStyleSheet(_tb_btn_ss)
@@ -236,7 +160,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         toolbar.addWidget(self.btn_pre_binary)
 
         self.btn_reset = QPushButton("重置")
-        self.btn_reset.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "reset.svg"), 16, _icon_clr)))
+        self.btn_reset.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "reset.svg"), 16, _icon_clr)))
         self.btn_reset.setIconSize(QSize(16, 16))
         self.btn_reset.setMinimumWidth(80)
         self.btn_reset.setStyleSheet(_tb_btn_ss)
@@ -244,7 +168,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         toolbar.addWidget(self.btn_reset)
 
         self.btn_clear = QPushButton("清空")
-        self.btn_clear.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "clear.svg"), 16, _icon_clr)))
+        self.btn_clear.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "clear.svg"), 16, _icon_clr)))
         self.btn_clear.setIconSize(QSize(16, 16))
         self.btn_clear.setMinimumWidth(80)
         self.btn_clear.setStyleSheet(_tb_btn_ss)
@@ -252,7 +176,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         toolbar.addWidget(self.btn_clear)
 
         self.btn_save_image = QPushButton("保存图片")
-        self.btn_save_image.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "save.svg"), 16, _icon_clr)))
+        self.btn_save_image.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "save.svg"), 16, _icon_clr)))
         self.btn_save_image.setIconSize(QSize(16, 16))
         self.btn_save_image.setMinimumWidth(100)
         self.btn_save_image.setStyleSheet(_tb_btn_ss)
@@ -328,7 +252,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         history_row.addWidget(self.history_label)
         history_row.addStretch()
         self.btn_clear_history = QPushButton("清空")
-        self.btn_clear_history.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "clear.svg"), 16, _icon_clr)))
+        self.btn_clear_history.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "clear.svg"), 16, _icon_clr)))
         self.btn_clear_history.setIconSize(QSize(16, 16))
         self.btn_clear_history.setStyleSheet(get_clear_history_stylesheet(_t_hist))
         self.btn_clear_history.clicked.connect(self.clear_history)
@@ -390,14 +314,14 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         ocr_btn_row.setSpacing(4)
         _ocr_btn_ss = f"QPushButton {{ padding: 4px 12px; font-size: 13px; }}"
         self.btn_ocr_local = QPushButton("本地识别")
-        self.btn_ocr_local.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "local-ocr.svg"), 16, _icon_clr)))
+        self.btn_ocr_local.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "local-ocr.svg"), 16, _icon_clr)))
         self.btn_ocr_local.setIconSize(QSize(16, 16))
         self.btn_ocr_local.setFixedHeight(28)
         self.btn_ocr_local.setStyleSheet(_ocr_btn_ss)
         self.btn_ocr_local.clicked.connect(lambda: self._run_ocr_local())
         ocr_btn_row.addWidget(self.btn_ocr_local)
         self.btn_ocr_ai = QPushButton("AI识别")
-        self.btn_ocr_ai.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "ai-ocr.svg"), 16, _icon_clr)))
+        self.btn_ocr_ai.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "ai-ocr.svg"), 16, _icon_clr)))
         self.btn_ocr_ai.setIconSize(QSize(16, 16))
         self.btn_ocr_ai.setFixedHeight(28)
         self.btn_ocr_ai.setStyleSheet(_ocr_btn_ss)
@@ -445,14 +369,14 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         trans_btn_row.setSpacing(4)
         _trans_btn_ss = f"QPushButton {{ padding: 4px 12px; font-size: 13px; }}"
         self.btn_trans_online = QPushButton("在线翻译")
-        self.btn_trans_online.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "online-trans.svg"), 16, _icon_clr)))
+        self.btn_trans_online.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "online-trans.svg"), 16, _icon_clr)))
         self.btn_trans_online.setIconSize(QSize(16, 16))
         self.btn_trans_online.setFixedHeight(28)
         self.btn_trans_online.setStyleSheet(_trans_btn_ss)
         self.btn_trans_online.clicked.connect(lambda: self._run_translate_online())
         trans_btn_row.addWidget(self.btn_trans_online)
         self.btn_trans_ai = QPushButton("AI翻译")
-        self.btn_trans_ai.setIcon(QIcon(_load_svg_icon(os.path.join(_icons_dir, "ai-ocr.svg"), 16, _icon_clr)))
+        self.btn_trans_ai.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "ai-ocr.svg"), 16, _icon_clr)))
         self.btn_trans_ai.setIconSize(QSize(16, 16))
         self.btn_trans_ai.setFixedHeight(28)
         self.btn_trans_ai.setStyleSheet(_trans_btn_ss)
@@ -491,6 +415,11 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         content_splitter.setStyleSheet("QSplitter { background: transparent; } QSplitter::handle { background: transparent; }")
 
         layout.addWidget(content_splitter, 1)
+
+    def closeEvent(self, event):
+        """清理线程"""
+        self.cleanup_threads()
+        super().closeEvent(event)
 
     def eventFilter(self, obj, event):
         """跟踪 ocr_text / translate_text 尺寸变化，同步 glow 覆盖层"""

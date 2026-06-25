@@ -29,6 +29,7 @@ class OCRTranslateMixin:
         self.ocr_running = True
         self._glow_ocr.start()
         arr = qpixmap_to_numpy(pixmap)
+        self._cleanup_ocr_thread()
         self.ocr_thread = QThread()
         self.ocr_worker = OCRWorker(self.ocr_manager, arr)
         self.ocr_worker.moveToThread(self.ocr_thread)
@@ -39,6 +40,15 @@ class OCRTranslateMixin:
         self._ocr_pending_callback = callback
         self.ocr_worker.finished.connect(self._on_ocr_finished)
         self.ocr_thread.start()
+
+    def _cleanup_ocr_thread(self):
+        """清理旧的OCR线程"""
+        try:
+            if hasattr(self, 'ocr_thread') and self.ocr_thread and self.ocr_thread.isRunning():
+                self.ocr_thread.quit()
+                self.ocr_thread.wait(1000)
+        except RuntimeError:
+            pass
     
     def run_ocr_all(self):
         if not self.canvas.display_pixmap:
@@ -119,14 +129,25 @@ class OCRTranslateMixin:
         self.translate_worker.finished.connect(self.translate_worker.deleteLater)
         self.translate_thread.finished.connect(self.translate_thread.deleteLater)
         self.translate_thread.finished.connect(lambda: setattr(self, 'translate_thread', None))
-        
+
         self.translate_worker.finished.connect(self._on_translate_finished)
         self.translate_worker.error.connect(self._on_translate_error)
-        
+
         self._glow_trans.start()
         self.btn_trans_online.setEnabled(False)
         self.btn_trans_ai.setEnabled(False)
         self.translate_thread.start()
+
+    def cleanup_threads(self):
+        """清理所有线程"""
+        for attr in ('ocr_thread', 'translate_thread'):
+            thread = getattr(self, attr, None)
+            try:
+                if thread and thread.isRunning():
+                    thread.quit()
+                    thread.wait(500)
+            except RuntimeError:
+                pass
     
     def _on_translate_finished(self, translated):
         self._glow_trans.stop()

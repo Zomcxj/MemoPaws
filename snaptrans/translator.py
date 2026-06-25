@@ -155,7 +155,7 @@ class SimpleTranslator:
         return None
     
     def _youdao_translate(self, text, from_lang, to_lang):
-        """调用 MyMemory 翻译 API（免费，无需 API Key）"""
+        """调用在线翻译 API（备用）"""
         try:
             import httpx
             lang_map = {
@@ -165,20 +165,37 @@ class SimpleTranslator:
             source_lang = lang_map.get(from_lang, "auto")
             target_lang = lang_map.get(to_lang, "en")
             
-            url = "https://api.mymemory.translated.net/get"
-            params = {
-                "q": text,
-                "langpair": f"{source_lang}|{target_lang}",
-            }
-            with httpx.Client(timeout=10) as client:
-                r = client.get(url, params=params)
+            # 尝试多个翻译 API
+            apis = [
+                # MyMemory
+                {
+                    "url": "https://api.mymemory.translated.net/get",
+                    "params": {"q": text, "langpair": f"{source_lang}|{target_lang}"},
+                    "method": "get",
+                    "parse": lambda r: r.json().get("responseData", {}).get("translatedText", ""),
+                },
+                # Google Translate (unofficial)
+                {
+                    "url": f"https://translate.googleapis.com/translate_a/single",
+                    "params": {"client": "gtx", "sl": source_lang, "tl": target_lang, "dt": "t", "q": text},
+                    "method": "get",
+                    "parse": lambda r: "".join([item[0] for item in r.json()[0]] if r.json() else ""),
+                },
+            ]
             
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("responseStatus") == 200:
-                    result = data.get("responseData", {}).get("translatedText", "")
-                    if result and result != text:
-                        return result
+            with httpx.Client(timeout=10) as client:
+                for api in apis:
+                    try:
+                        if api["method"] == "get":
+                            r = client.get(api["url"], params=api["params"])
+                        else:
+                            r = client.post(api["url"], json=api["params"])
+                        if r.status_code == 200:
+                            result = api["parse"](r)
+                            if result and result != text and len(result) > 1:
+                                return result
+                    except Exception:
+                        continue
         except Exception as e:
             logger.warning("在线翻译异常: %s", e)
         return None

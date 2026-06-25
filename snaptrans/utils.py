@@ -382,3 +382,59 @@ def detect_lang(text):
     if cjk / total > 0.1:
         return "zh"
     return "en"
+
+
+# ── 公共工具函数 ──
+
+def load_svg_icon(svg_path: str, size: int = 20, color: str = None):
+    """加载 SVG 文件并返回指定大小的 QPixmap，支持动态换色"""
+    import re
+    from PySide6.QtGui import QPixmap, QPainter
+    from PySide6.QtCore import Qt
+    from PySide6.QtSvg import QSvgRenderer
+    try:
+        with open(svg_path, "r", encoding="utf-8") as f:
+            svg_data = f.read()
+        if color:
+            svg_data = svg_data.replace('currentColor', color)
+            svg_data = re.sub(r'fill="#ccc"', f'fill="{color}"', svg_data)
+        renderer = QSvgRenderer(svg_data.encode("utf-8"))
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        renderer.render(painter)
+        painter.end()
+        return pixmap
+    except Exception:
+        return QPixmap(size, size)
+
+
+def normalize_api_url(url: str) -> str:
+    """规范化 API URL：确保以 /chat/completions 结尾"""
+    url = (url or "").rstrip("/")
+    if not url:
+        return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    if url.endswith("/chat/completions"):
+        return url
+    return url + "/chat/completions"
+
+
+def test_api_connection(api_key: str, api_url: str, model: str = "glm-4-flash", timeout: float = 10.0) -> dict:
+    """测试 API 连接，返回 {success, elapsed_ms, status_code, error}"""
+    import time
+    import httpx
+    url = normalize_api_url(api_url)
+    t0 = time.perf_counter()
+    try:
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(url, json=payload, headers=headers)
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        return {"success": resp.status_code == 200, "elapsed_ms": elapsed, "status_code": resp.status_code, "error": ""}
+    except httpx.TimeoutException:
+        return {"success": False, "elapsed_ms": int((time.perf_counter() - t0) * 1000), "status_code": 0, "error": "timeout"}
+    except httpx.ConnectError:
+        return {"success": False, "elapsed_ms": int((time.perf_counter() - t0) * 1000), "status_code": 0, "error": "connect_error"}
+    except Exception as e:
+        return {"success": False, "elapsed_ms": int((time.perf_counter() - t0) * 1000), "status_code": 0, "error": str(e)}

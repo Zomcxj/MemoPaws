@@ -16,72 +16,19 @@ from .themes import (
     DARK, LIGHT,
     get_theme_button_stylesheet, _inner_shadow,
 )
-from .utils import set_title_bar_color, get_root_path, get_config_dir, move_snaptrans_folder, save_anchor
+from .utils import (
+    set_title_bar_color, get_root_path, get_config_dir,
+    move_snaptrans_folder, save_anchor, normalize_api_url,
+    test_api_connection, load_svg_icon as _load_svg
+)
+from .segmented_control import AnimatedSegmentedControl
+
+
+def load_svg_icon(svg_path, size=20, color=None):
+    """兼容旧调用，委托给 utils"""
+    return _load_svg(svg_path, size, color)
 
 logger = logging.getLogger(__name__)
-
-
-def load_svg_icon(svg_path: str, size: int = 20, color: str = None):
-    """加载 SVG 图标（从 main_window.py 复用）"""
-    import re
-    from PySide6.QtGui import QPixmap, QPainter
-    from PySide6.QtSvg import QSvgRenderer
-
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg_data = f.read()
-    if color:
-        svg_data = svg_data.replace('currentColor', color)
-        svg_data = re.sub(r'fill="#ccc"', f'fill="{color}"', svg_data)
-    renderer = QSvgRenderer(svg_data.encode("utf-8"))
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    return pixmap
-
-
-class AnimatedSegmentedControl:
-    """带滑动指示器动画的分段按钮控制器"""
-
-    def __init__(self, container, btn_left, btn_right):
-        self.container = container
-        self.btn_left = btn_left
-        self.btn_right = btn_right
-        self.accent_color = ""
-
-        # 滑动指示器，作为 container 的子 widget，放在按钮下方
-        self.indicator = QWidget(container)
-        self.indicator.lower()
-
-        # 动画
-        self.anim = QPropertyAnimation(self.indicator, b"geometry")
-        self.anim.setDuration(180)
-        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-    def set_accent(self, color):
-        self.accent_color = color
-        self.indicator.setStyleSheet(
-            f"background: {color}; border-radius: 8px;"
-        )
-
-    def update_position(self, animated=True):
-        """根据当前 checked 状态更新指示器位置"""
-        btn = self.btn_left if self.btn_left.isChecked() else self.btn_right
-        is_left = btn == self.btn_left
-        w = btn.width() or self.btn_left.width()
-        h = self.container.height() or 32
-        x = 0 if is_left else w
-        target = QRect(x, 0, w, h)
-        cur = self.indicator.geometry()
-
-        if animated and cur.isValid() and cur != target:
-            self.anim.stop()
-            self.anim.setStartValue(cur)
-            self.anim.setEndValue(target)
-            self.anim.start()
-        else:
-            self.indicator.setGeometry(target)
 
 
 class SettingsPage(QWidget):
@@ -120,6 +67,7 @@ class SettingsPage(QWidget):
         self._shortcut_mgr = shortcut_mgr
 
         self._create_ui()
+        self.apply_theme()  # 初始化时应用主题色
 
         if hasattr(parent, 'theme_changed'):
             parent.theme_changed.connect(lambda _: self.apply_theme())

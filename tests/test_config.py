@@ -47,6 +47,6 @@ def test_save_load_config(tmp_path):
 
 
 def test_config_path():
-    assert CONFIG_FILE.endswith("SnapTrans.json")
-    assert os.path.basename(CONFIG_FILE) == "SnapTrans.json"
-    assert ".SnapTrans" in CONFIG_DIR
+    assert CONFIG_FILE.endswith("setting.json")
+    assert os.path.basename(CONFIG_FILE) == "setting.json"
+    assert ".snaptrans" in CONFIG_DIR

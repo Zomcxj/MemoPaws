@@ -13,73 +13,10 @@ from PySide6.QtCore import Qt, QDate, QMimeData, QByteArray
 from PySide6.QtGui import QIcon, QDrag
 
 from .key_manager import KeyManager
+from .key_dialogs import UnlockDialog, EntryDialog, _t
+from .utils import normalize_api_url as _normalize_url, test_api_connection, load_svg_icon as _load_svg
 
 logger = logging.getLogger(__name__)
-
-# ── 中英文文本映射 ──
-_T = {
-    "设置主密码": {"en": "Set Master Password", "zh": "设置主密码"},
-    "解锁密钥管理": {"en": "Unlock Key Manager", "zh": "解锁密钥管理"},
-    "输入主密码": {"en": "Enter master password", "zh": "输入主密码"},
-    "输入主密码解锁": {"en": "Enter master password to unlock", "zh": "输入主密码解锁"},
-    "确认主密码": {"en": "Confirm master password", "zh": "确认主密码"},
-    "编辑密钥": {"en": "Edit Key", "zh": "编辑密钥"},
-    "添加密钥": {"en": "Add Key", "zh": "添加密钥"},
-    "名称": {"en": "Name", "zh": "名称"},
-    "类型": {"en": "Type", "zh": "类型"},
-    "大模型密钥": {"en": "LLM Key", "zh": "大模型密钥"},
-    "普通密钥": {"en": "Secret Key", "zh": "普通密钥"},
-    "密钥": {"en": "Key", "zh": "密钥"},
-    "密钥值": {"en": "Key value", "zh": "密钥值"},
-    "API 地址": {"en": "API URL", "zh": "API 地址"},
-    "URL": {"en": "URL", "zh": "URL"},
-    "备注": {"en": "Note", "zh": "备注"},
-    "备注可选": {"en": "Note (optional)", "zh": "备注（可选）"},
-    "测试连接": {"en": "Test Connection", "zh": "测试连接"},
-    "测试中": {"en": "Testing...", "zh": "测试中..."},
-    "应用到设置": {"en": "Apply to Settings", "zh": "应用到设置"},
-    "请先填写密钥": {"en": "Please fill in the key first", "zh": "请先填写密钥"},
-    "已更新设置": {"en": "Settings updated", "zh": "已更新设置"},
-    "更新失败": {"en": "Update failed", "zh": "更新失败"},
-    "连接成功": {"en": "Connected", "zh": "连接成功"},
-    "连接失败": {"en": "Connection failed", "zh": "连接失败"},
-    "延迟": {"en": "latency", "zh": "延迟"},
-    "测试": {"en": "Test", "zh": "测试"},
-    "云端": {"en": "Cloud", "zh": "云端"},
-    "来源": {"en": "Source", "zh": "来源"},
-    "模型": {"en": "Model", "zh": "模型"},
-    "模型ID": {"en": "Model ID", "zh": "模型ID"},
-    "API 密钥": {"en": "API Key", "zh": "API 密钥"},
-    "编辑模型配置": {"en": "Edit Model Config", "zh": "编辑模型配置"},
-    "地址": {"en": "URL", "zh": "地址"},
-    "取消": {"en": "Cancel", "zh": "取消"},
-    "保存": {"en": "Save", "zh": "保存"},
-    "测试速度": {"en": "Test Speed", "zh": "测试速度"},
-    "多模态": {"en": "Multimodal", "zh": "多模态"},
-    "文本": {"en": "Text", "zh": "文本"},
-    "无主密码": {"en": "No master password — keys stored in plaintext", "zh": "无主密码 — 密钥明文存储"},
-    "已解锁": {"en": "Unlocked", "zh": "已解锁"},
-    "已锁定": {"en": "Locked — enter master password to unlock", "zh": "已锁定 — 输入主密码解锁"},
-    "解锁": {"en": "Unlock", "zh": "解锁"},
-    "锁定": {"en": "Lock", "zh": "锁定"},
-    "移除主密码": {"en": "Remove Master Password", "zh": "移除主密码"},
-    "添加密钥按钮": {"en": "+ Add Key", "zh": "+ 添加密钥"},
-    "暂无密钥": {"en": "No keys yet, click above to add", "zh": "暂无密钥，点击上方按钮添加"},
-    "复制": {"en": "Copy", "zh": "复制"},
-    "编辑": {"en": "Edit", "zh": "编辑"},
-    "删除": {"en": "Delete", "zh": "删除"},
-    "错误": {"en": "Error", "zh": "错误"},
-    "两次密码不一致": {"en": "Passwords do not match", "zh": "两次密码不一致"},
-    "密码错误": {"en": "Wrong password", "zh": "密码错误"},
-    "名称和密钥不能为空": {"en": "Name and key cannot be empty", "zh": "名称和密钥不能为空"},
-    "确认移除密码": {"en": "Confirm", "zh": "确认"},
-    "移除密码提示": {"en": "Keys will be stored in plaintext after removing master password. Continue?", "zh": "移除主密码后密钥将明文存储，确定移除？"},
-}
-
-
-def _t(key: str, lang: str = "zh") -> str:
-    """获取翻译文本"""
-    return _T.get(key, {}).get(lang, key)
 
 
 class DraggableCard(QFrame):
@@ -138,68 +75,11 @@ class DraggableCard(QFrame):
             event.acceptProposedAction()
 
 
-class UnlockDialog(QDialog):
-    """主密码输入对话框"""
-    def __init__(self, parent, is_set=False, lang="zh"):
+class KeyPage(QWidget):
+    """密钥管理页面"""
+
+    def __init__(self, parent, *, get_theme, is_dark, show_message, get_icons_dir, get_icon_clr, get_current_lang):
         super().__init__(parent)
-        self._lang = lang
-        self.setWindowTitle(_t("设置主密码", lang) if is_set else _t("解锁密钥管理", lang))
-        self.setFixedSize(320, 160)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-
-        self.pwd_input = QLineEdit()
-        self.pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pwd_input.setPlaceholderText(_t("输入主密码", lang) if is_set else _t("输入主密码解锁", lang))
-        self.pwd_input.setFixedHeight(32)
-        layout.addWidget(self.pwd_input)
-
-        if is_set:
-            self.pwd2 = QLineEdit()
-            self.pwd2.setEchoMode(QLineEdit.EchoMode.Password)
-            self.pwd2.setPlaceholderText(_t("确认主密码", lang))
-            self.pwd2.setFixedHeight(32)
-            layout.addWidget(self.pwd2)
-        else:
-            self.pwd2 = None
-
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
-
-    def get_password(self):
-        return self.pwd_input.text().strip()
-
-    def get_confirm(self):
-        return self.pwd2.text().strip() if self.pwd2 else ""
-
-
-class EntryDialog(QDialog):
-    """添加/编辑密钥条目对话框 — 新设计"""
-    def __init__(self, parent, entry=None, is_dark=True, lang="zh"):
-        super().__init__(parent)
-        self._lang = lang
-        self._entry = entry
-        self.setWindowTitle(_t("编辑密钥", lang) if entry else _t("添加密钥", lang))
-        self.setFixedSize(420, 500)
-
-        from .themes import DARK, LIGHT
-        t = DARK if is_dark else LIGHT
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 16, 20, 16)
-
-        # 标题行：图标 + 标题
-        title_row = QHBoxLayout()
-        title_icon = QLabel(">_")
-        title_icon.setStyleSheet(f"font-size:14px; font-weight:bold; color:{t.accent}; border:none; background:transparent;")
-        title_row.addWidget(title_icon)
-
-        title_text = QLabel(_t("编辑模型配置", lang))
-        title_text.setStyleSheet(f"font-size:14px; font-weight:bold; color:{t.text_primary}; border:none; background:transparent;")
-        title_row.addWidget(title_text)
 
         title_row.addStretch()
 
