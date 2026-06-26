@@ -156,9 +156,9 @@ class ScreenCaptureOverlay(QWidget):
         self._result_panel.setFixedSize(316, 416)
         self._result_panel.setStyleSheet("""
             QWidget {
-                background: #1a1a1a;
-                border: 2px solid #333;
-                border-radius: 10px;
+                background: #2C2C2B;
+                border: 1px solid #3E3E38;
+                border-radius: 12px;
             }
         """)
         self._result_panel_dragging = False
@@ -180,27 +180,27 @@ class ScreenCaptureOverlay(QWidget):
         panel_lay.setContentsMargins(12, 10, 12, 10)
         panel_lay.setSpacing(8)
 
-        header_css = "color: #FFFFFF; font-size: 12px; font-weight: 600; background: transparent; border: none;"
+        header_css = "color: #F1F1EF; font-size: 12px; font-weight: 600; background: transparent; border: none;"
         text_css = """
             QTextEdit {
-                background: #2a2a2a;
-                color: #FFFFFF;
-                border: 1px solid #555;
-                border-radius: 6px;
+                background: #1B1B19;
+                color: #F1F1EF;
+                border: 1px solid #52514A;
+                border-radius: 8px;
                 padding: 6px;
                 font-size: 12px;
             }
         """
         copy_btn_css = """
             QPushButton {
-                background: rgba(255,255,255,0.1);
-                color: #FFF;
+                background: #3E3E38;
+                color: #F1F1EF;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 2px 8px;
                 font-size: 11px;
             }
-            QPushButton:hover { background: rgba(255,255,255,0.2); }
+            QPushButton:hover { background: #52514A; }
         """
 
         ocr_header = QHBoxLayout()
@@ -347,15 +347,16 @@ class ScreenCaptureOverlay(QWidget):
         import math
         self._pulse_ocr_phase = (self._pulse_ocr_phase + 1) % 40
         brightness = 0.4 + 0.6 * abs(math.sin(self._pulse_ocr_phase * math.pi / 20))
-        r = max(0, min(255, int(33 + (100 - 33) * brightness)))
-        g = max(0, min(255, int(150 + (200 - 150) * brightness)))
-        b = max(0, min(255, int(243 * brightness)))
+        # Claude 品牌色 #D97757 脉动
+        r = max(0, min(255, int(217 * brightness)))
+        g = max(0, min(255, int(119 * brightness)))
+        b = max(0, min(255, int(87 * brightness)))
         self.ocr_text_edit.setStyleSheet(f"""
             QTextEdit {{
-                background: #2a2a2a;
-                color: #FFFFFF;
+                background: #1B1B19;
+                color: #F1F1EF;
                 border: 2px solid rgb({r},{g},{b});
-                border-radius: 6px;
+                border-radius: 8px;
                 padding: 6px;
                 font-size: 12px;
             }}
@@ -379,16 +380,16 @@ class ScreenCaptureOverlay(QWidget):
         import math
         self._pulse_trans_phase = (self._pulse_trans_phase + 1) % 40
         brightness = 0.4 + 0.6 * abs(math.sin(self._pulse_trans_phase * math.pi / 20))
-        # 绿色 #4CAF50 脉动
-        r = max(0, min(255, int(76 + (150 - 76) * brightness)))
-        g = max(0, min(255, int(175 + (230 - 175) * brightness)))
-        b = max(0, min(255, int(80 + (150 - 80) * brightness)))
+        # Claude 成功色 #8CA06F 脉动
+        r = max(0, min(255, int(140 * brightness)))
+        g = max(0, min(255, int(160 * brightness)))
+        b = max(0, min(255, int(111 * brightness)))
         self.trans_text_edit.setStyleSheet(f"""
             QTextEdit {{
-                background: #2a2a2a;
-                color: #FFFFFF;
+                background: #1B1B19;
+                color: #F1F1EF;
                 border: 2px solid rgb({r},{g},{b});
-                border-radius: 6px;
+                border-radius: 8px;
                 padding: 6px;
                 font-size: 12px;
             }}
@@ -398,10 +399,10 @@ class ScreenCaptureOverlay(QWidget):
         """重置单个文本框样式"""
         text_edit.setStyleSheet("""
             QTextEdit {
-                background: #2a2a2a;
-                color: #FFFFFF;
-                border: 1px solid #555;
-                border-radius: 6px;
+                background: #1B1B19;
+                color: #F1F1EF;
+                border: 1px solid #52514A;
+                border-radius: 8px;
                 padding: 6px;
                 font-size: 12px;
             }
@@ -454,7 +455,7 @@ class ScreenCaptureOverlay(QWidget):
 
             # 尺寸标签
             size_text = f"{rect.width()} × {rect.height()}"
-            font = QFont("Inter", 11)
+            font = QFont("Microsoft YaHei UI", 11)
             font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(font)
             fm = painter.fontMetrics()

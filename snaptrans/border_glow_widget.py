@@ -8,7 +8,7 @@ from PySide6.QtGui import QPainter, QColor, QPen
 class BorderGlowWidget(QWidget):
     """边框氛围进度条 — 在目标控件边框绘制呼吸灯效果"""
 
-    def __init__(self, parent=None, accent_color="#E8875C", radius=6):
+    def __init__(self, parent=None, accent_color="#D97757", radius=6):
         super().__init__(parent)
         self._opacity = 0.0
         self._color = QColor(accent_color)

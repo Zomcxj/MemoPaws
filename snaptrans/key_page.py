@@ -401,6 +401,7 @@ class KeyPage(QWidget):
         left_layout.setSpacing(4)
 
         left_title = QLabel("🤖 " + (_t("大模型密钥", lang)))
+        self._left_title = left_title
         left_title.setFixedHeight(28)
         left_title.setStyleSheet(f"font-size:13px; font-weight:600; color:{t.text_secondary}; border:none; background:transparent;")
         left_title.setAlignment(Qt.AlignmentFlag.AlignVCenter)
@@ -424,6 +425,7 @@ class KeyPage(QWidget):
         right_layout.setSpacing(4)
 
         right_title = QLabel("🔑 " + (_t("普通密钥", lang)))
+        self._right_title = right_title
         right_title.setFixedHeight(28)
         right_title.setStyleSheet(f"font-size:13px; font-weight:600; color:{t.text_secondary}; border:none; background:transparent;")
         right_title.setAlignment(Qt.AlignmentFlag.AlignVCenter)
@@ -996,3 +998,8 @@ class KeyPage(QWidget):
 
     def apply_language(self, lang: str):
         self._update_ui()
+        # 更新标题
+        if hasattr(self, '_left_title'):
+            self._left_title.setText("🤖 " + _t("大模型密钥", lang))
+        if hasattr(self, '_right_title'):
+            self._right_title.setText("🔑 " + _t("普通密钥", lang))

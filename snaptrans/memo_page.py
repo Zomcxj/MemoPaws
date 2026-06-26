@@ -348,7 +348,7 @@ class MemoPage(QWidget):
         lang = self._get_current_lang()
 
         seg_container = QFrame()
-        seg_container.setFixedWidth(128)
+        seg_container.setFixedWidth(160)
         seg_container.setFixedHeight(36)
         seg_container.setStyleSheet(f"QFrame {{ background: {t.bg_neutral_button}; border: 1px solid {t.border_subtle}; border-radius: 8px; margin-bottom: 2px; }}")
         seg_layout = QHBoxLayout(seg_container)
@@ -358,7 +358,7 @@ class MemoPage(QWidget):
         self.btn_memo_edit = QPushButton("编辑" if lang == "zh" else "Edit")
         self.btn_memo_edit.setCheckable(True)
         self.btn_memo_edit.setChecked(True)
-        self.btn_memo_edit.setFixedWidth(62)
+        self.btn_memo_edit.setFixedWidth(78)
         self.btn_memo_edit.setFixedHeight(32)
         self.btn_memo_edit.setStyleSheet(f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 6px; font-size: 13px; }}")
         self.btn_memo_edit.clicked.connect(lambda: self._switch_memo_mode(False))
@@ -366,7 +366,7 @@ class MemoPage(QWidget):
 
         self.btn_memo_preview = QPushButton("预览" if lang == "zh" else "Preview")
         self.btn_memo_preview.setCheckable(True)
-        self.btn_memo_preview.setFixedWidth(62)
+        self.btn_memo_preview.setFixedWidth(78)
         self.btn_memo_preview.setFixedHeight(32)
         self.btn_memo_preview.setStyleSheet(f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 6px; font-size: 13px; }}")
         self.btn_memo_preview.clicked.connect(lambda: self._switch_memo_mode(True))

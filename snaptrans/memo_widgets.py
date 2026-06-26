@@ -23,17 +23,18 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         self._rules.clear()
         dark = self._is_dark_fn() if self._is_dark_fn else True
 
-        h_color = "#E8875C" if dark else "#C05C2E"
-        bold_color = "#F0E6D3" if dark else "#1A1A1A"
-        italic_color = "#B8B8B8" if dark else "#555555"
-        code_inline_color = "#A8D8A8" if dark else "#2E7D32"
-        link_color = "#6FA3EF" if dark else "#1565C0"
-        quote_color = "#999999" if dark else "#888888"
-        list_color = "#D4A76A" if dark else "#8D6E2F"
-        hr_color = "#666666" if dark else "#BBBBBB"
-        code_marker_color = "#888888" if dark else "#AAAAAA"
-        code_content_bg = QColor("#1E1E1E" if dark else "#F5F5F5")
-        code_content_fg = QColor("#D4D4D4" if dark else "#333333")
+        # Claude Design System 颜色
+        h_color = "#D97757" if dark else "#C05C2E"
+        bold_color = "#FAF9F5" if dark else "#1A1A1A"
+        italic_color = "#B7B5A9" if dark else "#555555"
+        code_inline_color = "#8CA06F" if dark else "#2E7D32"
+        link_color = "#D97757" if dark else "#1565C0"
+        quote_color = "#908E84" if dark else "#888888"
+        list_color = "#E8A98F" if dark else "#8D6E2F"
+        hr_color = "#52514A" if dark else "#BBBBBB"
+        code_marker_color = "#6E6D68" if dark else "#AAAAAA"
+        code_content_bg = QColor("#1B1B19" if dark else "#F5F5F5")
+        code_content_fg = QColor("#F1F1EF" if dark else "#333333")
 
         def fmt(color, bold=False, italic=False):
             f = QTextCharFormat()
