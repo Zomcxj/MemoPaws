@@ -112,7 +112,7 @@ def markdown_to_html(md: str, is_dark: bool = True) -> str:
     # <code> (inline)
     html_body = html_body.replace(
         "<code>",
-        f'<code style="background:{code_bg};color:{code_color};padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:13px;">',
+        f'<code style="background:{code_bg};color:{code_color};padding:1px 4px;border-radius:3px;font-family:\'JetBrains Mono\',\'Consolas\',monospace;font-size:13px;">',
     )
     # <pre><code> (block)
     html_body = html_body.replace(
@@ -121,7 +121,7 @@ def markdown_to_html(md: str, is_dark: bool = True) -> str:
     )
     html_body = html_body.replace(
         "<pre><code>",
-        f'<pre style="background:{code_bg};border:1px solid {border_color};border-radius:6px;padding:10px 12px;margin:8px 0;"><code style="color:{code_color};font-family:Consolas,monospace;font-size:13px;">',
+        f'<pre style="background:{code_bg};border:1px solid {border_color};border-radius:6px;padding:10px 12px;margin:8px 0;"><code style="color:{code_color};font-family:\'JetBrains Mono\',\'Consolas\',monospace;font-size:13px;">',
     )
     # <blockquote>
     html_body = html_body.replace(
@@ -149,7 +149,7 @@ def markdown_to_html(md: str, is_dark: bool = True) -> str:
     # <li>
     html_body = html_body.replace("<li>", f'<li style="color:{text_color};margin:2px 0;">')
 
-    return f'<div style="font-family:JetBrains Mono,宋体,Inter,Noto Sans SC,sans-serif;font-size:14px;line-height:1.7;color:{text_color};">{html_body}</div>'
+    return f'<div style="font-family:\'Microsoft YaHei UI\',\'Microsoft YaHei\',\'Inter\',sans-serif;font-size:14px;line-height:1.7;color:{text_color};">{html_body}</div>'
 
 
 class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
@@ -417,6 +417,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             on_append_status=lambda msg: self._append_status(msg),
             is_dark=lambda: self._current_theme_dark,
             show_message=lambda icon, title, text: self.show_themed_message(icon, title, text),
+            get_current_lang=lambda: self._current_lang,
         )
         self.memo_data = self.memo_page.memo_data
         self.memo_list = self.memo_page.memo_list
@@ -539,7 +540,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         self.memo_page._save_memo_edit(silent)
 
     def _toggle_memo_preview(self, checked):
-        self.memo_page._toggle_memo_preview(checked)
+        self.memo_page._switch_memo_mode(checked)
 
     def _on_memo_text_changed(self):
         self.memo_page._on_memo_text_changed()

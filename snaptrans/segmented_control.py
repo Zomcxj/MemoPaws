@@ -37,9 +37,12 @@ class AnimatedSegmentedControl(QFrame):
         btn = self._btn_left if self._btn_left.isChecked() else self._btn_right
         is_left = btn == self._btn_left
         w = btn.width() or self._btn_left.width()
-        h = self._container.height() or 32
+        h = btn.height() or self._container.height() or 32
         x = 0 if is_left else w
-        target = QRect(x, 0, w, h)
+        # 居中对齐，考虑容器边距
+        container_h = self._container.height()
+        y = max(0, (container_h - h) // 2)
+        target = QRect(x, y, w, h)
         cur = self._indicator.geometry()
 
         if animated and cur.isValid() and cur != target:

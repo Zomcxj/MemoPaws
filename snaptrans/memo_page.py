@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLabel,
     QLineEdit, QTextEdit, QListWidget, QListWidgetItem,
     QPushButton, QCheckBox, QFileDialog, QMessageBox,
-    QAbstractItemView, QSplitter, QTextBrowser
+    QAbstractItemView, QSplitter
 )
 from PySide6.QtCore import Qt, QSize, QRegularExpression, QTimer
 from PySide6.QtGui import QIcon, QSyntaxHighlighter, QTextCharFormat, QColor, QFont
@@ -18,6 +18,7 @@ from PySide6.QtGui import QIcon, QSyntaxHighlighter, QTextCharFormat, QColor, QF
 from .utils import get_config_dir, get_memo_dir, ensure_config_dir, load_svg_icon
 from .memo_widgets import MarkdownHighlighter, ZoomableTextEdit
 from .themes import DARK, LIGHT, get_status_list_stylesheet, get_text_edit_stylesheet
+from .segmented_control import AnimatedSegmentedControl
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def markdown_to_html(md: str, theme=None) -> str:
     )
     html_body = html_body.replace(
         "<code>",
-        f'<code style="background:{code_bg};color:{code_color};padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:13px;">',
+        f'<code style="background:{code_bg};color:{code_color};padding:1px 4px;border-radius:3px;font-family:\'JetBrains Mono\',\'Consolas\',monospace;font-size:13px;">',
     )
     html_body = html_body.replace(
         "<pre>",
@@ -66,7 +67,7 @@ def markdown_to_html(md: str, theme=None) -> str:
     )
     html_body = html_body.replace(
         "<pre><code",
-        f'<pre style="background:{code_bg};border:1px solid {border_color};border-radius:6px;padding:10px 12px;margin:8px 0;"><code style="background:transparent;color:{code_color};padding:0;font-family:Consolas,monospace;font-size:13px;">',
+        f'<pre style="background:{code_bg};border:1px solid {border_color};border-radius:6px;padding:10px 12px;margin:8px 0;"><code style="background:transparent;color:{code_color};padding:0;font-family:\'JetBrains Mono\',\'Consolas\',monospace;font-size:13px;">',
     )
     html_body = html_body.replace(
         "<blockquote>",
@@ -103,7 +104,7 @@ def markdown_to_html(md: str, theme=None) -> str:
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
-<body style="font-family:'Microsoft YaHei','Inter',sans-serif;font-size:14px;padding:8px;">
+<body style="font-family:'Microsoft YaHei UI','Microsoft YaHei','Inter',sans-serif;font-size:14px;padding:8px;">
 {html_body}
 </body></html>"""
     return html
@@ -121,6 +122,7 @@ class MemoPage(QWidget):
                  is_dark,
                  show_message=None,
                  get_memo_path=None,
+                 get_current_lang=None,
                  ):
         super().__init__(parent)
         self._get_config_path = get_config_path
@@ -131,6 +133,7 @@ class MemoPage(QWidget):
         self._is_dark = is_dark
         self._show_message = show_message
         self._get_memo_path = get_memo_path
+        self._get_current_lang = get_current_lang or (lambda: "zh")
 
         self.memo_data = []
         self._memo_editing = True
@@ -308,12 +311,7 @@ class MemoPage(QWidget):
         tag_row.addWidget(self.memo_tags_input, 1)
         right_layout.addLayout(tag_row)
 
-        # 内容区域（编辑器 + 预览分栏）
-        self._content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._content_splitter.setHandleWidth(2)
-        self._content_splitter.setStyleSheet(f"QSplitter::handle {{ background: {t.border_subtle}; }}")
-
-        # 编辑器
+        # 内容区域（编辑器）
         self.memo_content_view = ZoomableTextEdit()
         self.memo_content_view.setReadOnly(False)
         self._md_highlighter = MarkdownHighlighter(
@@ -321,37 +319,7 @@ class MemoPage(QWidget):
         self.memo_content_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.memo_content_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.memo_content_view.setStyleSheet(get_text_edit_stylesheet(t))
-        self._content_splitter.addWidget(self.memo_content_view)
-
-        # MD 预览面板（默认隐藏）
-        self._md_preview = QTextBrowser()
-        self._md_preview.setOpenExternalLinks(True)
-        self._md_preview.setStyleSheet(f"""
-            QTextBrowser {{
-                background: {t.bg_panel};
-                color: {t.text_primary};
-                border: none;
-                padding: 8px;
-                font-size: 13px;
-            }}
-        """)
-        self._md_preview.hide()
-        self._content_splitter.addWidget(self._md_preview)
-
-        # 等宽初始比例
-        self._content_splitter.setSizes([500, 500])
-        right_layout.addWidget(self._content_splitter, 1)
-
-        # 同步滚动
-        self.memo_content_view.verticalScrollBar().valueChanged.connect(
-            self._sync_scroll_to_preview)
-        self._md_preview.verticalScrollBar().valueChanged.connect(
-            self._sync_scroll_to_editor)
-        self._syncing_scroll = False
-
-        # 记录分栏状态
-        self._split_mode = False
-        self._split_threshold = 700  # 右面板宽度阈值
+        right_layout.addWidget(self.memo_content_view, 1)
 
         # 操作按钮
         edit_row = QHBoxLayout()
@@ -374,10 +342,41 @@ class MemoPage(QWidget):
         edit_row.addWidget(self.memo_btn_save)
 
         edit_row.addStretch()
-        self.memo_preview_toggle = QCheckBox("预览模式")
-        self.memo_preview_toggle.setStyleSheet(f"color: {t.text_muted};")
-        self.memo_preview_toggle.toggled.connect(self._toggle_memo_preview)
-        edit_row.addWidget(self.memo_preview_toggle)
+
+        # 编辑/预览 分段切换按钮（与设置页风格一致）
+        self._memo_preview_mode = False
+        lang = self._get_current_lang()
+
+        seg_container = QFrame()
+        seg_container.setFixedWidth(128)
+        seg_container.setFixedHeight(36)
+        seg_container.setStyleSheet(f"QFrame {{ background: {t.bg_neutral_button}; border: 1px solid {t.border_subtle}; border-radius: 8px; margin-bottom: 2px; }}")
+        seg_layout = QHBoxLayout(seg_container)
+        seg_layout.setContentsMargins(2, 2, 2, 2)
+        seg_layout.setSpacing(0)
+
+        self.btn_memo_edit = QPushButton("编辑" if lang == "zh" else "Edit")
+        self.btn_memo_edit.setCheckable(True)
+        self.btn_memo_edit.setChecked(True)
+        self.btn_memo_edit.setFixedWidth(62)
+        self.btn_memo_edit.setFixedHeight(32)
+        self.btn_memo_edit.setStyleSheet(f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 6px; font-size: 13px; }}")
+        self.btn_memo_edit.clicked.connect(lambda: self._switch_memo_mode(False))
+        seg_layout.addWidget(self.btn_memo_edit)
+
+        self.btn_memo_preview = QPushButton("预览" if lang == "zh" else "Preview")
+        self.btn_memo_preview.setCheckable(True)
+        self.btn_memo_preview.setFixedWidth(62)
+        self.btn_memo_preview.setFixedHeight(32)
+        self.btn_memo_preview.setStyleSheet(f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 6px; font-size: 13px; }}")
+        self.btn_memo_preview.clicked.connect(lambda: self._switch_memo_mode(True))
+        seg_layout.addWidget(self.btn_memo_preview)
+
+        self._memo_seg_ctrl = AnimatedSegmentedControl(seg_container, self.btn_memo_edit, self.btn_memo_preview)
+        edit_row.addWidget(seg_container)
+
+        # 保持 memo_preview_toggle 兼容（内部逻辑引用）
+        self.memo_preview_toggle = self.btn_memo_preview
 
         self.memo_content_view.textChanged.connect(self._on_memo_text_changed)
 
@@ -393,6 +392,7 @@ class MemoPage(QWidget):
 
         self.memo_data = self.load_memo()
         self._update_memo_list()
+        self.apply_theme()
 
     def add_memo(self):
         self._memo_saving = True
@@ -545,75 +545,40 @@ class MemoPage(QWidget):
         finally:
             self._memo_saving = False
 
-    def _toggle_memo_preview(self, checked: bool):
-        if checked:
+    def _switch_memo_mode(self, preview: bool):
+        """切换编辑/预览模式（保留滚动位置）"""
+        self._memo_preview_mode = preview
+        t = self._get_theme()
+        scrollbar = self.memo_content_view.verticalScrollBar()
+        scroll_pos = scrollbar.value()
+
+        if preview:
             self._memo_md_source = self.memo_content_view.toPlainText()
-            html = markdown_to_html(self._memo_md_source, self._get_theme())
+            html = markdown_to_html(self._memo_md_source, t)
             self.memo_content_view.setHtml(html)
             self.memo_content_view.setReadOnly(True)
         else:
             self.memo_content_view.setPlainText(self._memo_md_source)
             self.memo_content_view.setReadOnly(False)
 
-    def _check_split_mode(self):
-        """检查右面板宽度，自动切换分栏模式"""
-        right_frame = self._content_splitter.parentWidget()
-        if not right_frame:
-            return
-        w = right_frame.width()
-        if w >= self._split_threshold and not self._split_mode:
-            # 宽度足够，开启分栏
-            self._split_mode = True
-            self._md_preview.show()
-            self._update_md_preview()
-        elif w < self._split_threshold and self._split_mode:
-            # 宽度不足，关闭分栏
-            self._split_mode = False
-            self._md_preview.hide()
+        scrollbar.setValue(scroll_pos)
 
-    def _update_md_preview(self):
-        """更新 MD 预览内容"""
-        if not self._split_mode:
-            return
-        md_text = self.memo_content_view.toPlainText()
-        html = markdown_to_html(md_text, self._get_theme())
-        self._md_preview.setHtml(html)
-
-    def _sync_scroll_to_preview(self, value):
-        """编辑器滚动 → 同步预览"""
-        if self._syncing_scroll or not self._split_mode:
-            return
-        self._syncing_scroll = True
-        scrollbar = self._md_preview.verticalScrollBar()
-        max_val = scrollbar.maximum()
-        editor_max = self.memo_content_view.verticalScrollBar().maximum()
-        if editor_max > 0:
-            scrollbar.setValue(int(value * max_val / editor_max))
-        self._syncing_scroll = False
-
-    def _sync_scroll_to_editor(self, value):
-        """预览滚动 → 同步编辑器"""
-        if self._syncing_scroll or not self._split_mode:
-            return
-        self._syncing_scroll = True
-        scrollbar = self.memo_content_view.verticalScrollBar()
-        max_val = scrollbar.maximum()
-        preview_max = self._md_preview.verticalScrollBar().maximum()
-        if preview_max > 0:
-            scrollbar.setValue(int(value * max_val / preview_max))
-        self._syncing_scroll = False
+        # 更新按钮样式和状态
+        self.btn_memo_edit.setChecked(not preview)
+        self.btn_memo_preview.setChecked(preview)
+        btn_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 6px; font-size: 13px; }}"
+        active_ss = f"QPushButton {{ background: transparent; color: #FFFFFF; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; }}"
+        self.btn_memo_edit.setStyleSheet(active_ss if not preview else btn_ss)
+        self.btn_memo_preview.setStyleSheet(active_ss if preview else btn_ss)
+        self._memo_seg_ctrl.update_position(animated=True)
 
     def _on_memo_text_changed(self):
         if self._memo_current_idx < 0:
             return
-        if self.memo_preview_toggle.isChecked():
+        if self._memo_preview_mode:
             return
         self._memo_md_source = self.memo_content_view.toPlainText()
         self._memo_is_dirty = True
-        # 同步更新分栏预览
-        if self._split_mode:
-            self._update_md_preview()
-        # 启动自动保存定时器（文本变更后重置倒计时）
         self._auto_save_timer.stop()
         self._auto_save_timer.start()
 
@@ -830,9 +795,7 @@ class MemoPage(QWidget):
         self._memo_md_source = ""
 
     def resizeEvent(self, event):
-        """窗口大小变化时检查分栏模式"""
         super().resizeEvent(event)
-        self._check_split_mode()
 
     def apply_theme(self):
         t = self._get_theme()
@@ -854,10 +817,20 @@ class MemoPage(QWidget):
         self._md_highlighter._build_rules()
         self._md_highlighter.rehighlight()
         self.memo_content_view.setStyleSheet(get_text_edit_stylesheet(t))
-        if self.memo_preview_toggle.isChecked():
+        if self._memo_preview_mode:
             html = markdown_to_html(self._memo_md_source, t)
             self.memo_content_view.setHtml(html)
-        self.memo_preview_toggle.setStyleSheet(f"color: {t.text_muted};")
+        # 分段控件主题（与设置页风格一致）
+        self._memo_seg_ctrl.set_accent(t.accent)
+        seg_container = self.btn_memo_edit.parent()
+        if seg_container:
+            seg_container.setStyleSheet(f"QFrame {{ background: {t.bg_neutral_button}; border: 1px solid {t.border_subtle}; border-radius: 8px; margin-bottom: 2px; }}")
+        btn_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 6px; font-size: 13px; }}"
+        active_ss = f"QPushButton {{ background: transparent; color: #FFFFFF; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; }}"
+        self.btn_memo_edit.setStyleSheet(active_ss if not self._memo_preview_mode else btn_ss)
+        self.btn_memo_preview.setStyleSheet(active_ss if self._memo_preview_mode else btn_ss)
+        # 延迟更新滑块位置，确保按钮尺寸已计算
+        QTimer.singleShot(0, lambda: self._memo_seg_ctrl.update_position(animated=False))
         # 搜索框 + 标签输入框
         _input_ss = f"""
             QLineEdit {{
@@ -887,7 +860,8 @@ class MemoPage(QWidget):
 
     def apply_language(self, lang: str):
         self.memo_btn_save.setText("Save" if lang == "en" else "保存")
-        self.memo_preview_toggle.setText("Preview" if lang == "en" else "预览模式")
+        self.btn_memo_edit.setText("Edit" if lang == "en" else "编辑")
+        self.btn_memo_preview.setText("Preview" if lang == "en" else "预览")
         self._memo_btn_add.setText("New" if lang == "en" else "新建")
         self._memo_btn_import.setText("Import" if lang == "en" else "导入")
         self._memo_btn_export.setText("Export" if lang == "en" else "导出")

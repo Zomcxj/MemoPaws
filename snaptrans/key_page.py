@@ -3,13 +3,17 @@
 import logging
 import os
 import json
+import random
+import time
+from functools import partial
+from PySide6.QtCore import QThread, Signal as pyqtSignal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QFrame, QComboBox, QScrollArea, QMessageBox,
     QDialog, QDialogButtonBox, QFormLayout, QApplication,
     QDateEdit, QGridLayout, QSizePolicy, QSplitter,
 )
-from PySide6.QtCore import Qt, QDate, QMimeData, QByteArray
+from PySide6.QtCore import Qt, QDate, QMimeData, QByteArray, QTimer
 from PySide6.QtGui import QIcon, QDrag
 
 from .key_manager import KeyManager
@@ -73,6 +77,35 @@ class DraggableCard(QFrame):
                 if parent:
                     parent._swap_entries(source_id, target_id)
             event.acceptProposedAction()
+
+
+class _MatrixAnimWorker(QThread):
+    """Matrix Decode 动画线程（独立线程驱动，不阻塞UI）"""
+    frame_ready = pyqtSignal(str, str)  # entry_id(str), html
+    finished = pyqtSignal(str)  # entry_id(str)
+
+    def __init__(self, entry_id, label, chars, target, parent=None):
+        super().__init__(parent)
+        self._entry_id = str(entry_id)
+        self._label = label
+        self._chars = chars
+        self._target = target
+        self._running = True
+        self._start_ms = time.time() * 1000
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        n = len(self._target)
+        while self._running:
+            chars = [random.choice(self._chars) for _ in range(n)]
+            display = ''.join(f'<span style="color:#00ff41">{ch}</span>' for ch in chars)
+            html = f'<span style="font-family:Consolas,monospace;font-size:12px;font-stretch:condensed;letter-spacing:-0.5px;color:#00ff41;text-shadow:0 0 4px #00ff41;">{display}</span>'
+            self.frame_ready.emit(self._entry_id, html)
+            time.sleep(0.050)
+
+        self.finished.emit(self._entry_id)
 
 
 class KeyPage(QWidget):
@@ -271,6 +304,9 @@ class KeyPage(QWidget):
 class KeyPage(QWidget):
     """密钥管理页面"""
 
+    # 跨线程信号：单个模型测试完成 (entry_id_str, status_code, elapsed_ms)
+    _sig_test_one_done = pyqtSignal(str, int, int)
+
     def __init__(self, parent, *, get_theme, is_dark, show_message, get_icons_dir, get_icon_clr, get_current_lang):
         super().__init__(parent)
         self._get_theme = get_theme
@@ -280,6 +316,7 @@ class KeyPage(QWidget):
         self._get_icon_clr = get_icon_clr
         self._get_current_lang = get_current_lang
         self._km = KeyManager()
+        self._sig_test_one_done.connect(self._on_test_one_done)
         self._build_ui()
 
         if hasattr(parent, 'theme_changed'):
@@ -734,17 +771,60 @@ class KeyPage(QWidget):
         else:
             return "#F44336"  # 红色
 
+    # ── Matrix Decode 动画 ──
+    _MATRIX_CHARS = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789'
+    _MATRIX_TARGET = 'SNAPTRNS'
+
+    def _start_matrix_decode(self, entry_id: int):
+        """启动 Matrix Decode 动画"""
+        lbl = self._latency_labels.get(entry_id)
+        if not lbl:
+            return
+        # 停止旧动画
+        self._stop_matrix_decode(entry_id)
+        # 创建新动画线程
+        worker = _MatrixAnimWorker(entry_id, lbl, self._MATRIX_CHARS, self._MATRIX_TARGET)
+        worker.frame_ready.connect(self._on_matrix_frame)
+        worker.finished.connect(self._on_matrix_anim_done)
+        if not hasattr(self, '_matrix_workers'):
+            self._matrix_workers = {}
+        self._matrix_workers[str(entry_id)] = worker
+        worker.start()
+
+    def _stop_matrix_decode(self, entry_id: int):
+        """停止 Matrix Decode 动画"""
+        eid = str(entry_id)
+        if hasattr(self, '_matrix_workers') and eid in self._matrix_workers:
+            w = self._matrix_workers[eid]
+            w.stop()
+            w.wait(100)
+            del self._matrix_workers[eid]
+
+    def _on_matrix_frame(self, entry_id, html):
+        """接收动画帧并更新UI"""
+        lbl = self._latency_labels.get(int(entry_id))
+        if lbl:
+            lbl.setText(html)
+
+    def _on_matrix_anim_done(self, entry_id):
+        """动画自然结束"""
+        if hasattr(self, '_matrix_workers') and entry_id in self._matrix_workers:
+            del self._matrix_workers[entry_id]
+
     def _add_latency_label(self, layout, entry_id, t, lang):
         """添加延迟显示标签（用于测试后更新）"""
         row = QHBoxLayout()
-        row.setSpacing(0)
-        # "延迟:" 固定颜色
+        row.setSpacing(4)
+        row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         prefix = QLabel(f"{_t('延迟', lang)}:")
         prefix.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent;")
+        prefix.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(prefix)
-        # 数字部分 可变颜色
         value_lbl = QLabel(" --")
         value_lbl.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent;")
+        value_lbl.setTextFormat(Qt.TextFormat.RichText)
+        value_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        value_lbl.setFixedHeight(18)
         value_lbl.setObjectName(f"latency_{entry_id}")
         row.addWidget(value_lbl)
         row.addStretch()
@@ -775,131 +855,22 @@ class KeyPage(QWidget):
             self._km._save()
             self._rebuild_list()
 
-    def _test_entry(self, entry_id: int, btn: QPushButton):
-        """从卡片一键测试大模型密钥连接"""
-        import time
-        import httpx
-
-        entry = None
-        for e in self._km.get_entries():
-            if e["id"] == entry_id:
-                entry = e
-                break
-        if not entry:
-            return
-
-        api_key = self._km.get_plain_value(entry_id)
-        api_url = entry.get("url", "")
-        if not api_key:
-            return
-
-        # 使用条目中存储的模型ID，默认 glm-4-flash
-        model_id = entry.get("note", "") or "glm-4-flash"
-
-        def _normalize_url(url: str) -> str:
-            url = url.rstrip("/")
-            if not url:
-                return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-            if url.endswith("/chat/completions"):
-                return url
-            return url + "/chat/completions"
-
-        # 更新延迟标签为"测试中..."
-        lat_lbl = self._latency_labels.get(entry_id)
-        if lat_lbl:
-            lang = self._get_current_lang()
-            t = self._get_theme()
-            lat_lbl.setText(" ...")
-            lat_lbl.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent;")
-
-        btn.setEnabled(False)
-        btn.setText("...")
-        QApplication.processEvents()
-
-        # 使用持久连接池，减少建连开销
-        if not hasattr(self, '_http_client'):
-            self._http_client = httpx.Client(
-                timeout=httpx.Timeout(10.0, connect=5.0),
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-            )
-
-        t0 = time.perf_counter()
-        try:
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-            # 只测 1 token，减少响应时间
-            payload = {"model": model_id, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
-
-            resp = self._http_client.post(_normalize_url(api_url), json=payload, headers=headers)
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-
-            if resp.status_code == 200:
-                btn.setText(f"✓ {elapsed_ms}ms")
-                btn.setStyleSheet("""
-                    QPushButton { background: rgba(16,185,129,0.15); color: #10B981; border: 1px solid #10B981; border-radius: 4px; font-size: 12px; font-weight:600; padding: 0 12px; }
-                """)
-                if lat_lbl:
-                    lat_lbl.setText(f" {elapsed_ms}ms")
-                    lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent; font-weight:600;")
-            else:
-                btn.setText(f"✗ {resp.status_code}")
-                btn.setStyleSheet("""
-                    QPushButton { background: rgba(244,67,54,0.15); color: #F44336; border: 1px solid #F44336; border-radius: 4px; font-size: 12px; font-weight:600; padding: 0 12px; }
-                """)
-                if lat_lbl:
-                    lat_lbl.setText(f" {elapsed_ms}ms")
-                    lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent;")
-        except (httpx.TimeoutException, httpx.ConnectError, Exception) as e:
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-            btn.setText(f"✗ {elapsed_ms}ms")
-            btn.setStyleSheet("""
-                QPushButton { background: rgba(244,67,54,0.15); color: #F44336; border: 1px solid #F44336; border-radius: 4px; font-size: 12px; font-weight:600; padding: 0 12px; }
-            """)
-            if lat_lbl:
-                lat_lbl.setText(f" {elapsed_ms}ms")
-                lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent;")
-        finally:
-            # 2 秒后恢复按钮
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(2000, lambda: self._reset_test_btn(btn))
-
-    def _reset_test_btn(self, btn: QPushButton):
-        lang = self._get_current_lang()
-        t = self._get_theme()
-        btn.setEnabled(True)
-        btn.setText(_t("测试", lang))
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {t.bg_neutral_button}; color: {t.text_secondary};
-                border: 1px solid {t.border_subtle}; border-radius: 4px;
-                font-size: 12px; padding: 0 12px;
-            }}
-            QPushButton:hover {{ background: {t.bg_active}; }}
-        """)
-
     def _test_all_entries(self):
-        """一键测试所有LLM密钥"""
-        import time
-        import httpx
+        """一键测试所有LLM密钥（异步逐个测试，参考 EchoBird）"""
+        import threading
 
-        lang = self._get_current_lang()
-        t = self._get_theme()
         entries = self._km.get_entries()
         llm_entries = [e for e in entries if e.get("type") == "llm"]
         if not llm_entries:
             return
 
+        lang = self._get_current_lang()
         self.btn_test_all.setEnabled(False)
         self.btn_test_all.setText(_t("测试中", lang))
-        QApplication.processEvents()
 
-        # 使用持久连接池
-        if not hasattr(self, '_http_client'):
-            self._http_client = httpx.Client(
-                timeout=httpx.Timeout(10.0, connect=5.0),
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-            )
+        # 为每个 LLM 条目启动 Matrix 动画
+        for entry in llm_entries:
+            self._start_matrix_decode(entry["id"])
 
         def _normalize_url(url: str) -> str:
             url = url.rstrip("/")
@@ -909,43 +880,66 @@ class KeyPage(QWidget):
                 return url
             return url + "/chat/completions"
 
-        for entry in llm_entries:
-            entry_id = entry["id"]
-            api_key = self._km.get_plain_value(entry_id)
-            api_url = entry.get("url", "")
-            if not api_key:
-                continue
+        def do_test_all():
+            import time
+            import httpx
 
-            model_id = entry.get("note", "") or "glm-4-flash"
-
-            lat_lbl = self._latency_labels.get(entry_id)
-            if lat_lbl:
-                lat_lbl.setText(" ...")
-                lat_lbl.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent;")
-
+            client = httpx.Client(
+                timeout=httpx.Timeout(10.0, connect=5.0),
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
             try:
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                payload = {"model": model_id, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+                for entry in llm_entries:
+                    entry_id = entry["id"]
+                    api_key = self._km.get_plain_value(entry_id)
+                    api_url = entry.get("url", "")
+                    model_id = entry.get("note", "") or "glm-4-flash"
 
-                t0 = time.perf_counter()
-                resp = self._http_client.post(_normalize_url(api_url), json=payload, headers=headers)
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                    if not api_key:
+                        self._sig_test_one_done.emit(str(entry_id), 0, 0)
+                        continue
 
-                if lat_lbl:
-                    if resp.status_code == 200:
-                        lat_lbl.setText(f" {elapsed_ms}ms")
-                        lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent; font-weight:600;")
-                    else:
-                        lat_lbl.setText(f" {resp.status_code}")
-                        lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent;")
-            except Exception:
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                if lat_lbl:
-                    lat_lbl.setText(f" {elapsed_ms}ms")
-                    lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent;")
+                    t0 = time.perf_counter()
+                    try:
+                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                        payload = {"model": model_id, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+                        resp = client.post(_normalize_url(api_url), json=payload, headers=headers)
+                        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                        status_code = resp.status_code
+                    except Exception:
+                        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                        status_code = 0
 
-        self.btn_test_all.setEnabled(True)
-        self.btn_test_all.setText(_t("测试速度", lang))
+                    self._sig_test_one_done.emit(str(entry_id), status_code, elapsed_ms)
+            finally:
+                client.close()
+                # 全部完成信号：entry_id="__done__"
+                self._sig_test_one_done.emit("__done__", 0, 0)
+
+        threading.Thread(target=do_test_all, daemon=True).start()
+
+    def _on_test_one_done(self, entry_id_str: str, status_code: int, elapsed_ms: int):
+        """单个模型测试完成（主线程 slot）"""
+        if entry_id_str == "__done__":
+            # 全部测试完成
+            lang = self._get_current_lang()
+            self.btn_test_all.setEnabled(True)
+            self.btn_test_all.setText(_t("测试速度", lang))
+            return
+
+        entry_id = int(entry_id_str)
+        self._stop_matrix_decode(entry_id)
+        lat_lbl = self._latency_labels.get(entry_id)
+        if lat_lbl:
+            if status_code == 200:
+                lat_lbl.setText(f" {elapsed_ms}ms")
+                lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent; font-weight:600;")
+            elif status_code > 0:
+                lat_lbl.setText(f" {status_code}")
+                lat_lbl.setStyleSheet(f"font-size:13px; color:#F44336; border:none; background:transparent;")
+            else:
+                lat_lbl.setText(" --")
+                lat_lbl.setStyleSheet(f"font-size:13px; color:#F44336; border:none; background:transparent;")
 
     def _edit_entry(self, entry_id: int):
         lang = self._get_current_lang()
