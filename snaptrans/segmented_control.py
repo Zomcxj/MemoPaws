@@ -1,18 +1,17 @@
-"""分段按钮动画控件"""
+"""分段按钮动画控件（支持 N 个按钮）"""
 
 from PySide6.QtWidgets import QFrame, QWidget, QPushButton
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtGui import QColor
 
 
 class AnimatedSegmentedControl(QFrame):
     """带滑动指示器的分段按钮控件"""
 
-    def __init__(self, container: QFrame, btn_left: QPushButton, btn_right: QPushButton):
+    def __init__(self, container: QFrame, *buttons):
         super().__init__(container.parent())
         self._container = container
-        self._btn_left = btn_left
-        self._btn_right = btn_right
+        self._buttons = list(buttons)
         self._accent = "#E8875C"
 
         # 用 QWidget 做指示器
@@ -25,20 +24,35 @@ class AnimatedSegmentedControl(QFrame):
         self._anim.setDuration(180)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        # 初始位置
-        btn_left.clicked.connect(lambda: self.update_position(animated=True))
-        btn_right.clicked.connect(lambda: self.update_position(animated=True))
+        # 内部连接点击信号
+        for btn in self._buttons:
+            btn.clicked.connect(lambda: self.update_position(animated=True))
 
     def set_accent(self, color: str):
         self._accent = color
         self._indicator.setStyleSheet(f"background: {color}; border-radius: 8px;")
 
     def update_position(self, animated=True):
-        btn = self._btn_left if self._btn_left.isChecked() else self._btn_right
-        is_left = btn == self._btn_left
-        w = btn.width() or self._btn_left.width()
-        h = btn.height() or self._container.height() or 32
-        x = 0 if is_left else w
+        checked = None
+        for btn in self._buttons:
+            if btn.isChecked():
+                checked = btn
+                break
+        if checked is None:
+            if not self._buttons:
+                return
+            checked = self._buttons[0]
+
+        w = checked.width() or 80
+        h = checked.height() or self._container.height() or 32
+
+        # 通过遍历前面的按钮累计 x 偏移
+        x = 0
+        for btn in self._buttons:
+            if btn is checked:
+                break
+            x += btn.width()
+
         # 居中对齐，考虑容器边距
         container_h = self._container.height()
         y = max(0, (container_h - h) // 2)

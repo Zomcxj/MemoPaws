@@ -1,7 +1,7 @@
 """备忘录相关控件"""
 
 from PySide6.QtWidgets import QTextEdit
-from PySide6.QtCore import Qt, QRegularExpression
+from PySide6.QtCore import Qt, QRegularExpression, Signal
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 
 
@@ -106,22 +106,33 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
 class ZoomableTextEdit(QTextEdit):
     """支持 Ctrl+滚轮 缩放字体大小的 QTextEdit"""
+    zoomChanged = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._font_size = 14
+
+    @property
+    def font_size(self) -> int:
+        return self._font_size
+
+    def set_font_size(self, size: int):
+        self._font_size = max(8, min(40, size))
         self._apply_font_size()
 
     def wheelEvent(self, event):
-        if self.isReadOnly():
-            super().wheelEvent(event)
-            return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
             if delta > 0:
-                self._font_size = min(40, self._font_size + 1)
+                new_size = min(40, self._font_size + 1)
             elif delta < 0:
-                self._font_size = max(8, self._font_size - 1)
-            self._apply_font_size()
+                new_size = max(8, self._font_size - 1)
+            else:
+                return
+            if new_size != self._font_size:
+                self._font_size = new_size
+                self._apply_font_size()
+                self.zoomChanged.emit(self._font_size)
             event.accept()
             return
         super().wheelEvent(event)
@@ -132,8 +143,3 @@ class ZoomableTextEdit(QTextEdit):
         f = self.font()
         f.setPointSize(self._font_size)
         self.setFont(f)
-        # 同步更新默认样式中的字号
-        ss = self.styleSheet()
-        import re
-        ss = re.sub(r'font-size:\s*\d+px', f'font-size: {self._font_size}px', ss)
-        self.setStyleSheet(ss)

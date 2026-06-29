@@ -116,8 +116,8 @@ class SettingsPage(QWidget):
 
         # 主题分段按钮
         self._theme_seg = QFrame()
-        self._theme_seg.setFixedHeight(32)
-        self._theme_seg.setFixedWidth(160)
+        self._theme_seg.setFixedHeight(34)
+        self._theme_seg.setFixedWidth(162)
         self._theme_seg.setStyleSheet(f"""
             QFrame {{
                 background: {_t.bg_neutral_button};
@@ -176,8 +176,8 @@ class SettingsPage(QWidget):
 
         # 分段按钮容器
         self._lang_seg = QFrame()
-        self._lang_seg.setFixedHeight(32)
-        self._lang_seg.setFixedWidth(160)
+        self._lang_seg.setFixedHeight(34)
+        self._lang_seg.setFixedWidth(162)
         seg_t = DARK if self._is_dark() else LIGHT
         is_en = self._get_current_lang() == "en"
         self._lang_seg.setStyleSheet(f"""
@@ -578,8 +578,8 @@ class SettingsPage(QWidget):
         self._close_behavior = "tray" if is_tray else "exit"
 
         self._close_seg = QFrame()
-        self._close_seg.setFixedHeight(32)
-        self._close_seg.setFixedWidth(220)
+        self._close_seg.setFixedHeight(34)
+        self._close_seg.setFixedWidth(222)
         self._close_seg.setStyleSheet(f"""
             QFrame {{
                 background: {_t.bg_neutral_button};

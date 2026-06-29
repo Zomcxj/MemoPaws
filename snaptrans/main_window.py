@@ -234,6 +234,8 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             if self._tray_icon:
                 self._tray_icon.hide()
             event.accept()
+            from PySide6.QtWidgets import QApplication
+            QApplication.instance().quit()
 
     def init_ui(self):
         # 当前主题下的图标颜色

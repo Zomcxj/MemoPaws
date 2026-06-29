@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QSplitter, QFrame, QSlider, QSizePolicy, QListWidget,
     QListWidgetItem, QComboBox, QFileDialog, QMessageBox, QApplication,
 )
-from PySide6.QtCore import Qt, QTimer, QThread, QSize, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtCore import Qt, QTimer, QThread, QSize, QPropertyAnimation, QEasingCurve, Property, Signal
 from PySide6.QtGui import QIcon, QPixmap, QShortcut, QKeySequence, QPainter, QColor, QPen
 from PySide6.QtSvg import QSvgRenderer
 
@@ -27,6 +27,44 @@ from .capture import ScreenCaptureOverlay
 from .utils import qpixmap_to_numpy, numpy_to_qpixmap, ensure_config_dir, load_svg_icon
 from .ocr_translate import OCRTranslateMixin
 from .border_glow_widget import BorderGlowWidget
+
+
+class _CaptureOCRWorker(QThread):
+    """截图覆盖层 OCR 线程"""
+    finished = Signal(str)
+
+    def __init__(self, ocr_manager, pixmap):
+        super().__init__()
+        self.ocr_manager = ocr_manager
+        self.pixmap = pixmap
+
+    def run(self):
+        arr = qpixmap_to_numpy(self.pixmap)
+        text = self.ocr_manager.run_ocr(arr)
+        self.finished.emit(text or "(无识别结果)")
+
+
+class _CaptureTranslateWorker(QThread):
+    """截图覆盖层 OCR+翻译线程"""
+    ocr_done = Signal(str)
+    translate_done = Signal(str, str)
+
+    def __init__(self, ocr_manager, translator, target, pixmap):
+        super().__init__()
+        self.ocr_manager = ocr_manager
+        self.translator = translator
+        self.target = target
+        self.pixmap = pixmap
+
+    def run(self):
+        arr = qpixmap_to_numpy(self.pixmap)
+        text = self.ocr_manager.run_ocr(arr)
+        if not text:
+            self.translate_done.emit("", "(无识别结果)")
+            return
+        self.ocr_done.emit(text)
+        result = self.translator.translate(text, target_lang=self.target)
+        self.translate_done.emit(text, result or "(翻译失败)")
 
 
 class RecognizePage(OCRTranslateMixin, QWidget):
@@ -503,57 +541,19 @@ class RecognizePage(OCRTranslateMixin, QWidget):
 
     def _on_capture_ocr(self, pixmap):
         """截图覆盖层：OCR 识别，结果显示在覆盖层"""
-        # 用线程异步执行，不阻塞 UI
-        import numpy as np
-        from PySide6.QtCore import QThread, Signal
-
-        class OCRWorker(QThread):
-            finished = Signal(str)
-            def __init__(self, ocr_manager, pixmap):
-                super().__init__()
-                self.ocr_manager = ocr_manager
-                self.pixmap = pixmap
-            def run(self):
-                arr = qpixmap_to_numpy(self.pixmap)
-                text = self.ocr_manager.run_ocr(arr)
-                self.finished.emit(text or "(无识别结果)")
-
         def on_done(text):
             if hasattr(self, 'capture_overlay') and self.capture_overlay:
                 self.capture_overlay.show_ocr_result(text)
                 self.capture_overlay.on_result_received()
 
-        # 清理旧 worker 避免 "QThread destroyed while running" 警告
         self._cleanup_old_worker('_ocr_worker')
-        self._ocr_worker = OCRWorker(self.ocr_manager, pixmap)
+        self._ocr_worker = _CaptureOCRWorker(self.ocr_manager, pixmap)
         self._ocr_worker.finished.connect(on_done)
         self._ocr_worker.finished.connect(self._ocr_worker.deleteLater)
         self._ocr_worker.start()
 
     def _on_capture_translate(self, pixmap):
         """截图覆盖层：先 OCR 再翻译，结果显示在覆盖层"""
-        from PySide6.QtCore import QThread, Signal
-
-        class TranslateWorker(QThread):
-            ocr_done = Signal(str)
-            translate_done = Signal(str, str)  # (ocr_text, translated)
-            def __init__(self, ocr_manager, translator, target, pixmap):
-                super().__init__()
-                self.ocr_manager = ocr_manager
-                self.translator = translator
-                self.target = target
-                self.pixmap = pixmap
-            def run(self):
-                import numpy as np
-                arr = qpixmap_to_numpy(self.pixmap)
-                text = self.ocr_manager.run_ocr(arr)
-                if not text:
-                    self.translate_done.emit("", "(无识别结果)")
-                    return
-                self.ocr_done.emit(text)
-                result = self.translator.translate(text, target_lang=self.target)
-                self.translate_done.emit(text, result or "(翻译失败)")
-
         def on_ocr_done(text):
             if hasattr(self, 'capture_overlay') and self.capture_overlay:
                 self.capture_overlay.show_ocr_result(text)
@@ -569,9 +569,10 @@ class RecognizePage(OCRTranslateMixin, QWidget):
 
         self._cleanup_old_worker('_translate_worker')
         target = getattr(self, 'translate_target', '英文')
-        self._translate_worker = TranslateWorker(self.ocr_manager, self.translator, target, pixmap)
+        self._translate_worker = _CaptureTranslateWorker(self.ocr_manager, self.translator, target, pixmap)
         self._translate_worker.ocr_done.connect(on_ocr_done)
         self._translate_worker.translate_done.connect(on_translate_done)
+        self._translate_worker.finished.connect(self._translate_worker.deleteLater)
         self._translate_worker.start()
 
     def _on_image_dropped(self, file_path):

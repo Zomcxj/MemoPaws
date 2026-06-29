@@ -18,6 +18,7 @@ onnxruntime>=1.15.0
 
 # ── 备忘录 Markdown 渲染（可选，运行时自动加载）──
 markdown>=3.0.0
+pygments>=2.17.0
 
 # ── 文本替换器（可选，依赖 pynput）──
 # pynput>=1.7.0
