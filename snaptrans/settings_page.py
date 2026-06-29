@@ -1183,10 +1183,6 @@ class SettingsPage(QWidget):
             self.settings_url_input.setText(config["api_url"])
             self._save_clip_setting(config=config)
             self._show_message(QMessageBox.Icon.Information, "提示", "配置已保存")
-            self._ocr_manager.set_config(config)
-            self.settings_url_input.setText(config["api_url"])
-            self._save_clip_setting(config=config)
-            self._show_message(QMessageBox.Icon.Information, "提示", "配置已保存")
 
     def _load_clip_setting_to_input(self):
         config = self._load_config()

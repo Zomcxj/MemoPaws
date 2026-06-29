@@ -16,10 +16,14 @@ class OCRTranslateMixin:
     # ══════════════════════════════════════════════
     
     def _run_ocr_local(self):
+        if self.ocr_running:
+            return
         self.ocr_manager.ocr_mode = MODE_LOCAL
         self.run_ocr_all()
     
     def _run_ocr_ai(self):
+        if self.ocr_running:
+            return
         self.ocr_manager.ocr_mode = MODE_CLOUD
         self.run_ocr_all()
     
@@ -84,10 +88,22 @@ class OCRTranslateMixin:
     # ══════════════════════════════════════════════
     
     def _run_translate_online(self):
+        if self.translate_thread is not None:
+            try:
+                if self.translate_thread.isRunning():
+                    return
+            except RuntimeError:
+                pass
         self.translator.set_mode(SimpleTranslator.MODE_ONLINE)
         self.run_translate()
     
     def _run_translate_ai(self):
+        if self.translate_thread is not None:
+            try:
+                if self.translate_thread.isRunning():
+                    return
+            except RuntimeError:
+                pass
         self.translator.set_mode(SimpleTranslator.MODE_LLM)
         self.run_translate()
     

@@ -43,7 +43,7 @@ class ClipboardEditDialog(QDialog):
                     border-radius: 8px;
                     padding: 10px;
                     font-size: 14px;
-                    font-family: Consolas, 'Microsoft YaHei', monospace;
+                    font-family: 'JetBrains Mono', 'Consolas', monospace;
                 }}
             """)
         else:
@@ -55,7 +55,7 @@ class ClipboardEditDialog(QDialog):
                     border-radius: 8px;
                     padding: 10px;
                     font-size: 14px;
-                    font-family: Consolas, 'Microsoft YaHei', monospace;
+                    font-family: 'JetBrains Mono', 'Consolas', monospace;
                 }}
             """)
         layout.addWidget(self.editor, 1)

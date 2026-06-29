@@ -1,0 +1,23 @@
+{
+  "project": {
+    "name": "SnapTrans Claude 风格重制",
+    "designSource": {
+      "operatingMode": "library-bound",
+      "libraryIdentity": {
+        "name": "Claude",
+        "id": "dl_builtin_claude",
+        "version": 0,
+        "scope": "built-in-global",
+        "path": "/data/user/design_libraries/Claude",
+        "versionSource": "metadata.json"
+      }
+    }
+  },
+  "pages": [
+    { "nodeId": "page-settings", "htmlSrc": "pages/settings.html", "title": "设置" },
+    { "nodeId": "page-snap-recognition", "htmlSrc": "pages/snap-recognition.html", "title": "贴图识别" },
+    { "nodeId": "page-clipboard-history", "htmlSrc": "pages/clipboard-history.html", "title": "剪贴板历史" },
+    { "nodeId": "page-memo", "htmlSrc": "pages/memo.html", "title": "备忘录" },
+    { "nodeId": "page-key-management", "htmlSrc": "pages/key-management.html", "title": "密钥管理" }
+  ]
+}

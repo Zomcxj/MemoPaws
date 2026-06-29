@@ -9,3 +9,5 @@ dist/
 *.spec
 test_icon.png
 AGENTS.md
+./node_modules
+./snaptrans

@@ -1,0 +1,102 @@
+{
+  "data": [
+    {
+      "id": "page-settings",
+      "title": "设置",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1782352500000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/settings.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-snap-recognition",
+      "title": "贴图识别",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1782352500000,
+      "canvasData": {
+        "x": 620,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/snap-recognition.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-clipboard-history",
+      "title": "剪贴板历史",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1782352500000,
+      "canvasData": {
+        "x": 1240,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/clipboard-history.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-memo",
+      "title": "备忘录",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1782352500000,
+      "canvasData": {
+        "x": 1860,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/memo.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-key-management",
+      "title": "密钥管理",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1782352500000,
+      "canvasData": {
+        "x": 2480,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/key-management.html",
+        "interactions": []
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "desktop",
+    "projectName": "SnapTrans Claude 风格重制",
+    "designLibrary": {
+      "name": "Claude",
+      "id": "dl_builtin_claude",
+      "version": 0,
+      "scope": "built-in-global",
+      "path": "/data/user/design_libraries/Claude",
+      "versionSource": "metadata.json"
+    },
+    "showEdge": false,
+    "windowSize": {
+      "width": 979,
+      "height": 600
+    }
+  }
+}
