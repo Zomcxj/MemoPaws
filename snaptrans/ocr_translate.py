@@ -144,7 +144,12 @@ class OCRTranslateMixin:
         self.translate_worker.finished.connect(self.translate_thread.quit)
         self.translate_worker.finished.connect(self.translate_worker.deleteLater)
         self.translate_thread.finished.connect(self.translate_thread.deleteLater)
-        self.translate_thread.finished.connect(lambda: setattr(self, 'translate_thread', None))
+        self.translate_thread.finished.connect(
+            lambda t=self.translate_thread:
+            setattr(self, 'translate_thread', None)
+            if getattr(self, 'translate_thread', None) is t
+            else None
+        )
 
         self.translate_worker.finished.connect(self._on_translate_finished)
         self.translate_worker.error.connect(self._on_translate_error)

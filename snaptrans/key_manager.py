@@ -6,6 +6,7 @@ import logging
 import hashlib
 import base64
 import time
+import uuid
 from datetime import datetime
 
 from .utils import get_config_dir
@@ -112,7 +113,7 @@ class KeyManager:
         if not self._unlocked:
             return
         entry = {
-            "id": int(time.time() * 1000),
+            "id": uuid.uuid4().int & ((1 << 53) - 1),
             "name": name,
             "type": entry_type,
             "value": value,

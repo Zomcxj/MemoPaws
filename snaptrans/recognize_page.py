@@ -482,6 +482,17 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         QApplication.clipboard().setImage(pixmap.toImage())
         self.window().showMinimized()
 
+    def _cleanup_old_worker(self, attr_name: str):
+        """清理指定属性上的旧 QThread worker"""
+        worker = getattr(self, attr_name, None)
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    worker.quit()
+                    worker.wait(500)
+            except RuntimeError:
+                pass
+
     def _on_capture_save(self, pixmap):
         """截图覆盖层：保存图片到文件，恢复主窗口但不抢焦点"""
         file_path, _ = QFileDialog.getSaveFileName(
@@ -512,8 +523,11 @@ class RecognizePage(OCRTranslateMixin, QWidget):
                 self.capture_overlay.show_ocr_result(text)
                 self.capture_overlay.on_result_received()
 
+        # 清理旧 worker 避免 "QThread destroyed while running" 警告
+        self._cleanup_old_worker('_ocr_worker')
         self._ocr_worker = OCRWorker(self.ocr_manager, pixmap)
         self._ocr_worker.finished.connect(on_done)
+        self._ocr_worker.finished.connect(self._ocr_worker.deleteLater)
         self._ocr_worker.start()
 
     def _on_capture_translate(self, pixmap):
@@ -543,7 +557,6 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         def on_ocr_done(text):
             if hasattr(self, 'capture_overlay') and self.capture_overlay:
                 self.capture_overlay.show_ocr_result(text)
-                # OCR完成，切换到翻译框脉动
                 self.capture_overlay.stop_all_pulses()
                 self.capture_overlay._start_pulse_trans()
 
@@ -554,6 +567,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
                 self.capture_overlay.show_translate_result(translated)
                 self.capture_overlay.on_result_received()
 
+        self._cleanup_old_worker('_translate_worker')
         target = getattr(self, 'translate_target', '英文')
         self._translate_worker = TranslateWorker(self.ocr_manager, self.translator, target, pixmap)
         self._translate_worker.ocr_done.connect(on_ocr_done)

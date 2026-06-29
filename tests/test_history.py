@@ -53,9 +53,9 @@ def test_load_save(history_manager):
 
 
 def test_history_file_path(history_manager, temp_dir):
-    # HistoryManager now uses HISTORY_FILE from utils, not derived from config path
-    from snaptrans.utils import HISTORY_FILE
-    assert history_manager._history_file == HISTORY_FILE
+    """_history_file 应基于传入的 get_config_path 推断路径"""
+    expected = os.path.join(temp_dir, "history.json")
+    assert history_manager._history_file == expected
 
 
 def test_max_records(history_manager):

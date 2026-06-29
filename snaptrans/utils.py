@@ -21,8 +21,10 @@ APP_NAME = "SnapTrans"
 # 锚点文件（单文件，只存数据目录指针）
 _ANCHOR_FILE = os.path.join(os.path.expanduser("~"), ".snaptrans.json")
 
-# 当前实际路径（启动时初始化）
-CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".snaptrans")
+# 当前实际路径（启动时初始化默认值，init_paths() 后通过锚点文件修正）
+# 注意：此处赋值会被 init_paths() 覆盖，不产生实际目录创建
+_DEFAULT_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".snaptrans")
+CONFIG_DIR = _DEFAULT_CONFIG_DIR
 CONFIG_FILE = os.path.join(CONFIG_DIR, "setting.json")
 HISTORY_FILE = os.path.join(CONFIG_DIR, "history.json")
 CLIPBOARD_FILE = os.path.join(CONFIG_DIR, "clipboard.json")

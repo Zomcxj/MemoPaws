@@ -14,9 +14,13 @@ class HistoryManager:
         初始化历史记录管理器
         """
         self.history_data: List[dict] = []
+        self._get_config_path = get_config_path
     
     @property
     def _history_file(self) -> str:
+        if self._get_config_path:
+            config_dir = os.path.dirname(self._get_config_path())
+            return os.path.join(config_dir, "history.json")
         from .utils import HISTORY_FILE
         return HISTORY_FILE
 
@@ -36,9 +40,9 @@ class HistoryManager:
     def save(self):
         """保存历史记录到文件"""
         try:
-            from .utils import ensure_config_dir
-            ensure_config_dir()
-            with open(self._history_file, "w", encoding="utf-8") as f:
+            path = self._history_file
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.history_data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
@@ -55,9 +59,12 @@ class HistoryManager:
         # 读取配置中的最大条数
         max_items = 100
         try:
-            from .utils import CONFIG_FILE
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            cfg_path = self._get_config_path() if self._get_config_path else None
+            if not cfg_path:
+                from .utils import CONFIG_FILE
+                cfg_path = CONFIG_FILE
+            if cfg_path and os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                 max_items = int(cfg.get("history_max_items", 100))
         except Exception:

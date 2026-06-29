@@ -23,6 +23,13 @@ class ThemeColors:
     progress_bg: str
     progress_chunk: str
     scroll_handle: str
+    success: str = "#8CA06F"
+    success_hover: str = "#A3B58A"
+    success_pressed: str = "#708353"
+    destructive_hover: str = "#F26B6B"
+    destructive_pressed: str = "#C43A39"
+    ghost_hover_bg: str = ""
+    ghost_pressed_bg: str = ""
 
 
 DARK = ThemeColors(
@@ -35,6 +42,7 @@ DARK = ThemeColors(
     error="#EF4444",
     separator="#3E3E38", progress_bg="#3E3E38", progress_chunk="#D97757",
     scroll_handle="#52514A",
+    ghost_hover_bg="#3E3E38", ghost_pressed_bg="#2C2C2B",
 )
 
 LIGHT = ThemeColors(
@@ -47,6 +55,9 @@ LIGHT = ThemeColors(
     error="#BA1A1A",
     separator="#E5E2DD", progress_bg="#E5E2DD", progress_chunk="#D97757",
     scroll_handle="rgba(0,0,0,0.15)",
+    success="#6B7E55", success_hover="#7C9363", success_pressed="#5A6C48",
+    destructive_hover="#D64545", destructive_pressed="#B03A3A",
+    ghost_hover_bg="#E8E5E0", ghost_pressed_bg="#DCD8D0",
 )
 
 
@@ -150,6 +161,39 @@ def get_main_stylesheet(t: ThemeColors) -> str:
             margin: -5px 0; border-radius: 7px; border: none;
         }}
         QSlider::sub-page:horizontal {{ background: {t.accent}; border-radius: 2px; }}
+        QCheckBox {{ color: {t.text_primary}; font-size: 14px; spacing: 8px; }}
+        QCheckBox::indicator {{
+            width: 18px; height: 18px;
+            border: 2px solid {t.border_strong}; border-radius: 4px;
+            background: {t.bg_input};
+        }}
+        QCheckBox::indicator:hover {{ border-color: {t.text_muted}; }}
+        QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}
+        QRadioButton {{ color: {t.text_primary}; font-size: 14px; spacing: 8px; }}
+        QRadioButton::indicator {{
+            width: 18px; height: 18px;
+            border: 2px solid {t.border_strong}; border-radius: 9px;
+            background: {t.bg_input};
+        }}
+        QRadioButton::indicator:hover {{ border-color: {t.text_muted}; }}
+        QRadioButton::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}
+        QGroupBox {{
+            color: {t.text_primary}; font-size: 14px; font-weight: 600;
+            border: 1px solid {t.border_subtle}; border-radius: 12px;
+            margin-top: 16px; padding: 20px 16px 16px 16px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin; subcontrol-position: top left;
+            padding: 4px 12px; color: {t.text_muted}; font-size: 13px; font-weight: 600;
+        }}
+        QToolTip {{
+            background: {t.bg_panel}; color: {t.text_primary};
+            border: 1px solid {t.border_subtle}; border-radius: 8px;
+            padding: 6px 12px; font-size: 12px;
+        }}
+        QSplitter::handle:horizontal {{ width: 1px; background: {t.border_subtle}; }}
+        QSplitter::handle:vertical {{ height: 1px; background: {t.border_subtle}; }}
+        QSplitter::handle:hover {{ background: {t.accent}; }}
         QMessageBox, QDialog {{ background: {t.bg_panel}; color: {t.text_primary}; border: none; }}
         QMessageBox QLabel, QDialog QLabel {{ color: {t.text_primary}; border: none; background: transparent; }}
         QMessageBox QPushButton, QDialog QPushButton {{
@@ -336,6 +380,111 @@ def get_canvas_stylesheet(t: ThemeColors, is_dragging: bool = False) -> str:
             border: {border_w} solid {border_color};
             border-radius: 12px;
         }}
+    """
+
+
+def get_ghost_button_stylesheet(t: ThemeColors) -> str:
+    hover_bg = t.ghost_hover_bg or t.bg_active
+    pressed_bg = t.ghost_pressed_bg or t.border_subtle
+    return f"""
+        QPushButton#ghost {{
+            background: transparent;
+            color: {t.text_primary};
+            border: none;
+            border-radius: 8px;
+            padding: 8px 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }}
+        QPushButton#ghost:hover {{ background: {hover_bg}; }}
+        QPushButton#ghost:pressed {{ background: {pressed_bg}; }}
+        QPushButton#ghost:disabled {{ color: {t.text_muted}; }}
+    """
+
+
+def get_destructive_button_stylesheet(t: ThemeColors) -> str:
+    return f"""
+        QPushButton#destructive {{
+            background: {t.error}; color: #FFFFFF; border: none;
+            border-radius: 8px; padding: 8px 20px;
+            font-size: 14px; font-weight: 600;
+        }}
+        QPushButton#destructive:hover {{ background: {t.destructive_hover}; }}
+        QPushButton#destructive:pressed {{ background: {t.destructive_pressed}; }}
+    """
+
+
+def get_success_button_stylesheet(t: ThemeColors) -> str:
+    return f"""
+        QPushButton#success {{
+            background: {t.success}; color: #141413; border: none;
+            border-radius: 8px; padding: 8px 20px;
+            font-size: 14px; font-weight: 600;
+        }}
+        QPushButton#success:hover {{ background: {t.success_hover}; }}
+        QPushButton#success:pressed {{ background: {t.success_pressed}; }}
+    """
+
+
+def get_checkbox_stylesheet(t: ThemeColors) -> str:
+    return f"""
+        QCheckBox {{ color: {t.text_primary}; font-size: 14px; spacing: 8px; }}
+        QCheckBox::indicator {{
+            width: 18px; height: 18px;
+            border: 2px solid {t.border_strong};
+            border-radius: 4px;
+            background: {t.bg_input};
+        }}
+        QCheckBox::indicator:hover {{ border-color: {t.text_muted}; }}
+        QCheckBox::indicator:checked {{
+            background: {t.accent}; border-color: {t.accent};
+        }}
+        QCheckBox::indicator:disabled {{
+            background: {t.bg_panel}; border-color: {t.border_subtle};
+        }}
+    """
+
+
+def get_radio_button_stylesheet(t: ThemeColors) -> str:
+    return f"""
+        QRadioButton {{ color: {t.text_primary}; font-size: 14px; spacing: 8px; }}
+        QRadioButton::indicator {{
+            width: 18px; height: 18px;
+            border: 2px solid {t.border_strong};
+            border-radius: 9px;
+            background: {t.bg_input};
+        }}
+        QRadioButton::indicator:hover {{ border-color: {t.text_muted}; }}
+        QRadioButton::indicator:checked {{
+            background: {t.accent}; border-color: {t.accent};
+        }}
+        QRadioButton::indicator:disabled {{
+            background: {t.bg_panel}; border-color: {t.border_subtle};
+        }}
+    """
+
+
+def get_tooltip_stylesheet(t: ThemeColors) -> str:
+    return f"""
+        QToolTip {{
+            background: {t.bg_panel}; color: {t.text_primary};
+            border: 1px solid {t.border_subtle};
+            border-radius: 8px; padding: 6px 12px;
+            font-size: 12px;
+            font-family: 'Poppins', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        }}
+    """
+
+
+def get_splitter_stylesheet(t: ThemeColors) -> str:
+    return f"""
+        QSplitter::handle:horizontal {{
+            width: 1px; background: {t.border_subtle};
+        }}
+        QSplitter::handle:vertical {{
+            height: 1px; background: {t.border_subtle};
+        }}
+        QSplitter::handle:hover {{ background: {t.accent}; }}
     """
 
 
