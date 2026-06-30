@@ -1,6 +1,6 @@
 import pytest
 
-from snaptrans.utils import (
+from snaptrans.core.utils import (
     detect_lang,
     normalize_api_url,
 )
@@ -88,7 +88,7 @@ class TestApiConnection:
 
     def test_success_200(self):
         from unittest.mock import patch
-        from snaptrans.utils import test_api_connection
+        from snaptrans.core.utils import test_api_connection
 
         with patch("httpx.Client", self._mock_client(200, delay=0.03)):
             result = test_api_connection("test_key", "https://api.test.com", timeout=5)
@@ -100,7 +100,7 @@ class TestApiConnection:
 
     def test_latency_increases_with_delay(self):
         from unittest.mock import patch
-        from snaptrans.utils import test_api_connection
+        from snaptrans.core.utils import test_api_connection
 
         with patch("httpx.Client", self._mock_client(200, delay=0.05)):
             r1 = test_api_connection("k", "https://api.test.com", timeout=5)
@@ -111,7 +111,7 @@ class TestApiConnection:
 
     def test_auth_error_401(self):
         from unittest.mock import patch
-        from snaptrans.utils import test_api_connection
+        from snaptrans.core.utils import test_api_connection
 
         with patch("httpx.Client", self._mock_client(401)):
             result = test_api_connection("bad_key", "https://api.test.com", timeout=5)
@@ -122,7 +122,7 @@ class TestApiConnection:
     def test_timeout_error(self):
         from unittest.mock import patch, MagicMock
         import httpx
-        from snaptrans.utils import test_api_connection
+        from snaptrans.core.utils import test_api_connection
 
         mock_instance = MagicMock()
         mock_instance.post = MagicMock(side_effect=httpx.TimeoutException("timeout", request=None))
@@ -139,7 +139,7 @@ class TestApiConnection:
     def test_connect_error(self):
         from unittest.mock import patch, MagicMock
         import httpx
-        from snaptrans.utils import test_api_connection
+        from snaptrans.core.utils import test_api_connection
 
         mock_instance = MagicMock()
         mock_instance.post = MagicMock(side_effect=httpx.ConnectError("connection refused"))

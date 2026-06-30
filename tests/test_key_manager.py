@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from snaptrans.key_manager import _derive_key, _encrypt, _decrypt, KeyManager
+from snaptrans.keys.key_manager import _derive_key, _encrypt, _decrypt, KeyManager
 
 
 class TestCrypto:
@@ -53,7 +53,7 @@ def _km_tmpdir(monkeypatch):
     """每个测试函数重定向 key_manager._get_keys_file"""
     tmp_dir = tempfile.mkdtemp()
     keys_file = os.path.join(tmp_dir, "keys.json")
-    monkeypatch.setattr("snaptrans.key_manager._get_keys_file", lambda: keys_file)
+    monkeypatch.setattr("snaptrans.keys.key_manager._get_keys_file", lambda: keys_file)
     yield
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -173,7 +173,7 @@ class TestKeyManager:
         km.set_master("pwd")
         km.add_entry("safe", "secret", "hidden_value")
         km.lock()
-        from snaptrans.key_manager import _get_keys_file
+        from snaptrans.keys.key_manager import _get_keys_file
         with open(_get_keys_file(), "r", encoding="utf-8") as f:
             data = json.load(f)
         for e in data["entries"]:

@@ -7,7 +7,7 @@ import os
 import sys
 import logging
 
-from snaptrans.utils import get_app_root, get_icon_path
+from snaptrans.core.utils import get_app_root, get_icon_path
 
 # 配置日志 - 存放在安装根目录（exe 所在目录），不是临时目录
 log_path = os.path.join(get_app_root(), "SnapTrans_debug.log")
@@ -20,10 +20,10 @@ logging.basicConfig(
 print(f"日志文件: {log_path}", file=sys.stderr)
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QIcon
 
-from snaptrans.utils import get_app_root, get_icon_path, init_paths, migrate_legacy_config, migrate_pending_memo
-from snaptrans.main_window import MainWindow
+from snaptrans.core.utils import get_app_root, get_icon_path, init_paths, migrate_legacy_config, migrate_pending_memo
+from snaptrans.ui.main_window import MainWindow
 
 
 def main():
@@ -37,7 +37,6 @@ def main():
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # 关闭窗口不退出，靠托盘图标保活
-    app.setFont(QFont("Microsoft YaHei UI", 10))
     
     # 设置程序图标
     icon_path = get_icon_path()

@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from snaptrans.utils import detect_lang
+from snaptrans.core.utils import detect_lang
 
 
 def test_ensure_config_dir():

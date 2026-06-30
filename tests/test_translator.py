@@ -1,4 +1,4 @@
-from snaptrans.translator import SimpleTranslator
+from snaptrans.ocr.translator import SimpleTranslator
 
 
 class TestTranslatorPure:

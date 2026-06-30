@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from snaptrans.utils import CONFIG_DIR, CONFIG_FILE, ensure_config_dir
+from snaptrans.core.utils import CONFIG_DIR, CONFIG_FILE, ensure_config_dir
 
 
 def get_default_config():

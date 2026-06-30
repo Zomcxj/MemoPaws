@@ -1,4 +1,4 @@
-from snaptrans.themes import (
+from snaptrans.core.themes import (
     ThemeColors,
     DARK,
     LIGHT,

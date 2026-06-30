@@ -16,7 +16,7 @@ def qapp():
 
 class TestBorderGlowWidget:
     def test_create_and_accent(self, qapp):
-        from snaptrans.border_glow_widget import BorderGlowWidget
+        from snaptrans.canvas.border_glow_widget import BorderGlowWidget
         w = BorderGlowWidget()
         assert w is not None
         assert w._opacity == 0.0
@@ -25,7 +25,7 @@ class TestBorderGlowWidget:
         assert w._color.name() == "#ff0000"
 
     def test_start_stop(self, qapp):
-        from snaptrans.border_glow_widget import BorderGlowWidget
+        from snaptrans.canvas.border_glow_widget import BorderGlowWidget
         w = BorderGlowWidget()
         assert w.isHidden() is True
         w.start()
@@ -34,26 +34,26 @@ class TestBorderGlowWidget:
         assert w.isHidden() is True
 
     def test_glow_opacity_property(self, qapp):
-        from snaptrans.border_glow_widget import BorderGlowWidget
+        from snaptrans.canvas.border_glow_widget import BorderGlowWidget
         w = BorderGlowWidget()
         assert w.get_glow_opacity() == 0.0
         w.set_glow_opacity(0.5)
         assert w.get_glow_opacity() == 0.5
 
     def test_default_radius(self, qapp):
-        from snaptrans.border_glow_widget import BorderGlowWidget
+        from snaptrans.canvas.border_glow_widget import BorderGlowWidget
         w = BorderGlowWidget(radius=12)
         assert w._radius == 12
 
     def test_custom_accent_color(self, qapp):
-        from snaptrans.border_glow_widget import BorderGlowWidget
+        from snaptrans.canvas.border_glow_widget import BorderGlowWidget
         w = BorderGlowWidget(accent_color="#00FF00")
         assert w._color.name() == "#00ff00"
 
 
 class TestSegmentedControl:
     def test_create(self, qapp):
-        from snaptrans.segmented_control import AnimatedSegmentedControl
+        from snaptrans.ui.segmented_control import AnimatedSegmentedControl
         container = QFrame()
         container.resize(200, 40)
         btn_left = QPushButton("编辑")
@@ -67,7 +67,7 @@ class TestSegmentedControl:
         assert sc._accent == "#E8875C"
 
     def test_set_accent(self, qapp):
-        from snaptrans.segmented_control import AnimatedSegmentedControl
+        from snaptrans.ui.segmented_control import AnimatedSegmentedControl
         container = QFrame()
         btn_left = QPushButton("A")
         btn_right = QPushButton("B")
