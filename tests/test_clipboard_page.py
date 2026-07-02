@@ -5,8 +5,8 @@ import pytest
 
 from PySide6.QtWidgets import QWidget
 
-from snaptrans.clipboard.clipboard_page import ClipboardPage
-from snaptrans.core.themes import DARK
+from memopaws.clipboard.clipboard_page import ClipboardPage
+from memopaws.core.themes import DARK
 
 
 class TestClipboardPage:

@@ -4,7 +4,7 @@ import pytest
 
 from PySide6.QtWidgets import QTextEdit, QListWidget
 
-from snaptrans.canvas.canvas import RoundedTextEdit, RoundedListWidget, CanvasWidget
+from memopaws.canvas.canvas import RoundedTextEdit, RoundedListWidget, CanvasWidget
 
 
 class TestRoundedTextEdit:

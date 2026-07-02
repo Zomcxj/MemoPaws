@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from snaptrans.config.history import HistoryManager
+from memopaws.config.history import HistoryManager
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def temp_dir():
 @pytest.fixture
 def history_manager(temp_dir):
     """创建临时目录中的 HistoryManager"""
-    config_path = os.path.join(temp_dir, "SnapTrans.json")
+    config_path = os.path.join(temp_dir, "MemoPaws.json")
     return HistoryManager(lambda: config_path)
 
 

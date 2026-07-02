@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QIcon, QAction
 
-from ..core.utils import get_icon_path
+from ..core.utils import APP_NAME, get_icon_path
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class TrayMixin:
             tray_menu.addAction(action_quit)
 
             self._tray_icon.setContextMenu(tray_menu)
-            self._tray_icon.setToolTip("SnapTrans")
+            self._tray_icon.setToolTip(APP_NAME)
             self._tray_icon.activated.connect(self._tray_activated)
             self._tray_icon.show()
         except Exception as e:

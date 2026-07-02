@@ -109,7 +109,7 @@ def call_llm_vision(image_base64: str, api_key: str, api_url: str = None, model:
         result = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         return result
     else:
-        raise Exception(f"API 错误: HTTP {resp.status_code} - {resp.text[:200]}")
+        raise Exception(f"API 错误: HTTP {resp.status_code}")
 
 
 class OCRManager:
@@ -127,9 +127,8 @@ class OCRManager:
         self._api_key = config.get("api_key", "")
         self._api_url = config.get("api_url", "")
         self._api_model = config.get("api_model", "")
-        logger.info("OCR 配置已更新: has_key=%s, key_prefix=%s, model=%s", 
-                    bool(self._api_key), self._api_key[:10] if self._api_key else "None",
-                    self._api_model or "glm-4v-flash(默认)")
+        logger.info("OCR 配置已更新: has_key=%s, model=%s",
+                    bool(self._api_key), self._api_model or "glm-4v-flash(默认)")
     
     @property
     def ocr_mode(self):
@@ -152,7 +151,7 @@ class OCRManager:
                 # 使用自定义配置文件（禁用所有非 CPU 提供程序）
                 config_path = os.path.join(
                     BUNDLE_DIR,
-                    'snaptrans', 'resources', 'rapidocr_config.yaml'
+                    'memopaws', 'resources', 'rapidocr_config.yaml'
                 )
                 
                 if os.path.exists(config_path):

@@ -5,7 +5,7 @@ import pytest
 from PySide6.QtWidgets import QTextEdit
 from PySide6.QtCore import Qt
 
-from snaptrans.memo.memo_widgets import MarkdownHighlighter, ZoomableTextEdit
+from memopaws.memo.memo_widgets import MarkdownHighlighter, ZoomableTextEdit
 
 
 class TestMarkdownHighlighter:

@@ -5,7 +5,7 @@ import pytest
 
 from PySide6.QtWidgets import QWidget
 
-from snaptrans.ui.nav_sidebar import NavSidebar
+from memopaws.ui.nav_sidebar import NavSidebar
 
 
 class TestNavSidebar:
@@ -21,7 +21,7 @@ class TestNavSidebar:
         pytest.skip("icons directory not found")
 
     def test_create(self, qapp, parent, icons_dir):
-        from snaptrans.core.themes import DARK
+        from memopaws.core.themes import DARK
         sidebar = NavSidebar(
             parent,
             get_theme=lambda: DARK,
@@ -35,7 +35,7 @@ class TestNavSidebar:
         assert sidebar is not None
 
     def test_apply_language(self, qapp, parent, icons_dir):
-        from snaptrans.core.themes import DARK
+        from memopaws.core.themes import DARK
         sidebar = NavSidebar(
             parent,
             get_theme=lambda: DARK,

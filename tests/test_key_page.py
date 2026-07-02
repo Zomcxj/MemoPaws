@@ -4,8 +4,8 @@ import pytest
 
 from PySide6.QtWidgets import QWidget
 
-from snaptrans.keys.key_page import KeyPage
-from snaptrans.core.themes import DARK
+from memopaws.keys.key_page import KeyPage
+from memopaws.core.themes import DARK
 
 
 class TestKeyPage:

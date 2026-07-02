@@ -13,17 +13,22 @@ from PySide6.QtCore import Qt, QSize
 logger = logging.getLogger(__name__)
 
 # PyInstaller --onefile 运行时资源目录
-# 注意：__file__ 指向 snaptrans/core/utils.py，需要向上两级获取项目根目录
+# 注意：__file__ 指向 memopaws/core/utils.py，需要向上两级获取项目根目录
 BUNDLE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-APP_NAME = "SnapTrans"
+APP_NAME = "MemoPaws"
+CONFIG_DIR_NAME = ".memopaws"
+ANCHOR_FILE_NAME = ".memopaws.json"
+_OLD_APP_NAME = "Snap" "Trans"
+_OLD_CONFIG_DIR_NAME = "." + "snap" + "trans"
+_OLD_ANCHOR_FILE_NAME = "." + "snap" + "trans" + ".json"
 
 # 锚点文件（单文件，只存数据目录指针）
-_ANCHOR_FILE = os.path.join(os.path.expanduser("~"), ".snaptrans.json")
+_ANCHOR_FILE = os.path.join(os.path.expanduser("~"), ANCHOR_FILE_NAME)
 
 # 当前实际路径（启动时初始化默认值，init_paths() 后通过锚点文件修正）
 # 注意：此处赋值会被 init_paths() 覆盖，不产生实际目录创建
-_DEFAULT_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".snaptrans")
+_DEFAULT_CONFIG_DIR = os.path.join(os.path.expanduser("~"), CONFIG_DIR_NAME)
 CONFIG_DIR = _DEFAULT_CONFIG_DIR
 CONFIG_FILE = os.path.join(CONFIG_DIR, "setting.json")
 HISTORY_FILE = os.path.join(CONFIG_DIR, "history.json")
@@ -34,20 +39,22 @@ LEGACY_MEMO_FILE = os.path.join(CONFIG_DIR, "memo.json")
 
 def _detect_config_dir() -> str:
     """检测配置目录：读锚点文件，否则用默认目录"""
-    if not os.path.exists(_ANCHOR_FILE):
-        return os.path.join(os.path.expanduser("~"), ".snaptrans")
+    anchor_file = _ANCHOR_FILE
+    old_anchor_file = os.path.join(os.path.expanduser("~"), _OLD_ANCHOR_FILE_NAME)
+    if not os.path.exists(anchor_file) and os.path.exists(old_anchor_file):
+        anchor_file = old_anchor_file
+    if not os.path.exists(anchor_file):
+        return os.path.join(os.path.expanduser("~"), CONFIG_DIR_NAME)
     try:
         import json
-        with open(_ANCHOR_FILE, "r", encoding="utf-8") as f:
+        with open(anchor_file, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         data_dir = cfg.get("data_dir", "")
         if data_dir and os.path.isdir(data_dir):
-            snaptrans_dir = os.path.join(data_dir, ".snaptrans")
-            if os.path.isdir(snaptrans_dir):
-                return snaptrans_dir
+            return os.path.join(data_dir, CONFIG_DIR_NAME)
     except Exception:
         pass
-    return os.path.join(os.path.expanduser("~"), ".snaptrans")
+    return os.path.join(os.path.expanduser("~"), CONFIG_DIR_NAME)
 
 
 def _update_path_constants(config_dir: str):
@@ -76,7 +83,7 @@ def save_anchor(data_dir: str):
 
 
 def get_root_path() -> str:
-    """返回用户设置的父目录（不含 .snaptrans）"""
+    """返回用户设置的父目录（不含当前应用数据目录）"""
     return os.path.dirname(CONFIG_DIR)
 
 
@@ -91,15 +98,15 @@ def get_memo_dir() -> str:
 
 
 def get_root_path() -> str:
-    """返回用户设置的父目录（不含 .snaptrans）"""
+    """返回用户设置的父目录（不含当前应用数据目录）"""
     return os.path.dirname(CONFIG_DIR)
 
 
-def move_snaptrans_folder(src_root: str, dst_root: str, mode: str = "move") -> bool:
-    """移动/复制 .snaptrans 文件夹
+def move_memopaws_folder(src_root: str, dst_root: str, mode: str = "move") -> bool:
+    """移动/复制 .memopaws 文件夹
 
     Args:
-        src_root: 源父目录（如 ~/.snaptrans 的父目录）
+        src_root: 源父目录
         dst_root: 目标父目录
         mode: "move" 移动, "merge" 合并, "overwrite" 覆盖
 
@@ -107,8 +114,8 @@ def move_snaptrans_folder(src_root: str, dst_root: str, mode: str = "move") -> b
         是否成功
     """
     import shutil
-    src_dir = os.path.join(src_root, ".snaptrans")
-    dst_dir = os.path.join(dst_root, ".snaptrans")
+    src_dir = os.path.join(src_root, CONFIG_DIR_NAME)
+    dst_dir = os.path.join(dst_root, CONFIG_DIR_NAME)
 
     if not os.path.isdir(src_dir):
         return False
@@ -164,61 +171,76 @@ def ensure_config_dir():
 
 
 def migrate_legacy_config():
-    """迁移旧配置目录 ~/.SnapTrans/ 到 ~/.snaptrans/"""
-    legacy_dir = os.path.join(os.path.expanduser("~"), ".SnapTrans")
-    if not os.path.exists(legacy_dir):
-        return
-
+    """迁移旧配置到当前应用数据目录"""
     import shutil
 
     # 旧文件映射到新文件
     migrations = [
-        ("SnapTrans.json", "setting.json"),
-        ("SnapTrans_keys.json", "keys.json"),
-        ("SnapTrans_history.json", "history.json"),
-        ("SnapTrans_clipboard.json", "clipboard.json"),
+        (f"{_OLD_APP_NAME}.json", "setting.json"),
+        (f"{_OLD_APP_NAME}_keys.json", "keys.json"),
+        (f"{_OLD_APP_NAME}_history.json", "history.json"),
+        (f"{_OLD_APP_NAME}_clipboard.json", "clipboard.json"),
     ]
 
-    for old_name, new_name in migrations:
-        old_path = os.path.join(legacy_dir, old_name)
-        new_path = os.path.join(CONFIG_DIR, new_name)
-        if os.path.exists(old_path) and not os.path.exists(new_path):
-            try:
-                shutil.copy2(old_path, new_path)
-            except Exception:
-                pass
-
-    # 迁移旧 memo.json 到新 memo/ 目录
-    old_memo_file = os.path.join(legacy_dir, "memo.json")
-    if os.path.exists(old_memo_file):
+    legacy_dirs = [
+        os.path.join(os.path.expanduser("~"), f".{_OLD_APP_NAME}"),
+        os.path.join(os.path.expanduser("~"), _OLD_CONFIG_DIR_NAME),
+    ]
+    old_anchor_file = os.path.join(os.path.expanduser("~"), _OLD_ANCHOR_FILE_NAME)
+    if os.path.exists(old_anchor_file):
         try:
             import json
-            with open(old_memo_file, "r", encoding="utf-8") as f:
-                old_data = json.load(f)
-            if isinstance(old_data, list):
-                os.makedirs(MEMO_DIR, exist_ok=True)
-                for m in old_data:
-                    fname = m.get("_file", f"memo_{m.get('id', 0)}.md")
-                    fpath = os.path.join(MEMO_DIR, fname)
-                    if not os.path.exists(fpath):
-                        title = m.get("title", "memo")
-                        content = m.get("content", "")
-                        with open(fpath, "w", encoding="utf-8") as f:
-                            f.write(f"---\ntitle: {title}\nid: {m.get('id', 0)}\n---\n\n{content}")
+            with open(old_anchor_file, "r", encoding="utf-8") as f:
+                data_dir = json.load(f).get("data_dir", "")
+            if data_dir:
+                legacy_dirs.append(os.path.join(data_dir, _OLD_CONFIG_DIR_NAME))
         except Exception:
             pass
 
-    # 迁移 memo 子目录中的文件
-    legacy_memo_dir = os.path.join(legacy_dir, "memo")
-    if os.path.exists(legacy_memo_dir) and os.path.isdir(legacy_memo_dir):
-        for fname in os.listdir(legacy_memo_dir):
-            old_path = os.path.join(legacy_memo_dir, fname)
-            new_path = os.path.join(MEMO_DIR, fname)
-            if os.path.isfile(old_path) and not os.path.exists(new_path):
+    for legacy_dir in legacy_dirs:
+        if not os.path.isdir(legacy_dir):
+            continue
+
+        for old_name, new_name in migrations:
+            old_path = os.path.join(legacy_dir, old_name)
+            new_path = os.path.join(CONFIG_DIR, new_name)
+            if os.path.exists(old_path) and not os.path.exists(new_path):
                 try:
                     shutil.copy2(old_path, new_path)
                 except Exception:
                     pass
+
+        # 迁移旧 memo.json 到新 memo/ 目录
+        old_memo_file = os.path.join(legacy_dir, "memo.json")
+        if os.path.exists(old_memo_file):
+            try:
+                import json
+                with open(old_memo_file, "r", encoding="utf-8") as f:
+                    old_data = json.load(f)
+                if isinstance(old_data, list):
+                    os.makedirs(MEMO_DIR, exist_ok=True)
+                    for m in old_data:
+                        fname = m.get("_file", f"memo_{m.get('id', 0)}.md")
+                        fpath = os.path.join(MEMO_DIR, fname)
+                        if not os.path.exists(fpath):
+                            title = m.get("title", "memo")
+                            content = m.get("content", "")
+                            with open(fpath, "w", encoding="utf-8") as f:
+                                f.write(f"---\ntitle: {title}\nid: {m.get('id', 0)}\n---\n\n{content}")
+            except Exception:
+                pass
+
+        # 迁移 memo 子目录中的文件
+        legacy_memo_dir = os.path.join(legacy_dir, "memo")
+        if os.path.exists(legacy_memo_dir) and os.path.isdir(legacy_memo_dir):
+            for fname in os.listdir(legacy_memo_dir):
+                old_path = os.path.join(legacy_memo_dir, fname)
+                new_path = os.path.join(MEMO_DIR, fname)
+                if os.path.isfile(old_path) and not os.path.exists(new_path):
+                    try:
+                        shutil.copy2(old_path, new_path)
+                    except Exception:
+                        pass
 
 
 def migrate_pending_memo():
@@ -306,16 +328,12 @@ def get_icon_pixmap(size: int = 20):
     pix = QPixmap(icon_png)
     if pix.isNull():
         return QPixmap(size, size)
-    # 裁剪掉 cream 背景（只保留 bear + bunny 角色），左对齐到 size×size 透明画布
-    src_w, src_h = pix.width(), pix.height()
-    cropped = pix.copy(src_w // 6, src_h // 6,
-                       src_w * 2 // 3, src_h * 2 // 3)
-    scaled = cropped.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
-                            Qt.TransformationMode.SmoothTransformation)
+    scaled = pix.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation)
     canvas = QPixmap(size, size)
     canvas.fill(Qt.GlobalColor.transparent)
     p = QPainter(canvas)
-    p.drawPixmap(0, (size - scaled.height()) // 2, scaled)
+    p.drawPixmap((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
     p.end()
     return canvas
 

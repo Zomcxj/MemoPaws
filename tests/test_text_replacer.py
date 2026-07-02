@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from snaptrans.config.text_replacer import TextReplacerManager
+from memopaws.config.text_replacer import TextReplacerManager
 
 
 @pytest.fixture

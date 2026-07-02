@@ -75,12 +75,12 @@ def _icon_color(is_dark: bool) -> str:
     t = DARK if is_dark else LIGHT
     return t.text_secondary
  
-# 数据文件路径（统一从 snaptrans.utils 导入，存放在 ~/.SnapTrans/ 目录下）
+# 数据文件路径（统一从 memopaws.utils 导入，存放在 ~/.memopaws/ 目录下）
 
 
 
 class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
-    """SnapTrans 主窗口 - 侧边栏导航版"""
+    """MemoPaws 主窗口 - 侧边栏导航版"""
 
     theme_changed = Signal(bool)
     language_changed = Signal(str)
@@ -148,7 +148,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             self.hide()
             if self._tray_icon:
                 self._tray_icon.showMessage(
-                    "SnapTrans", "应用已最小化到系统托盘",
+                    APP_NAME, "应用已最小化到系统托盘",
                     QSystemTrayIcon.MessageIcon.Information, 2000
                 )
         else:
@@ -185,26 +185,14 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         title_bar_layout.setContentsMargins(8, 0, 8, 0)
         title_bar_layout.setSpacing(0)
         
-        # 左侧：图标 + "SnapTrans"
-        from PySide6.QtGui import QPixmap, QPainter, QPainterPath
-        from PySide6.QtCore import QRectF
-        class _TitleIconWidget(QWidget):
-            def __init__(self, pix, parent=None):
-                super().__init__(parent)
-                self._pix = pix
-                self.setFixedSize(20, 20)
-            def paintEvent(self, _):
-                p = QPainter(self)
-                p.setRenderHint(QPainter.RenderHint.Antialiasing)
-                path = QPainterPath()
-                path.addRoundedRect(QRectF(0, 0, 20, 20), 5, 5)
-                p.setClipPath(path)
-                p.drawPixmap(0, 0, self._pix)
+        # 左侧：图标 + APP_NAME
+        from PySide6.QtGui import QPixmap
         from ..core.utils import get_icon_pixmap
-        title_icon = _TitleIconWidget(get_icon_pixmap(20))
-        title_label = QLabel("SnapTrans")
+        title_icon_label = QLabel()
+        title_icon_label.setPixmap(get_icon_pixmap(20))
+        title_label = QLabel(APP_NAME)
         title_label.setStyleSheet(f"font-size:16px; font-weight:bold; color:{_t.accent}; border:none; background:transparent;")
-        title_bar_layout.addWidget(title_icon)
+        title_bar_layout.addWidget(title_icon_label)
         title_bar_layout.addSpacing(6)
         title_bar_layout.addWidget(title_label)
         title_bar_layout.addStretch()

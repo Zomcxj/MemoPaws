@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 
-from snaptrans.ocr.ocr import (
+from memopaws.ocr.ocr import (
     image_to_base64,
     OCRManager,
     OCRWorker,
@@ -66,7 +66,7 @@ class TestOCRManager:
         mgr = OCRManager()
         mgr._api_key = "test-key"
         arr = np.zeros((100, 100, 3), dtype=np.uint8)
-        with patch("snaptrans.ocr.ocr.call_llm_vision", return_value="recognized text") as mock:
+        with patch("memopaws.ocr.ocr.call_llm_vision", return_value="recognized text") as mock:
             result = mgr.run_ocr(arr, mode=MODE_CLOUD)
             assert result == "recognized text"
             mock.assert_called_once()

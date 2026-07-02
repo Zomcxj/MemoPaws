@@ -1,4 +1,4 @@
-# SnapTrans
+# MemoPaws
 
 轻量级截图 OCR + AI 翻译工具，支持本地 RapidOCR 和多模态大模型识别。
 
@@ -24,8 +24,8 @@ python main.py
 
 | 脚本 | 模式 | 输出 |
 |------|------|------|
-| `build_dev.bat` / `build_dev.sh` | onedir | `dist/dev/SnapTrans` |
-| `build_portable.bat` / `build_portable.sh` | onefile | `dist_portable/SnapTrans.exe` |
+| `build_dev.bat` / `build_dev.sh` | onedir | `dist/dev/MemoPaws` |
+| `build_portable.bat` / `build_portable.sh` | onefile | `dist_portable/MemoPaws.exe` |
 
 详见 [README.md](README.md)（构建说明）。
 

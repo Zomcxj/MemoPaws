@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-#  SnapTrans 构建脚本
+#  MemoPaws 构建脚本
 #  离线截图 OCR 翻译与编辑工具
 #  支持: Linux / Windows (MSYS2 / Git Bash / Cygwin) / macOS
 #  用法: ./build.sh [options]
@@ -87,12 +87,12 @@ if [ "$PLATFORM" = "windows" ]; then
     ADD_DATA_SEP=";"
     EXTRA_ARGS=""
     PROJECT_ROOT="$(cygpath -w "$PROJECT_ROOT" 2>/dev/null || echo "$PROJECT_ROOT")"
-    OUTPUT_FILE="${PROJECT_ROOT}/dist/SnapTrans_Portable.exe"
+    OUTPUT_FILE="${PROJECT_ROOT}/dist/MemoPaws_Portable.exe"
 else
     PYINSTALLER_CMD="pyinstaller"
     ADD_DATA_SEP=":"
     EXTRA_ARGS=""
-    OUTPUT_FILE="${PROJECT_ROOT}/dist/SnapTrans"
+    OUTPUT_FILE="${PROJECT_ROOT}/dist/MemoPaws"
 fi
 
 log_info "PyInstaller 命令: $PYINSTALLER_CMD"
@@ -139,7 +139,7 @@ fi
 ASSETS_DIR="${PROJECT_ROOT}/assets"
 ICONS_DIR="${ASSETS_DIR}/icons"
 FONTS_DIR="${ASSETS_DIR}/fonts"
-RESOURCES_DIR="${PROJECT_ROOT}/snaptrans/resources"
+RESOURCES_DIR="${PROJECT_ROOT}/memopaws/resources"
 
 if [ -d "$ICONS_DIR" ]; then
     ICON_COUNT=$(find "$ICONS_DIR" -name "*.svg" 2>/dev/null | wc -l)
@@ -159,11 +159,11 @@ fi
 if [ "$PORTABLE" = true ]; then
     log_info "模式: 便携版单文件"
     MODE_ARGS="-F"
-    OUTPUT_NAME="SnapTrans_Portable"
+    OUTPUT_NAME="MemoPaws_Portable"
 else
     log_info "模式: 目录打包（推荐）"
     MODE_ARGS="-D"
-    OUTPUT_NAME="SnapTrans"
+    OUTPUT_NAME="MemoPaws"
 fi
 
 # ==================== 执行打包 ====================
@@ -179,7 +179,7 @@ PYINSTALLER_CMD_LINE="$PYINSTALLER_CMD \
     --specpath \"${PROJECT_ROOT}\" \
     --icon=\"${ICON_FILE}\" \
     --add-data \"${ASSETS_DIR}${ADD_DATA_SEP}assets\" \
-    --add-data \"${RESOURCES_DIR}${ADD_DATA_SEP}snaptrans/resources\" \
+    --add-data \"${RESOURCES_DIR}${ADD_DATA_SEP}memopaws/resources\" \
     --hidden-import=PySide6.QtSvg \
     --hidden-import=PySide6.QtSvgWidgets \
     --hidden-import=rapidocr \

@@ -1,4 +1,4 @@
-from snaptrans.ocr.translator import SimpleTranslator
+from memopaws.ocr.translator import SimpleTranslator
 
 
 class TestTranslatorPure:

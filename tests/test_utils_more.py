@@ -1,6 +1,6 @@
 import pytest
 
-from snaptrans.core.utils import (
+from memopaws.core.utils import (
     detect_lang,
     normalize_api_url,
 )
@@ -65,6 +65,23 @@ class TestNormalizeApiUrl:
         assert result == "https://api.test.com/chat/completions"
 
 
+class TestConfigPaths:
+    def test_old_anchor_points_to_new_data_dir(self, tmp_path, monkeypatch):
+        import json
+        import memopaws.core.utils as utils
+
+        data_root = tmp_path / "data"
+        data_root.mkdir()
+        old_anchor = tmp_path / ("." + "snap" + "trans" + ".json")
+        old_anchor.write_text(json.dumps({"data_dir": str(data_root)}), encoding="utf-8")
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setattr(utils, "_ANCHOR_FILE", str(tmp_path / ".memopaws.json"))
+
+        assert utils._detect_config_dir() == str(data_root / ".memopaws")
+
+
 class TestApiConnection:
     @staticmethod
     def _mock_client(status_code: int = 200, delay: float = 0):
@@ -88,7 +105,7 @@ class TestApiConnection:
 
     def test_success_200(self):
         from unittest.mock import patch
-        from snaptrans.core.utils import test_api_connection
+        from memopaws.core.utils import test_api_connection
 
         with patch("httpx.Client", self._mock_client(200, delay=0.03)):
             result = test_api_connection("test_key", "https://api.test.com", timeout=5)
@@ -100,7 +117,7 @@ class TestApiConnection:
 
     def test_latency_increases_with_delay(self):
         from unittest.mock import patch
-        from snaptrans.core.utils import test_api_connection
+        from memopaws.core.utils import test_api_connection
 
         with patch("httpx.Client", self._mock_client(200, delay=0.05)):
             r1 = test_api_connection("k", "https://api.test.com", timeout=5)
@@ -111,7 +128,7 @@ class TestApiConnection:
 
     def test_auth_error_401(self):
         from unittest.mock import patch
-        from snaptrans.core.utils import test_api_connection
+        from memopaws.core.utils import test_api_connection
 
         with patch("httpx.Client", self._mock_client(401)):
             result = test_api_connection("bad_key", "https://api.test.com", timeout=5)
@@ -122,7 +139,7 @@ class TestApiConnection:
     def test_timeout_error(self):
         from unittest.mock import patch, MagicMock
         import httpx
-        from snaptrans.core.utils import test_api_connection
+        from memopaws.core.utils import test_api_connection
 
         mock_instance = MagicMock()
         mock_instance.post = MagicMock(side_effect=httpx.TimeoutException("timeout", request=None))
@@ -139,7 +156,7 @@ class TestApiConnection:
     def test_connect_error(self):
         from unittest.mock import patch, MagicMock
         import httpx
-        from snaptrans.core.utils import test_api_connection
+        from memopaws.core.utils import test_api_connection
 
         mock_instance = MagicMock()
         mock_instance.post = MagicMock(side_effect=httpx.ConnectError("connection refused"))

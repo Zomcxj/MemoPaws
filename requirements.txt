@@ -1,4 +1,4 @@
-# SnapTrans 运行依赖
+# MemoPaws 运行依赖
 # 安装：pip install -r requirements.txt
 
 # ── UI 框架 ──

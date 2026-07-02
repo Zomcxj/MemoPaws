@@ -601,7 +601,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     # ══════════════════════════════════════════════
 
     def export_text(self):
-        file_path, _ = QFileDialog.getSaveFileName(self.window(), "导出文本", "snaptrans_result.txt", "Text Files (*.txt)")
+        file_path, _ = QFileDialog.getSaveFileName(self.window(), "导出文本", "memopaws_result.txt", "Text Files (*.txt)")
         if file_path:
             content = "识别结果：\n" + self.ocr_text.toPlainText() + "\n\n翻译结果：\n" + self.translate_text.toPlainText()
             with open(file_path, "w", encoding="utf-8") as f:
@@ -611,7 +611,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         if not self.canvas.display_pixmap:
             self._show_message(QMessageBox.Icon.Information, "提示", "没有可导出的图片")
             return
-        file_path, _ = QFileDialog.getSaveFileName(self.window(), "导出图片", "snaptrans_output.png", "PNG Files (*.png)")
+        file_path, _ = QFileDialog.getSaveFileName(self.window(), "导出图片", "memopaws_output.png", "PNG Files (*.png)")
         if file_path:
             self.canvas.export_image(file_path)
 

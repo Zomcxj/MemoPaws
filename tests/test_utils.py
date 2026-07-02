@@ -9,12 +9,12 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from snaptrans.core.utils import detect_lang
+from memopaws.core.utils import detect_lang
 
 
 def test_ensure_config_dir():
     test_dir = tempfile.mkdtemp()
-    test_config_dir = os.path.join(test_dir, ".SnapTrans")
+    test_config_dir = os.path.join(test_dir, ".memopaws")
     os.makedirs(test_config_dir, exist_ok=True)
     assert os.path.isdir(test_config_dir)
     shutil.rmtree(test_dir)

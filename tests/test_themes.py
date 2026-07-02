@@ -1,4 +1,4 @@
-from snaptrans.core.themes import (
+from memopaws.core.themes import (
     ThemeColors,
     DARK,
     LIGHT,

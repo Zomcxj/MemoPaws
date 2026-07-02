@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from PySide6.QtWidgets import QWidget
 
-from snaptrans.ui.frameless_window import (
+from memopaws.ui.frameless_window import (
     FramelessWindowMixin,
     _load_svg_icon,
     WM_NCCALCSIZE,
@@ -21,7 +21,7 @@ class TestFramelessConstants:
         assert HTCLIENT == 1
 
     def test_ht_constants(self):
-        from snaptrans.ui.frameless_window import (
+        from memopaws.ui.frameless_window import (
             HTLEFT, HTRIGHT, HTTOP, HTBOTTOM,
             HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT,
         )

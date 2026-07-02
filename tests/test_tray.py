@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from PySide6.QtWidgets import QWidget
 
-from snaptrans.ui.tray import TrayMixin
+from memopaws.ui.tray import TrayMixin
 
 
 class TestTrayMixin:

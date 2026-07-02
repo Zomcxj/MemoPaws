@@ -928,6 +928,17 @@ class MemoPage(QWidget):
             safe = "memo"
         return f"{safe}_{memo_id}.md"
 
+    def _safe_memo_path(self, memo_dir: str, fname: str) -> tuple[str, str]:
+        """把旧数据中的文件名收窄到 memo 目录内。"""
+        fname = os.path.basename(fname or "")
+        if not fname.endswith(".md"):
+            fname = f"{fname}.md"
+        fpath = os.path.abspath(os.path.join(memo_dir, fname))
+        memo_root = os.path.abspath(memo_dir)
+        if os.path.commonpath([memo_root, fpath]) != memo_root:
+            raise ValueError("无效的备忘录文件路径")
+        return fname, fpath
+
     def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
         """解析 YAML frontmatter，返回 (metadata_dict, content)"""
         if not text.startswith("---"):
@@ -975,8 +986,8 @@ class MemoPage(QWidget):
                         if "_file" not in m:
                             m["_file"] = self._sanitize_filename(
                                 m.get("title", "memo"), m.get("id", 0))
-                        fname = m["_file"]
-                        fpath = os.path.join(memo_dir, fname)
+                        fname, fpath = self._safe_memo_path(memo_dir, m["_file"])
+                        m["_file"] = fname
                         if not os.path.exists(fpath):
                             frontmatter = self._build_frontmatter(m)
                             content = m.get("content", "")
@@ -1031,7 +1042,8 @@ class MemoPage(QWidget):
                 if not fname:
                     fname = self._sanitize_filename(memo.get("title", "memo"), memo.get("id", 0))
                     memo["_file"] = fname
-                fpath = os.path.join(memo_dir, fname)
+                fname, fpath = self._safe_memo_path(memo_dir, fname)
+                memo["_file"] = fname
                 frontmatter = self._build_frontmatter(memo)
                 content = memo.get("content", "")
                 with open(fpath, "w", encoding="utf-8") as f:

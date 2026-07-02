@@ -1,4 +1,4 @@
-"""SnapTrans - 离线截图 OCR 翻译与编辑工具
+"""MemoPaws - 离线截图 OCR 翻译与编辑工具
 
 入口文件
 """
@@ -7,10 +7,10 @@ import os
 import sys
 import logging
 
-from snaptrans.core.utils import get_app_root, get_icon_path
+from memopaws.core.utils import get_app_root, get_icon_path
 
 # 配置日志 - 存放在安装根目录（exe 所在目录），不是临时目录
-log_path = os.path.join(get_app_root(), "SnapTrans_debug.log")
+log_path = os.path.join(get_app_root(), "MemoPaws_debug.log")
 logging.basicConfig(
     filename=log_path,
     level=logging.DEBUG,
@@ -22,8 +22,8 @@ print(f"日志文件: {log_path}", file=sys.stderr)
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
-from snaptrans.core.utils import get_app_root, get_icon_path, init_paths, migrate_legacy_config, migrate_pending_memo
-from snaptrans.ui.main_window import MainWindow
+from memopaws.core.utils import get_app_root, get_icon_path, init_paths, migrate_legacy_config, migrate_pending_memo
+from memopaws.ui.main_window import MainWindow
 
 
 def main():

@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from snaptrans.core.utils import CONFIG_DIR, CONFIG_FILE, ensure_config_dir
+from memopaws.core.utils import CONFIG_DIR, CONFIG_FILE, ensure_config_dir
 
 
 def get_default_config():
@@ -49,4 +49,4 @@ def test_save_load_config(tmp_path):
 def test_config_path():
     assert CONFIG_FILE.endswith("setting.json")
     assert os.path.basename(CONFIG_FILE) == "setting.json"
-    assert ".snaptrans" in CONFIG_DIR
+    assert ".memopaws" in CONFIG_DIR

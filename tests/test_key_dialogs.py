@@ -1,6 +1,6 @@
 import pytest
 
-from snaptrans.keys.key_dialogs import _t, _T
+from memopaws.keys.key_dialogs import _t, _T
 
 
 class TestTFunction:

@@ -18,7 +18,7 @@ from ..core.themes import (
 )
 from ..core.utils import (
     set_title_bar_color, get_root_path, get_config_dir,
-    move_snaptrans_folder, save_anchor, normalize_api_url,
+    move_memopaws_folder, save_anchor, normalize_api_url,
     test_api_connection, load_svg_icon as _load_svg
 )
 from ..ui.segmented_control import AnimatedSegmentedControl
@@ -454,7 +454,7 @@ class SettingsPage(QWidget):
         memo_path_layout.addLayout(path_row)
 
         # 迁移提示
-        self.memo_path_tip = QLabel("留空则使用默认路径，切换后整个 .snaptrans 文件夹会移动")
+        self.memo_path_tip = QLabel("留空则使用默认路径，切换后整个 .memopaws 文件夹会移动")
         self.memo_path_tip.setStyleSheet(_init_tip_ss)
         memo_path_layout.addWidget(self.memo_path_tip)
 
@@ -900,8 +900,8 @@ class SettingsPage(QWidget):
             self.memo_path_title_lbl.setText("Storage Directory" if lang == "en" else "存储目录")
         if hasattr(self, 'memo_path_tip'):
             self.memo_path_tip.setText(
-                "Leave empty for default path, entire .snaptrans folder will be moved"
-                if lang == "en" else "留空则使用默认路径，切换后整个 .snaptrans 文件夹会移动")
+                "Leave empty for default path, entire .memopaws folder will be moved"
+                if lang == "en" else "留空则使用默认路径，切换后整个 .memopaws 文件夹会移动")
         if hasattr(self, '_memo_browse_btn'):
             self._memo_browse_btn.setText("Browse" if lang == "en" else "浏览")
         # 剪切板设置
@@ -1129,16 +1129,16 @@ class SettingsPage(QWidget):
         # 存储目录
         new_root = self.settings_memo_path_input.text().strip()
         current_dir = get_config_dir()
-        current_root = os.path.dirname(current_dir)  # .snaptrans 的父目录
+        current_root = os.path.dirname(current_dir)  # .memopaws 的父目录
 
         if new_root and new_root != current_root:
-            # 检查目标目录是否存在 .snaptrans
-            dst_snaptrans = os.path.join(new_root, ".snaptrans")
-            if os.path.exists(dst_snaptrans):
+            # 检查目标目录是否存在 .memopaws
+            dst_memopaws = os.path.join(new_root, ".memopaws")
+            if os.path.exists(dst_memopaws):
                 reply = QMessageBox.question(
                     self,
                     "目标目录已存在数据",
-                    f"{dst_snaptrans} 已存在\n\n如何处理？",
+                    f"{dst_memopaws} 已存在\n\n如何处理？",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
                     QMessageBox.StandardButton.Cancel,
                 )
@@ -1152,7 +1152,7 @@ class SettingsPage(QWidget):
                 move_mode = "move"
 
             # 直接移动
-            success = move_snaptrans_folder(current_root, new_root, mode=move_mode)
+            success = move_memopaws_folder(current_root, new_root, mode=move_mode)
             if not success:
                 self._show_message(QMessageBox.Icon.Warning, "错误", "移动文件夹失败")
                 return

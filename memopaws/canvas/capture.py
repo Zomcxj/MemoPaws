@@ -760,7 +760,7 @@ class ScreenCaptureOverlay(QWidget):
         """恢复主窗口显示"""
         from PySide6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
-            if widget.windowTitle() == "SnapTrans" or (hasattr(widget, '_is_main_window') and widget._is_main_window):
+            if widget.windowTitle() == "MemoPaws" or (hasattr(widget, '_is_main_window') and widget._is_main_window):
                 widget.showNormal()
                 widget.activateWindow()
                 return

@@ -7,7 +7,7 @@ import shutil
 
 import pytest
 
-from snaptrans.config.shortcut_manager import (
+from memopaws.config.shortcut_manager import (
     _load_shortcuts,
     _save_shortcuts,
     DEFAULT_SHORTCUTS,
@@ -24,7 +24,7 @@ def temp_dir():
 
 @pytest.fixture
 def config_path(temp_dir):
-    return os.path.join(temp_dir, "SnapTrans.json")
+    return os.path.join(temp_dir, "MemoPaws.json")
 
 
 def test_load_shortcuts_empty_file(config_path):

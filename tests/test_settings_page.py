@@ -7,8 +7,8 @@ import shutil
 
 from PySide6.QtWidgets import QWidget
 
-from snaptrans.config.settings_page import SettingsPage
-from snaptrans.core.themes import DARK, LIGHT
+from memopaws.config.settings_page import SettingsPage
+from memopaws.core.themes import DARK, LIGHT
 
 
 class TestSettingsPage:
@@ -19,7 +19,7 @@ class TestSettingsPage:
     @pytest.fixture
     def tmp_config(self):
         d = tempfile.mkdtemp()
-        cfg_path = os.path.join(d, "SnapTrans.json")
+        cfg_path = os.path.join(d, "MemoPaws.json")
         yield cfg_path
         shutil.rmtree(d)
 

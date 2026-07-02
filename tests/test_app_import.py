@@ -2,5 +2,5 @@
 
 def test_main_window_import():
     """涵盖 main_window → recognize_page → OCRWorker 等全链路导入"""
-    from snaptrans.ui.main_window import MainWindow  # noqa: F401
+    from memopaws.ui.main_window import MainWindow  # noqa: F401
     assert MainWindow is not None

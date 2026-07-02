@@ -2,8 +2,8 @@
 
 import pytest
 
-from snaptrans.clipboard.clipboard_dialog import ClipboardEditDialog
-from snaptrans.core.themes import DARK, LIGHT
+from memopaws.clipboard.clipboard_dialog import ClipboardEditDialog
+from memopaws.core.themes import DARK, LIGHT
 
 
 class TestClipboardEditDialog:

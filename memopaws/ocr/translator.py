@@ -88,7 +88,7 @@ class SimpleTranslator:
             from_lang = self._to_code(source_lang)
         else:
             from_lang = detect_lang(text)
-        logger.info("翻译: target=%s, to_lang=%s, from_lang=%s, text=%s", target_lang, to_lang, from_lang, text[:50])
+        logger.info("翻译: target=%s, to_lang=%s, from_lang=%s, length=%d", target_lang, to_lang, from_lang, len(text))
         
         if from_lang == to_lang:
             logger.info("源语言与目标语言相同，跳过翻译")
@@ -98,7 +98,7 @@ class SimpleTranslator:
         if self.mode == self.MODE_LLM and self.api_key:
             result = self._llm_translate(text, from_lang, to_lang)
             if result:
-                logger.info("LLM 翻译结果: %s", result[:50])
+                logger.info("LLM 翻译成功: length=%d", len(result))
                 return result
             else:
                 logger.warning("LLM 翻译失败")
@@ -107,7 +107,7 @@ class SimpleTranslator:
         if self.mode == self.MODE_ONLINE or not self.api_key:
             result = self._youdao_translate(text, from_lang, to_lang)
             if result:
-                logger.info("有道翻译结果: %s", result[:50])
+                logger.info("有道翻译成功: length=%d", len(result))
                 return result
         
         logger.warning("所有翻译方式都失败")
@@ -147,7 +147,7 @@ class SimpleTranslator:
                     return result
                 logger.warning("LLM 翻译返回空或与原文相同")
             else:
-                logger.warning("LLM 翻译 HTTP 错误: %d %s", resp.status_code, resp.text[:200])
+                logger.warning("LLM 翻译 HTTP 错误: %d", resp.status_code)
         except httpx.TimeoutException:
             logger.warning("LLM 翻译超时: url=%s", self.api_url)
         except Exception as e:

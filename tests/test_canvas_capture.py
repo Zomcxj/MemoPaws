@@ -2,7 +2,7 @@
 
 import pytest
 
-from snaptrans.canvas.capture import ScreenCaptureOverlay
+from memopaws.canvas.capture import ScreenCaptureOverlay
 
 
 class TestScreenCaptureOverlay:

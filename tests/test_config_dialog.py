@@ -4,7 +4,7 @@ import pytest
 
 from PySide6.QtWidgets import QApplication
 
-from snaptrans.config.config_dialog import ConfigDialog
+from memopaws.config.config_dialog import ConfigDialog
 
 
 class TestConfigDialog:
@@ -28,7 +28,7 @@ class TestConfigDialog:
         assert cfg["api_model"] == "m"
 
     def test_custom_theme(self, qapp):
-        from snaptrans.core.themes import LIGHT
+        from memopaws.core.themes import LIGHT
         dlg = ConfigDialog(config={}, is_dark=False)
         assert dlg is not None
 
