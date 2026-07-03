@@ -19,14 +19,9 @@ from ..core.themes import (
 from ..core.utils import (
     set_title_bar_color, get_root_path, get_config_dir,
     move_memopaws_folder, save_anchor, normalize_api_url,
-    test_api_connection, load_svg_icon as _load_svg
+    test_api_connection, load_svg_icon, init_paths
 )
 from ..ui.segmented_control import AnimatedSegmentedControl
-
-
-def load_svg_icon(svg_path, size=20, color=None):
-    """兼容旧调用，委托给 utils"""
-    return _load_svg(svg_path, size, color)
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +432,7 @@ class SettingsPage(QWidget):
         path_row.addWidget(self.settings_memo_path_input, 1)
 
         browse_btn = QPushButton("Browse" if self._get_current_lang() == "en" else "浏览")
-        browse_btn.setFixedSize(64, 28)
+        browse_btn.setFixedSize(88, 28)
         browse_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {_t.bg_neutral_button};
@@ -655,8 +650,6 @@ class SettingsPage(QWidget):
     def _init_seg_indicators(self):
         """布局就绪后一次性设置分段按钮的初始状态（样式 + 指示器位置）"""
         self._update_theme_seg_style()
-        self._update_lang_seg_style()
-        self._update_close_seg_style()
         self._update_lang_seg_style()
         self._update_close_seg_style()
 
@@ -920,14 +913,18 @@ class SettingsPage(QWidget):
             return
         t = DARK if self._is_dark() else LIGHT
         is_en = self._get_current_lang() == "en"
+        self.btn_lang_en.blockSignals(True)
+        self.btn_lang_zh.blockSignals(True)
         self.btn_lang_en.setChecked(is_en)
         self.btn_lang_zh.setChecked(not is_en)
+        self.btn_lang_en.blockSignals(False)
+        self.btn_lang_zh.blockSignals(False)
         btn_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
         active_text_ss = f"QPushButton {{ background: transparent; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
         self.btn_lang_en.setStyleSheet(active_text_ss if is_en else btn_ss)
         self.btn_lang_zh.setStyleSheet(active_text_ss if not is_en else btn_ss)
         self._lang_seg_ctrl.set_accent(t.accent)
-        self._lang_seg_ctrl.update_position(animated=True)
+        self._lang_seg_ctrl.update_position(animated=False)
 
     def _update_theme_seg_style(self):
         """刷新主题分段按钮的选中样式"""
@@ -1135,16 +1132,25 @@ class SettingsPage(QWidget):
             # 检查目标目录是否存在 .memopaws
             dst_memopaws = os.path.join(new_root, ".memopaws")
             if os.path.exists(dst_memopaws):
-                reply = QMessageBox.question(
-                    self,
-                    "目标目录已存在数据",
-                    f"{dst_memopaws} 已存在\n\n如何处理？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Cancel,
+                lang = self._get_current_lang()
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Icon.Question)
+                box.setWindowTitle("Target directory has data" if lang == "en" else "目标目录已存在数据")
+                box.setText(
+                    f"{dst_memopaws} already exists\n\nHow should it be handled?"
+                    if lang == "en"
+                    else f"{dst_memopaws} 已存在\n\n如何处理？"
                 )
-                if reply == QMessageBox.StandardButton.Cancel:
+                merge_btn = box.addButton("Merge" if lang == "en" else "合并", QMessageBox.ButtonRole.AcceptRole)
+                overwrite_btn = box.addButton("Overwrite" if lang == "en" else "覆盖", QMessageBox.ButtonRole.DestructiveRole)
+                cancel_btn = box.addButton("Cancel" if lang == "en" else "取消", QMessageBox.ButtonRole.RejectRole)
+                box.setDefaultButton(cancel_btn)
+                box.exec()
+
+                clicked = box.clickedButton()
+                if clicked == cancel_btn:
                     return
-                elif reply == QMessageBox.StandardButton.Yes:
+                elif clicked == merge_btn:
                     move_mode = "merge"
                 else:
                     move_mode = "overwrite"
@@ -1159,20 +1165,34 @@ class SettingsPage(QWidget):
 
             # 保存锚点文件
             save_anchor(new_root)
+            init_paths()
 
             self._save_config(config)
             self._ocr_manager.set_config(config)
             self.settings_url_input.setText(config["api_url"])
             self._save_clip_setting(config=config)
 
-            reply = QMessageBox.question(
-                self,
-                "重启生效",
-                "存储目录已修改，需要重启生效。\n\n是否立即重启？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
+            if os.path.abspath(current_dir) != os.path.abspath(get_config_dir()) and os.path.isdir(current_dir):
+                import shutil
+                try:
+                    shutil.rmtree(current_dir)
+                except Exception as e:
+                    logger.warning("删除旧配置目录失败: %s", e)
+
+            lang = self._get_current_lang()
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setWindowTitle("Restart required" if lang == "en" else "重启生效")
+            box.setText(
+                "Storage directory changed. Restart is required.\n\nRestart now?"
+                if lang == "en"
+                else "存储目录已修改，需要重启生效。\n\n是否立即重启？"
             )
-            if reply == QMessageBox.StandardButton.Yes:
+            restart_btn = box.addButton("Restart Now" if lang == "en" else "立即重启", QMessageBox.ButtonRole.AcceptRole)
+            later_btn = box.addButton("Later" if lang == "en" else "稍后重启", QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(restart_btn)
+            box.exec()
+            if box.clickedButton() == restart_btn:
                 import sys
                 import subprocess
                 subprocess.Popen([sys.executable] + sys.argv)

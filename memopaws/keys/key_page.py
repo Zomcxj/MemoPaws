@@ -321,11 +321,15 @@ class KeyPage(QWidget):
 
     def _on_remove_master(self):
         lang = self._get_current_lang()
-        reply = QMessageBox.question(
-            self, _t("确认移除密码", lang), _t("移除密码提示", lang),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(_t("确认移除密码", lang))
+        box.setText(_t("移除密码提示", lang))
+        remove_btn = box.addButton("Remove" if lang == "en" else "移除", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton("Cancel" if lang == "en" else "取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel_btn)
+        box.exec()
+        if box.clickedButton() == remove_btn:
             self._km.remove_master()
             self._update_ui()
 
@@ -373,6 +377,7 @@ class KeyPage(QWidget):
         # 左侧：大模型密钥卡片
         if not llm_entries:
             empty = QLabel(_t("暂无密钥", lang))
+            empty.setProperty("i18n_key", "暂无密钥")
             empty.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent; padding:20px;")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._llm_grid.addWidget(empty, 0, 0, 1, 2)
@@ -386,6 +391,7 @@ class KeyPage(QWidget):
         # 右侧：普通密钥（用 QFrame 行卡片）
         if not secret_entries:
             empty = QLabel(_t("暂无密钥", lang))
+            empty.setProperty("i18n_key", "暂无密钥")
             empty.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent; padding:20px;")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._secret_vbox.addWidget(empty)
@@ -426,6 +432,7 @@ class KeyPage(QWidget):
 
         # 复制按钮
         copy_btn = QPushButton(_t("复制", lang))
+        copy_btn.setProperty("i18n_key", "复制")
         copy_btn.setFixedSize(48, 28)
         copy_btn.setStyleSheet(f"""
             QPushButton {{ background: {t.bg_neutral_button}; color: {t.text_secondary};
@@ -437,6 +444,7 @@ class KeyPage(QWidget):
 
         # 编辑按钮
         edit_btn = QPushButton(_t("编辑", lang))
+        edit_btn.setProperty("i18n_key", "编辑")
         edit_btn.setFixedSize(48, 28)
         edit_btn.setStyleSheet(f"""
             QPushButton {{ background: {t.bg_neutral_button}; color: {t.text_secondary};
@@ -448,6 +456,7 @@ class KeyPage(QWidget):
 
         # 删除按钮
         del_btn = QPushButton(_t("删除", lang))
+        del_btn.setProperty("i18n_key", "删除")
         del_btn.setFixedSize(48, 28)
         del_btn.setStyleSheet(f"""
             QPushButton {{ background: {t.bg_neutral_button}; color: {t.text_secondary};
@@ -506,11 +515,15 @@ class KeyPage(QWidget):
         top_row.addWidget(name_lbl, 1)
 
         del_btn = QPushButton(f"[{_t('删除', lang)}]")
+        del_btn.setProperty("i18n_key", "删除")
+        del_btn.setProperty("i18n_bracket", True)
         del_btn.setStyleSheet(f"QPushButton {{ background:transparent; color:{t.text_muted}; border:none; font-size:12px; padding:0 4px; }} QPushButton:hover {{ color:{t.error}; }}")
         del_btn.clicked.connect(lambda checked=False, eid=eid: self._delete_entry(eid))
         top_row.addWidget(del_btn)
 
         edit_btn = QPushButton(f"[{_t('编辑', lang)}]")
+        edit_btn.setProperty("i18n_key", "编辑")
+        edit_btn.setProperty("i18n_bracket", True)
         edit_btn.setStyleSheet(f"QPushButton {{ background:transparent; color:{t.text_muted}; border:none; font-size:12px; padding:0 4px; }} QPushButton:hover {{ color:{t.text_primary}; }}")
         edit_btn.clicked.connect(lambda checked=False, eid=eid: self._edit_entry(eid))
         top_row.addWidget(edit_btn)
@@ -523,7 +536,9 @@ class KeyPage(QWidget):
             row_m.setSpacing(2)
             row_m.setContentsMargins(0, 0, 0, 0)
             prefix_m = QLabel(f"{_t('模型', lang)}:")
-            prefix_m.setFixedWidth(45)
+            prefix_m.setProperty("i18n_key", "模型")
+            prefix_m.setProperty("i18n_suffix", ":")
+            prefix_m.setFixedWidth(72 if lang == "en" else 45)
             prefix_m.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent;")
             row_m.addWidget(prefix_m)
             val_m = QLabel(model_name)
@@ -541,7 +556,9 @@ class KeyPage(QWidget):
             row_s.setSpacing(2)
             row_s.setContentsMargins(0, 0, 0, 0)
             prefix_s = QLabel(f"{_t('来源', lang)}:")
-            prefix_s.setFixedWidth(45)
+            prefix_s.setProperty("i18n_key", "来源")
+            prefix_s.setProperty("i18n_suffix", ":")
+            prefix_s.setFixedWidth(72 if lang == "en" else 45)
             prefix_s.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent;")
             row_s.addWidget(prefix_s)
             val_s = QLabel(source_short)
@@ -574,9 +591,11 @@ class KeyPage(QWidget):
             multimodal_kw = ["vision", "vl", "multi", "gpt-4o", "claude-3", "glm-4v"]
             if any(kw in model_name.lower() for kw in multimodal_kw):
                 type_tag = QLabel(_t("多模态", lang))
+                type_tag.setProperty("i18n_key", "多模态")
                 type_tag.setStyleSheet(f"font-size:11px; color:#10B981; border:1px solid #10B981; border-radius:4px; padding:2px 6px; background:transparent;")
             else:
                 type_tag = QLabel(_t("文本", lang))
+                type_tag.setProperty("i18n_key", "文本")
                 type_tag.setStyleSheet(f"font-size:11px; color:{t.text_muted}; border:1px solid {t.border_subtle}; border-radius:4px; padding:2px 6px; background:transparent;")
             bottom_row.addWidget(type_tag)
         card_layout.addLayout(bottom_row)
@@ -653,7 +672,9 @@ class KeyPage(QWidget):
         row.setSpacing(2)
         row.setContentsMargins(0, 0, 0, 0)
         prefix = QLabel(f"{_t('延迟', lang)}:")
-        prefix.setFixedWidth(45)
+        prefix.setProperty("i18n_key", "延迟")
+        prefix.setProperty("i18n_suffix", ":")
+        prefix.setFixedWidth(72 if lang == "en" else 45)
         prefix.setStyleSheet(f"font-size:13px; color:{t.text_muted}; border:none; background:transparent;")
         row.addWidget(prefix)
         value_lbl = QLabel("--")
@@ -764,15 +785,22 @@ class KeyPage(QWidget):
         if lat_lbl:
             if status_code == 200:
                 lat_lbl.setText(f"{elapsed_ms}ms")
+                lat_lbl.setToolTip("")
                 lat_lbl.setStyleSheet(f"font-size:13px; color:{self._get_latency_color(elapsed_ms)}; border:none; background:transparent;")
             elif status_code > 0:
-                if status_code == 401:
-                    lat_lbl.setText("Invalid Key")
-                else:
-                    lat_lbl.setText(str(status_code))
+                lang = self._get_current_lang()
+                status_text = {
+                    401: "Invalid Key" if lang == "en" else "密钥无效",
+                    403: "Forbidden" if lang == "en" else "无权限",
+                    429: "Rate Limited" if lang == "en" else "被限流",
+                    503: "Unavailable" if lang == "en" else "服务不可用",
+                }.get(status_code, str(status_code))
+                lat_lbl.setText(status_text)
+                lat_lbl.setToolTip(f"HTTP {status_code}")
                 lat_lbl.setStyleSheet(f"font-size:13px; color:#F44336; border:none; background:transparent;")
             else:
                 lat_lbl.setText("--")
+                lat_lbl.setToolTip("")
                 lat_lbl.setStyleSheet(f"font-size:13px; color:#F44336; border:none; background:transparent;")
 
     def _edit_entry(self, entry_id: int):
@@ -829,9 +857,40 @@ class KeyPage(QWidget):
         self._rebuild_list()
 
     def apply_language(self, lang: str):
-        self._update_ui()
+        has_master = self._km.has_master()
+        unlocked = self._km.is_unlocked()
+        self.btn_unlock.setText(_t("设置主密码", lang) if not has_master else _t("解锁", lang))
+        self.btn_unlock.setVisible((not has_master) or (not unlocked))
+        self.btn_lock.setVisible(has_master and unlocked)
+        self.btn_remove_master.setVisible(has_master and unlocked)
+        self.btn_add.setVisible((not has_master) or unlocked)
+        self.btn_test_all.setVisible((not has_master) or unlocked)
+        self.btn_lock.setText(_t("锁定", lang))
+        self.btn_remove_master.setText(_t("移除主密码", lang))
+        self.btn_add.setText(_t("添加密钥按钮", lang))
+        if self.btn_test_all.isEnabled():
+            self.btn_test_all.setText(_t("测试速度", lang))
+        else:
+            self.btn_test_all.setText(_t("测试中", lang))
         # 更新标题
         if hasattr(self, '_left_title'):
             self._left_title.setText("🤖 " + _t("大模型密钥", lang))
         if hasattr(self, '_right_title'):
             self._right_title.setText("🔑 " + _t("普通密钥", lang))
+        self._update_i18n_texts(lang)
+
+    def _update_i18n_texts(self, lang: str):
+        """更新密钥卡片内部文案，不重建卡片避免频繁切语言卡退。"""
+        for widget in self.findChildren(QWidget):
+            key = widget.property("i18n_key")
+            if not key or not hasattr(widget, "setText"):
+                continue
+            text = _t(str(key), lang)
+            if widget.property("i18n_bracket"):
+                text = f"[{text}]"
+            suffix = widget.property("i18n_suffix")
+            if suffix:
+                text = f"{text}{suffix}"
+                if hasattr(widget, "setFixedWidth"):
+                    widget.setFixedWidth(72 if lang == "en" else 45)
+            widget.setText(text)

@@ -9,36 +9,11 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QFrame, QMenu, QDialog, QLineEdit
 )
 from PySide6.QtGui import QIcon, QFont, QGuiApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 
-from ..core.utils import get_config_dir, ensure_config_dir
+from ..core.utils import get_config_dir, ensure_config_dir, load_svg_icon
 from ..core.themes import DARK, LIGHT, get_status_list_stylesheet, get_clear_history_stylesheet
 from .clipboard_dialog import ClipboardEditDialog
-
-import re
-from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtGui import QPixmap, QPainter
-from PySide6.QtCore import QSize
-
-
-def _load_svg_icon(svg_path: str, size: int = 20, color: str = None) -> QPixmap:
-    from PySide6.QtGui import QGuiApplication
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg_data = f.read()
-    if color:
-        svg_data = svg_data.replace('currentColor', color)
-        svg_data = re.sub(r'fill="#ccc"', f'fill="{color}"', svg_data)
-    renderer = QSvgRenderer(svg_data.encode("utf-8"))
-    screen = QGuiApplication.primaryScreen()
-    dpr = screen.devicePixelRatio() if screen else 1.0
-    physical = int(size * dpr)
-    pixmap = QPixmap(physical, physical)
-    pixmap.setDevicePixelRatio(dpr)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    return pixmap
 
 
 class ClipboardPage(QWidget):
@@ -132,7 +107,7 @@ class ClipboardPage(QWidget):
         clip_header.addWidget(self.btn_cancel_select)
 
         self.btn_delete_selected = QPushButton("删除选中")
-        self.btn_delete_selected.setIcon(QIcon(_load_svg_icon(os.path.join(icons_dir, "clear.svg"), 16, icon_clr)))
+        self.btn_delete_selected.setIcon(QIcon(load_svg_icon(os.path.join(icons_dir, "clear.svg"), 16, icon_clr)))
         self.btn_delete_selected.setIconSize(QSize(16, 16))
         self.btn_delete_selected.setStyleSheet(get_clear_history_stylesheet(t))
         self.btn_delete_selected.clicked.connect(self._delete_selected)
@@ -296,7 +271,7 @@ class ClipboardPage(QWidget):
         self.clipboard_list.clear()
         icons_dir = self._get_icons_dir()
         icon_clr = self._get_icon_clr()
-        lock_icon = _load_svg_icon(os.path.join(icons_dir, "lock.svg"), 14, icon_clr)
+        lock_icon = load_svg_icon(os.path.join(icons_dir, "lock.svg"), 14, icon_clr)
         lang = self._get_current_lang()
         lock_text = "[Locked]" if lang == "en" else "[锁定]"
         for r in self._clipboard_data[:200]:
@@ -501,5 +476,3 @@ class ClipboardPage(QWidget):
             self.btn_select_all.setText("Select All" if lang == "en" else "全选")
         if hasattr(self, 'btn_cancel_select'):
             self.btn_cancel_select.setText("Cancel" if lang == "en" else "取消")
-        # 刷新列表中的锁定标记
-        self._update_clipboard_list()

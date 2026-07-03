@@ -86,6 +86,12 @@ class UnlockDialog(QDialog):
             self.pwd2 = None
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok_btn = btns.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_btn = btns.button(QDialogButtonBox.StandardButton.Cancel)
+        if ok_btn:
+            ok_btn.setText(_t("保存", lang) if is_set else _t("解锁", lang))
+        if cancel_btn:
+            cancel_btn.setText(_t("取消", lang))
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)

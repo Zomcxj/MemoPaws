@@ -120,7 +120,14 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         if hasattr(w, 'show_themed_message'):
             w.show_themed_message(icon, title, text)
         else:
-            QMessageBox(icon, title, text, QMessageBox.StandardButton.Ok, self).exec()
+            lang = getattr(w, '_current_lang', 'zh')
+            msg = QMessageBox(self)
+            msg.setIcon(icon)
+            msg.setWindowTitle(title)
+            msg.setText(text)
+            ok_btn = msg.addButton("OK" if lang == "en" else "确定", QMessageBox.ButtonRole.AcceptRole)
+            msg.setDefaultButton(ok_btn)
+            msg.exec()
 
     def _build_ui(self):
         """构建识别页 UI（原 _create_recognize_page）"""

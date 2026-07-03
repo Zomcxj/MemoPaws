@@ -5,10 +5,10 @@ import ctypes
 import ctypes.wintypes
 from PySide6.QtWidgets import QMenu
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QColor, QPainterPath
-from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtGui import QPainter, QColor, QPainterPath, QIcon
 
 from ..core.themes import DARK, LIGHT
+from ..core.utils import load_svg_icon
 
 # Windows API 常量
 WM_NCCALCSIZE = 0x0083
@@ -26,27 +26,13 @@ GWL_STYLE = -16
 WS_THICKFRAME = 0x00040000
 
 
-def _load_svg_icon(svg_path, size=20, color=None):
-    """加载 SVG 文件并返回 QIcon，支持动态换色和高 DPI"""
-    import re
-    from PySide6.QtGui import QIcon, QPixmap, QGuiApplication
-    from PySide6.QtCore import QSize as _QS
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg_data = f.read()
-    if color:
-        svg_data = svg_data.replace('currentColor', color)
-        svg_data = re.sub(r'fill="#ccc"', f'fill="{color}"', svg_data)
-    renderer = QSvgRenderer(svg_data.encode("utf-8"))
-    screen = QGuiApplication.primaryScreen()
-    dpr = screen.devicePixelRatio() if screen else 1.0
-    physical = int(size * dpr)
-    pixmap = QPixmap(physical, physical)
-    pixmap.setDevicePixelRatio(dpr)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    return QIcon(pixmap)
+def _svg_icon(svg_path, size=20, color=None):
+    """加载 SVG 文件并返回 QIcon（包装 load_svg_icon）"""
+    return QIcon(load_svg_icon(svg_path, size, color))
+
+
+# 兼容既有测试和内部调用，实际实现统一在 utils.load_svg_icon。
+_load_svg_icon = _svg_icon
 
 
 class FramelessWindowMixin:

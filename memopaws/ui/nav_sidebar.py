@@ -1,35 +1,13 @@
 """导航栏侧边栏组件"""
 
 import os
-import re
 
 from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout
 from PySide6.QtCore import Qt, QSize, QVariantAnimation, QEasingCurve
 from PySide6.QtGui import QIcon, QPixmap, QPainter
-from PySide6.QtSvg import QSvgRenderer
 
 from ..core.themes import DARK, LIGHT, _hover
-
-
-def _load_svg_icon(svg_path: str, size: int = 20, color: str = None) -> QPixmap:
-    """加载 SVG 文件并返回指定大小的 QPixmap，支持动态换色和高 DPI"""
-    from PySide6.QtGui import QGuiApplication
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg_data = f.read()
-    if color:
-        svg_data = svg_data.replace('currentColor', color)
-        svg_data = re.sub(r'fill="#ccc"', f'fill="{color}"', svg_data)
-    renderer = QSvgRenderer(svg_data.encode("utf-8"))
-    screen = QGuiApplication.primaryScreen()
-    dpr = screen.devicePixelRatio() if screen else 1.0
-    physical = int(size * dpr)
-    pixmap = QPixmap(physical, physical)
-    pixmap.setDevicePixelRatio(dpr)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    return pixmap
+from ..core.utils import load_svg_icon
 
 
 class NavSidebar(QWidget):
@@ -94,7 +72,7 @@ class NavSidebar(QWidget):
         toggle_row.setSpacing(0)
         self.btn_toggle_nav = QPushButton()
         self.btn_toggle_nav.setFixedHeight(42)
-        self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
+        self.btn_toggle_nav.setIcon(QIcon(load_svg_icon(
             os.path.join(icons_dir, "panel-left.svg"), 18, ic)))
         self.btn_toggle_nav.setIconSize(QSize(18, 18))
         self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t, self._nav_expanded))
@@ -108,7 +86,7 @@ class NavSidebar(QWidget):
         self._nav_buttons = []
         for icon_filename, page_key in self._nav_items:
             icon_path = os.path.join(icons_dir, icon_filename)
-            icon_pixmap = _load_svg_icon(icon_path, 18, ic)
+            icon_pixmap = load_svg_icon(icon_path, 18, ic)
             btn = QPushButton(page_key)
             btn.setIcon(QIcon(icon_pixmap))
             btn.setIconSize(QSize(18, 18))
@@ -220,24 +198,24 @@ class NavSidebar(QWidget):
 
         # 先更新图标和文字
         if self._nav_expanded:
-            self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
+            self.btn_toggle_nav.setIcon(QIcon(load_svg_icon(
                 os.path.join(icons_dir, "panel-left.svg"), 18, ic)))
             self.btn_toggle_nav.setIconSize(QSize(18, 18))
             self.btn_toggle_nav.setToolTip("折叠侧边栏")
             # 立即显示文字
             for btn, (icon_filename, page_key) in zip(self._nav_buttons, self._nav_items):
                 btn.setText(page_key)
-                btn.setIcon(QIcon(_load_svg_icon(
+                btn.setIcon(QIcon(load_svg_icon(
                     os.path.join(icons_dir, icon_filename), 18, ic)))
         else:
-            self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
+            self.btn_toggle_nav.setIcon(QIcon(load_svg_icon(
                 os.path.join(icons_dir, "panel-left.svg"), 18, ic)))
             self.btn_toggle_nav.setIconSize(QSize(18, 18))
             self.btn_toggle_nav.setToolTip("展开侧边栏")
             # 折叠时先清空文字，避免动画过程中文字溢出
             for btn, (icon_filename, _page_key) in zip(self._nav_buttons, self._nav_items):
                 btn.setText("")
-                btn.setIcon(QIcon(_load_svg_icon(
+                btn.setIcon(QIcon(load_svg_icon(
                     os.path.join(icons_dir, icon_filename), 18, ic)))
 
         self.btn_toggle_nav.setStyleSheet(self._get_toggle_button_style(t, self._nav_expanded))
@@ -257,11 +235,11 @@ class NavSidebar(QWidget):
         ic = self._get_icon_clr()
         icons_dir = self._get_icons_dir()
         for btn, (icon_filename, _page_key) in zip(self._nav_buttons, self._nav_items):
-            btn.setIcon(QIcon(_load_svg_icon(
+            btn.setIcon(QIcon(load_svg_icon(
                 os.path.join(icons_dir, icon_filename), 18, ic)))
             btn.setIconSize(QSize(18, 18))
         toggle_icon = "panel-left.svg"
-        self.btn_toggle_nav.setIcon(QIcon(_load_svg_icon(
+        self.btn_toggle_nav.setIcon(QIcon(load_svg_icon(
             os.path.join(icons_dir, toggle_icon), 18, ic)))
         self.btn_toggle_nav.setIconSize(QSize(18, 18))
 

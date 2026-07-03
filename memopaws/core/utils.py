@@ -82,11 +82,6 @@ def save_anchor(data_dir: str):
         json.dump({"data_dir": data_dir}, f, ensure_ascii=False, indent=2)
 
 
-def get_root_path() -> str:
-    """返回用户设置的父目录（不含当前应用数据目录）"""
-    return os.path.dirname(CONFIG_DIR)
-
-
 def get_config_dir() -> str:
     """返回当前配置目录"""
     return CONFIG_DIR

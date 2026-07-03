@@ -25,7 +25,8 @@ from PySide6.QtSvg import QSvgRenderer
 
 from ..core.utils import (
     APP_NAME, BUNDLE_DIR, get_icon_path,
-    set_title_bar_color, get_config_dir, ensure_config_dir
+    set_title_bar_color, get_config_dir, ensure_config_dir,
+    load_svg_icon
 )
 from ..core.themes import (
     DARK, LIGHT, ThemeColors,
@@ -47,27 +48,6 @@ from ..config.settings_page import SettingsPage
 from .nav_sidebar import NavSidebar
 
 logger = logging.getLogger(__name__)
-
-def load_svg_icon(svg_path: str, size: int = 20, color: str = None) -> QPixmap:
-    """加载 SVG 文件并返回指定大小的 QPixmap，支持动态换色和高 DPI"""
-    import re
-    from PySide6.QtGui import QGuiApplication
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg_data = f.read()
-    if color:
-        svg_data = svg_data.replace('currentColor', color)
-        svg_data = re.sub(r'fill="#ccc"', f'fill="{color}"', svg_data)
-    renderer = QSvgRenderer(svg_data.encode("utf-8"))
-    screen = QGuiApplication.primaryScreen()
-    dpr = screen.devicePixelRatio() if screen else 1.0
-    physical = int(size * dpr)
-    pixmap = QPixmap(physical, physical)
-    pixmap.setDevicePixelRatio(dpr)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    return pixmap
 
 
 def _icon_color(is_dark: bool) -> str:
@@ -492,6 +472,8 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     
     def _set_language(self, lang: str):
         """设置界面语言：en=English, zh=中文"""
+        if lang == self._current_lang:
+            return
         self._current_lang = lang
         config = self.load_config()
         config["language"] = lang
@@ -502,7 +484,12 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         """应用语言设置，通过信号分发给各模块"""
         self.language_changed.emit(lang)
     def show_themed_message(self, icon, title, text):
-        msg = QMessageBox(icon, title, text, QMessageBox.StandardButton.Ok, self)
+        msg = QMessageBox(self)
+        msg.setIcon(icon)
+        msg.setWindowTitle(title)
+        msg.setText(text)
+        ok_btn = msg.addButton("OK" if self._current_lang == "en" else "确定", QMessageBox.ButtonRole.AcceptRole)
+        msg.setDefaultButton(ok_btn)
         set_title_bar_color(int(msg.winId()), self._current_theme_dark)
         msg.exec()
     
