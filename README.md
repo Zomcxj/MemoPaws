@@ -1,6 +1,6 @@
 # MemoPaws
 
-轻量级截图 OCR + AI 翻译工具，支持本地 RapidOCR 和多模态大模型识别。
+轻量级桌面 OCR、翻译、剪切板、备忘录与密钥管理工具，支持本地 RapidOCR 和多模态大模型识别。
 
 ## 功能
 
@@ -10,24 +10,33 @@
 - 🌐 **AI 翻译**：识别后一键翻译
 - 🎨 **画布编辑**：支持标注、裁剪、擦除
 - 🖼️ **导出**：支持 PNG/JPG/文本导出
+- 📋 **剪切板历史**：记录、搜索、锁定和批量删除剪切板内容
+- 📝 **Markdown 备忘录**：支持编辑、同步预览、纯预览、标签与导入导出
+- 🔑 **密钥管理**：管理大模型密钥和普通密钥，支持主密码锁定和测速
+- 🌗 **主题与语言**：支持亮/暗主题与中英文界面切换
 
 ## 快速开始
 
 ```bash
-pip install -r requirements.txt
-python main.py
+D:/software/miniforge3/envs/llm/python.exe -m pip install -r requirements.txt
+D:/software/miniforge3/envs/llm/python.exe main.py
 ```
 
 ## 构建与打包
 
-提供两种打包方式：
+使用统一脚本打包：
 
-| 脚本 | 模式 | 输出 |
+```bash
+bash build.sh portable
+```
+
+| 命令 | 模式 | 输出 |
 |------|------|------|
-| `build_dev.bat` / `build_dev.sh` | onedir | `dist/dev/MemoPaws` |
-| `build_portable.bat` / `build_portable.sh` | onefile | `dist_portable/MemoPaws.exe` |
+| `bash build.sh` | onedir | `dist/MemoPaws/` |
+| `bash build.sh fast` | onedir（复用缓存） | `dist/MemoPaws/` |
+| `bash build.sh portable` | onefile 单文件 | `dist/MemoPaws_Portable.exe` |
 
-详见 [README.md](README.md)（构建说明）。
+Windows 下建议在 Git Bash/MSYS2 中执行，脚本会自动包含 `assets/`、`memopaws/resources/` 以及 conda 环境的 OpenSSL DLL（供 HTTPS/API/OCR 使用）。
 
 ## 快捷键
 
@@ -47,26 +56,24 @@ python main.py
 
 - **API Key**：多模态大模型 API Key（智谱 AI / OpenAI 等）
 - **API URL**：API Base URL
-- **模型名**：如 `glm-4v-flash`、`deepseek-vl2`
+- **模型名**：如 `glm-4v-flash`
 - **关闭行为**：直接退出 / 最小化到托盘
+- **存储目录**：通过 `C:\Users\<用户>\.memopaws.json` 锚点定位实际 `.memopaws` 数据目录
+- **快捷键**：可在设置页修改截图、画布自适应、新建备忘录等快捷键
 
-## 常见问题
+## 项目结构
 
-### Q: 打包后本地 OCR 报错 "ProtocolResolver.SYSTEM cannot be loaded"
-
-**原因**：`default_models.yaml` 未打包进去。
-
-**解决**：确保构建脚本中包含 `--add-data ...default_models.yaml...` 参数。
-
-### Q: 打包后本地 OCR 报错 "No such file or directory: ...default_models.yaml"
-
-**原因**：RapidOCR 初始化时查找 `default_models.yaml`，但打包后路径不对。
-
-**解决**：已在构建脚本和 spec 文件中正确配置该文件的打包路径。
-
-### Q: 如何替换 OCR 模型？
-
-替换 `rapidocr/models/` 目录下的模型文件即可（开发版在 `_internal/rapidocr/models/`，便携版需重新打包）。
+```text
+memopaws/
+├── canvas/      # 画布、截图覆盖层、边框动效
+├── clipboard/   # 剪切板历史
+├── config/      # 设置页、快捷键、配置迁移
+├── core/        # 路径、主题、通用工具
+├── keys/        # 密钥管理
+├── memo/        # Markdown 备忘录、渲染、存储、UI
+├── ocr/         # OCR 与翻译
+└── ui/          # 主窗口、导航、托盘、识别页
+```
 
 ## 技术栈
 

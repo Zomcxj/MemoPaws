@@ -62,10 +62,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log_info()  { echo -e "${BLUE}[INFO]${NC}  $(date '+%H:%M:%S') $*"; }
-log_ok()    { echo -e "${GREEN}[OK]${NC}    $(date '+%H:%M:%S') $*"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $(date '+%H:%M:%S') $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $*"; }
+log_info()  { printf "%b[INFO]%b  %s %s\n" "$BLUE" "$NC" "$(date '+%H:%M:%S')" "$*"; }
+log_ok()    { printf "%b[OK]%b    %s %s\n" "$GREEN" "$NC" "$(date '+%H:%M:%S')" "$*"; }
+log_warn()  { printf "%b[WARN]%b  %s %s\n" "$YELLOW" "$NC" "$(date '+%H:%M:%S')" "$*"; }
+log_error() { printf "%b[ERROR]%b %s %s\n" "$RED" "$NC" "$(date '+%H:%M:%S')" "$*"; }
 
 # ==================== 检测操作系统 ====================
 log_info "检测操作系统..."
@@ -83,15 +83,26 @@ log_ok "当前平台: $PLATFORM (uname: $OS)"
 
 # ==================== 平台相关配置 ====================
 if [ "$PLATFORM" = "windows" ]; then
-    PYINSTALLER_CMD="python -m PyInstaller"
+    LLM_ENV_ROOT="/d/software/miniforge3/envs/llm"
+    LLM_PYTHON="$LLM_ENV_ROOT/python.exe"
+    if [ -x "$LLM_PYTHON" ]; then
+        PYTHON_BIN="$LLM_PYTHON"
+    else
+        PYTHON_BIN="python"
+    fi
+    PYINSTALLER_CMD="\"$PYTHON_BIN\" -m PyInstaller"
     ADD_DATA_SEP=";"
     EXTRA_ARGS=""
+    OPENSSL_SSL_DLL="$(cygpath -w "$LLM_ENV_ROOT/Library/bin/libssl-3-x64.dll" 2>/dev/null || echo "$LLM_ENV_ROOT/Library/bin/libssl-3-x64.dll")"
+    OPENSSL_CRYPTO_DLL="$(cygpath -w "$LLM_ENV_ROOT/Library/bin/libcrypto-3-x64.dll" 2>/dev/null || echo "$LLM_ENV_ROOT/Library/bin/libcrypto-3-x64.dll")"
+    OPENSSL_BINARY_ARGS="--add-binary \"${OPENSSL_SSL_DLL}${ADD_DATA_SEP}.\" --add-binary \"${OPENSSL_CRYPTO_DLL}${ADD_DATA_SEP}.\""
     PROJECT_ROOT="$(cygpath -w "$PROJECT_ROOT" 2>/dev/null || echo "$PROJECT_ROOT")"
     OUTPUT_FILE="${PROJECT_ROOT}/dist/MemoPaws_Portable.exe"
 else
     PYINSTALLER_CMD="pyinstaller"
     ADD_DATA_SEP=":"
     EXTRA_ARGS=""
+    OPENSSL_BINARY_ARGS=""
     OUTPUT_FILE="${PROJECT_ROOT}/dist/MemoPaws"
 fi
 
@@ -103,11 +114,12 @@ log_info "执行前置检查..."
 
 # 检查 PyInstaller
 if [ "$PLATFORM" = "windows" ]; then
-    if ! command -v python &> /dev/null; then
+    if ! command -v "$PYTHON_BIN" &> /dev/null; then
         log_error "未找到 python，请确保 Python 已安装并加入 PATH"
         exit 1
     fi
-    if ! python -m PyInstaller --version &> /dev/null; then
+    log_info "Python 解释器: $($PYTHON_BIN -c 'import sys; print(sys.executable)')"
+    if ! "$PYTHON_BIN" -m PyInstaller --version &> /dev/null; then
         log_error "未找到 PyInstaller，请执行: pip install pyinstaller"
         exit 1
     fi
@@ -155,6 +167,16 @@ else
     log_warn "字体目录不存在: $FONTS_DIR"
 fi
 
+if [ "$PLATFORM" = "windows" ]; then
+    for dll in "$OPENSSL_SSL_DLL" "$OPENSSL_CRYPTO_DLL"; do
+        if [ ! -f "$dll" ]; then
+            log_error "缺少 OpenSSL DLL: $dll"
+            exit 1
+        fi
+    done
+    log_ok "OpenSSL DLL 已找到"
+fi
+
 # ==================== 打包模式选择 ====================
 if [ "$PORTABLE" = true ]; then
     log_info "模式: 便携版单文件"
@@ -180,17 +202,31 @@ PYINSTALLER_CMD_LINE="$PYINSTALLER_CMD \
     --icon=\"${ICON_FILE}\" \
     --add-data \"${ASSETS_DIR}${ADD_DATA_SEP}assets\" \
     --add-data \"${RESOURCES_DIR}${ADD_DATA_SEP}memopaws/resources\" \
+    $OPENSSL_BINARY_ARGS \
     --hidden-import=PySide6.QtSvg \
     --hidden-import=PySide6.QtSvgWidgets \
     --hidden-import=rapidocr \
     --hidden-import=onnxruntime \
     --hidden-import=httpx \
+    --hidden-import=pynput.keyboard._win32 \
+    --hidden-import=pynput.mouse._win32 \
+    --hidden-import=pynput._util.win32 \
+    --hidden-import=pynput._util.win32_vks \
     --hidden-import=numpy \
     --hidden-import=cv2 \
     --hidden-import=PIL \
     --exclude-module tkinter \
+    --exclude-module PyQt5 \
+    --exclude-module PyQt6 \
     --exclude-module matplotlib \
     --exclude-module pandas \
+    --exclude-module torch \
+    --exclude-module torchvision \
+    --exclude-module torchaudio \
+    --exclude-module tensorflow \
+    --exclude-module keras \
+    --exclude-module sklearn \
+    --exclude-module scipy \
     --exclude-module pytest \
     --noconfirm \
     $EXTRA_ARGS \

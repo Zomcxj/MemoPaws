@@ -23,6 +23,55 @@ from ..core.utils import normalize_api_url as _normalize_url, test_api_connectio
 logger = logging.getLogger(__name__)
 
 
+def _run_llm_entry_tests(entries, get_plain_value, emit):
+    """后台测试 LLM 密钥；无论网络层哪里失败，都必须通知 UI 收尾。"""
+    def normalize_url(url: str) -> str:
+        return _normalize_url(url)
+
+    client = None
+    try:
+        import httpx
+
+        client = httpx.Client(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+        for entry in entries:
+            entry_id = entry["id"]
+            api_key = get_plain_value(entry_id)
+            api_url = entry.get("url", "")
+            model_id = entry.get("note", "") or "glm-4-flash"
+
+            if not api_key:
+                emit(str(entry_id), 0, 0)
+                continue
+
+            t0 = time.perf_counter()
+            try:
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                payload = {"model": model_id, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+                resp = client.post(normalize_url(api_url), json=payload, headers=headers)
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                status_code = resp.status_code
+            except Exception as exc:
+                logger.warning("密钥测试失败: entry_id=%s, error=%s", entry_id, exc)
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                status_code = 0
+
+            emit(str(entry_id), status_code, elapsed_ms)
+    except Exception as exc:
+        logger.warning("密钥测试线程初始化失败: %s", exc)
+        for entry in entries:
+            emit(str(entry["id"]), 0, 0)
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception as exc:
+                logger.warning("密钥测试 HTTP 客户端关闭失败: %s", exc)
+        emit("__done__", 0, 0)
+
+
 class DraggableCard(QFrame):
     """可拖拽的密钥卡片"""
     def __init__(self, entry_id: int, parent=None):
@@ -724,49 +773,8 @@ class KeyPage(QWidget):
         for entry in llm_entries:
             self._start_matrix_decode(entry["id"])
 
-        def _normalize_url(url: str) -> str:
-            url = url.rstrip("/")
-            if not url:
-                return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-            if url.endswith("/chat/completions"):
-                return url
-            return url + "/chat/completions"
-
         def do_test_all():
-            import time
-            import httpx
-
-            client = httpx.Client(
-                timeout=httpx.Timeout(10.0, connect=5.0),
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-            )
-            try:
-                for entry in llm_entries:
-                    entry_id = entry["id"]
-                    api_key = self._km.get_plain_value(entry_id)
-                    api_url = entry.get("url", "")
-                    model_id = entry.get("note", "") or "glm-4-flash"
-
-                    if not api_key:
-                        self._sig_test_one_done.emit(str(entry_id), 0, 0)
-                        continue
-
-                    t0 = time.perf_counter()
-                    try:
-                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                        payload = {"model": model_id, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
-                        resp = client.post(_normalize_url(api_url), json=payload, headers=headers)
-                        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                        status_code = resp.status_code
-                    except Exception:
-                        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                        status_code = 0
-
-                    self._sig_test_one_done.emit(str(entry_id), status_code, elapsed_ms)
-            finally:
-                client.close()
-                # 全部完成信号：entry_id="__done__"
-                self._sig_test_one_done.emit("__done__", 0, 0)
+            _run_llm_entry_tests(llm_entries, self._km.get_plain_value, self._sig_test_one_done.emit)
 
         threading.Thread(target=do_test_all, daemon=True).start()
 

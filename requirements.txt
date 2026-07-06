@@ -20,8 +20,8 @@ onnxruntime>=1.15.0
 markdown>=3.0.0
 pygments>=2.17.0
 
-# ── 文本替换器（可选，依赖 pynput）──
-# pynput>=1.7.0
+# ── 文本替换器 ──
+pynput>=1.7.0
 
 # ── 测试（仅开发时需要）──
 # pytest>=7.0.0
