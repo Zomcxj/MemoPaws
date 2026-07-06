@@ -4,10 +4,12 @@ import pytest
 import tempfile
 import os
 import shutil
+import time
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton, QWidget
 
 from memopaws.config.settings_page import SettingsPage
+from memopaws.config import api_config
 from memopaws.core.themes import DARK, LIGHT
 
 
@@ -81,3 +83,77 @@ class TestSettingsPage:
         )
         full_url = "https://api.test.com/v1/chat/completions"
         assert page._normalize_api_url(full_url) == full_url
+
+    def test_api_test_starts_background_thread_without_blocking(self, qapp, monkeypatch):
+        class SignalStub:
+            def connect(self, callback):
+                self.callback = callback
+
+        class FakeThread:
+            instances = []
+
+            def __init__(self, api_key, api_url, api_model):
+                self.api_key = api_key
+                self.api_url = api_url
+                self.api_model = api_model
+                self.result_ready = SignalStub()
+                self.finished = SignalStub()
+                self.started = False
+                FakeThread.instances.append(self)
+
+            def isRunning(self):
+                return False
+
+            def start(self):
+                self.started = True
+
+            def deleteLater(self):
+                pass
+
+        monkeypatch.setattr(api_config, "ApiTestThread", FakeThread)
+
+        page = QWidget()
+        page._is_dark = lambda: True
+        page.settings_key_input = QLineEdit()
+        page.settings_key_input.setText("key")
+        page.settings_url_input = QLineEdit()
+        page.settings_url_input.setText("https://api.test.com/v1")
+        page.settings_model_input = QLineEdit()
+        page.settings_model_input.setText("model")
+        page.settings_test_label = QLabel()
+        page.settings_test_btn = QPushButton("测试连接")
+
+        t0 = time.perf_counter()
+        api_config.test_api_connection(page)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+
+        assert elapsed_ms < 100
+        assert page.settings_test_label.text() == "⏳ 测试中..."
+        assert page.settings_test_btn.text() == "取消"
+        assert FakeThread.instances[0].started is True
+        assert page._api_test_thread is FakeThread.instances[0]
+
+    def test_api_test_second_click_requests_cancel(self, qapp):
+        class RunningThread:
+            def __init__(self):
+                self.cancel_requested = False
+
+            def isRunning(self):
+                return True
+
+            def requestInterruption(self):
+                self.cancel_requested = True
+
+        running = RunningThread()
+        page = QWidget()
+        page._is_dark = lambda: True
+        page._api_test_thread = running
+        page.settings_key_input = QLineEdit()
+        page.settings_url_input = QLineEdit()
+        page.settings_model_input = QLineEdit()
+        page.settings_test_label = QLabel()
+
+        api_config.test_api_connection(page)
+
+        assert running.cancel_requested is True
+        assert page.settings_test_label.text() == "⏹ 正在取消..."

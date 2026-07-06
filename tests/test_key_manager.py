@@ -1,5 +1,6 @@
 import json
 import os
+import base64
 import shutil
 import tempfile
 
@@ -25,8 +26,17 @@ class TestCrypto:
         plain = "sk-abc123xyz"
         encrypted = _encrypt(plain, key)
         assert encrypted != plain
+        assert encrypted.startswith("v2:")
         decrypted = _decrypt(encrypted, key)
         assert decrypted == plain
+
+    def test_decrypt_legacy_xor_ciphertext(self):
+        key = _derive_key("legacy_master")
+        plain = "legacy-secret"
+        encrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(plain.encode("utf-8")))
+        legacy_ciphertext = base64.b64encode(encrypted).decode("ascii")
+
+        assert _decrypt(legacy_ciphertext, key) == plain
 
     def test_encrypt_empty_string(self):
         key = _derive_key("test")
@@ -176,6 +186,8 @@ class TestKeyManager:
         from memopaws.keys.key_manager import _get_keys_file
         with open(_get_keys_file(), "r", encoding="utf-8") as f:
             data = json.load(f)
+        assert data["version"] == 2
         for e in data["entries"]:
             assert "value" not in e
             assert "enc_value" in e
+            assert e["enc_value"].startswith("v2:")

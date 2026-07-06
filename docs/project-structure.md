@@ -31,6 +31,7 @@
 | 文件 | 说明 |
 |------|------|
 | `main_window.py` | 主窗口，负责页面装配、导航、主题、语言和 OCR 配置传递。 |
+| `main_window_ui.py` | 主窗口标题栏、导航栏和页面栈装配辅助函数。 |
 | `recognize_page.py` | 识别页 UI，承载画布、OCR、翻译和导出入口。 |
 | `frameless_window.py` | 无边框窗口基础能力。 |
 | `nav_sidebar.py` | 左侧导航栏。 |
@@ -82,6 +83,7 @@
 | `memo_page.py` | 备忘录页面主逻辑。 |
 | `memo_ui.py` | 备忘录页面 UI 构建。 |
 | `memo_storage.py` | 备忘录文件、标签、导入和导出。 |
+| `memo_search.py` | 备忘录标题、正文、标签、拼音和模糊搜索匹配。 |
 | `markdown_converter.py` | Markdown 到 HTML 的渲染转换。 |
 | `memo_widgets.py` | 备忘录自定义控件。 |
 

@@ -1,51 +1,29 @@
 """主窗口模块 - 剪切板/备忘录版"""
 
 import os
-import sys
 import json
-import time
-import pickle
 import logging
-from datetime import datetime
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox,
-    QLabel, QPushButton, QTextEdit, QVBoxLayout, QHBoxLayout,
-    QSplitter, QFrame, QColorDialog, QSlider,
-    QListWidget, QListWidgetItem, QScrollArea, QProgressBar,
-    QSizePolicy, QDialog, QSystemTrayIcon, QMenu, QStackedWidget,
-    QLineEdit, QSpinBox, QAbstractItemView, QCheckBox, QComboBox
+    QMainWindow, QWidget, QMessageBox, QVBoxLayout, QHBoxLayout, QSizePolicy,
+    QSystemTrayIcon,
 )
-from PySide6.QtCore import Qt, QTimer, QThread, QSize, QRect, Signal
-from PySide6.QtGui import (
-    QIcon, QGuiApplication, QShortcut, QKeySequence, QAction,
-    QPixmap, QPainter, QColor, QFontDatabase
-)
-from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QIcon, QGuiApplication, QFontDatabase
 
 from ..core.utils import (
-    APP_NAME, BUNDLE_DIR, get_icon_path,
+    APP_NAME, get_icon_path,
     set_title_bar_color, get_config_dir, ensure_config_dir,
     load_svg_icon
 )
 from ..core.themes import (
-    DARK, LIGHT, ThemeColors,
-    get_main_stylesheet, get_scroll_area_stylesheet,
-    get_progress_bar_stylesheet, get_text_edit_stylesheet,
-    get_status_list_stylesheet, get_clear_history_stylesheet,
-    get_theme_button_stylesheet, _hover, _inner_shadow
+    DARK, LIGHT, get_main_stylesheet, get_status_list_stylesheet, _hover,
 )
 from ..ocr.ocr import OCRManager
 from ..ocr.translator import SimpleTranslator
-from ..config.config_dialog import ConfigDialog
-from ..clipboard.clipboard_dialog import ClipboardEditDialog
-from ..clipboard.clipboard_page import ClipboardPage
-from .recognize_page import RecognizePage
 from .frameless_window import FramelessWindowMixin
 from .tray import TrayMixin
-from ..memo.memo_page import MemoPage
-from ..config.settings_page import SettingsPage
-from .nav_sidebar import NavSidebar
+from .main_window_ui import build_pages, build_title_bar
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +33,6 @@ def _icon_color(is_dark: bool) -> str:
     t = DARK if is_dark else LIGHT
     return t.text_secondary
  
-# 数据文件路径（统一从 memopaws.utils 导入，存放在 ~/.memopaws/ 目录下）
-
-
-
 class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     """MemoPaws 主窗口 - 侧边栏导航版"""
 
@@ -157,195 +131,14 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
         
-        # ── 标题栏 ──
-        title_bar = QFrame()
-        title_bar.setFixedHeight(36)
-        title_bar.setObjectName("titleBar")
-        title_bar_layout = QHBoxLayout(title_bar)
-        title_bar_layout.setContentsMargins(8, 0, 8, 0)
-        title_bar_layout.setSpacing(0)
-        
-        # 左侧：图标 + APP_NAME
-        from PySide6.QtGui import QPixmap
-        from ..core.utils import get_icon_pixmap
-        title_icon_label = QLabel()
-        title_icon_label.setPixmap(get_icon_pixmap(20))
-        title_label = QLabel(APP_NAME)
-        title_label.setStyleSheet(f"font-size:16px; font-weight:bold; color:{_t.accent}; border:none; background:transparent;")
-        title_bar_layout.addWidget(title_icon_label)
-        title_bar_layout.addSpacing(6)
-        title_bar_layout.addWidget(title_label)
-        title_bar_layout.addStretch()
-        
-        # 右侧：最小化、最大化、关闭按钮
-        _icons_dir = os.path.join(BUNDLE_DIR, "assets", "icons")
-        _w_icon_clr = _t.text_secondary
-        self.minimize_btn = QPushButton()
-        self.minimize_btn.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "minimize.svg"), 16, _w_icon_clr)))
-        self.minimize_btn.setIconSize(QSize(16, 16))
-        self.minimize_btn.setFixedSize(32, 28)
-        self.minimize_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; border: none; }}
-            QPushButton:hover {{ background: {_hover(_t)}; }}
-        """)
-        self.minimize_btn.clicked.connect(self.showMinimized)
-        title_bar_layout.addWidget(self.minimize_btn)
-        
-        self.maximize_btn = QPushButton()
-        self.maximize_btn.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "maximize.svg"), 16, _w_icon_clr)))
-        self.maximize_btn.setIconSize(QSize(16, 16))
-        self.maximize_btn.setFixedSize(32, 28)
-        self.maximize_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; border: none; }}
-            QPushButton:hover {{ background: {_hover(_t)}; }}
-        """)
-        self.maximize_btn.clicked.connect(self._toggle_maximize)
-        title_bar_layout.addWidget(self.maximize_btn)
-        
-        self.close_btn = QPushButton()
-        self.close_btn.setIcon(QIcon(load_svg_icon(os.path.join(_icons_dir, "close.svg"), 16, _w_icon_clr)))
-        self.close_btn.setIconSize(QSize(16, 16))
-        self.close_btn.setFixedSize(32, 28)
-        self.close_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; border: none; }}
-            QPushButton:hover {{ background: {_t.error}; }}
-        """)
-        self.close_btn.clicked.connect(self.close)
-        title_bar_layout.addWidget(self.close_btn)
-        
-        title_bar.mousePressEvent = lambda e: setattr(self, '_drag_pos', e.globalPosition().toPoint() - self.frameGeometry().topLeft()) if e.button() == Qt.MouseButton.LeftButton else None
-        title_bar.mouseMoveEvent = lambda e: self.move(e.globalPosition().toPoint() - self._drag_pos) if e.buttons() & Qt.MouseButton.LeftButton and getattr(self, '_drag_pos', None) else None
-        title_bar.mouseReleaseEvent = lambda e: setattr(self, '_drag_pos', None)
-        title_bar.mouseDoubleClickEvent = lambda e: self._toggle_maximize()
-        
-        root_layout.addWidget(title_bar)
+        root_layout.addWidget(build_title_bar(self, _t))
         
         # ── 内容行（导航栏 + 内容区）──
         content_row = QHBoxLayout()
         content_row.setContentsMargins(0, 0, 0, 0)
         content_row.setSpacing(0)
         
-        # ── 左侧导航栏 ──
-        self._icons_dir = os.path.join(BUNDLE_DIR, "assets", "icons")
-        self.nav_sidebar = NavSidebar(
-            self,
-            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
-            is_dark=lambda: self._current_theme_dark,
-            get_icons_dir=lambda: self._icons_dir,
-            get_icon_clr=lambda: self._icon_clr,
-            on_switch_page=lambda pk: self.content_stack.setCurrentIndex(
-                {"设置": 0, "贴图识别": 1, "剪切板": 2, "备忘录": 3, "密钥": 4}.get(pk, 1)
-            ),
-            nav_items=[
-                ("settings.svg", "设置"),
-                ("camera.svg", "贴图识别"),
-                ("clipboard.svg", "剪切板"),
-                ("memo.svg", "备忘录"),
-                ("key.svg", "密钥"),
-            ],
-        )
-        
-        # ── 右侧内容区 ──
-        self.content_stack = QStackedWidget()
-        
-        # 快捷键管理器 + 文本替换管理器（在页面创建前初始化）
-        from ..config.shortcut_manager import ShortcutManager
-        from ..config.text_replacer import TextReplacerManager
-        self.shortcut_mgr = ShortcutManager(
-            self._get_config_path, self.save_config, self)
-        # 注册快捷键动作（在 SettingsPage 创建前，这样设置页能读到列表）
-        self.shortcut_mgr.register("capture", "Alt+X",
-                                   lambda: self.recognize_page.start_capture())
-        self.shortcut_mgr.register("canvas_fit", "Ctrl+F",
-                                   lambda: self.recognize_page.canvas.zoom_fit())
-        self.shortcut_mgr.register("new_memo", "Ctrl+N",
-                                   lambda: self.memo_page.add_memo())
-        self.text_replacer = TextReplacerManager(
-            self._get_config_path, self.save_config)
-        self.text_replacer.load()
-        
-        self.settings_page = SettingsPage(
-            self,
-            get_config_path=lambda: self._get_config_path(),
-            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
-            is_dark=lambda: self._current_theme_dark,
-            load_config=lambda: self.load_config(),
-            save_config=lambda cfg: self.save_config(cfg),
-            ocr_manager=self.ocr_manager,
-            on_toggle_theme=self.toggle_theme,
-            on_set_theme=self._set_theme,
-            on_set_language=self._set_language,
-            get_current_lang=lambda: self._current_lang,
-            get_current_theme_dark=lambda: self._current_theme_dark,
-            on_save_clipboard=lambda: (
-                self.clipboard_page._trim_clipboard(),
-                self.clipboard_page._update_clipboard_list(),
-            ),
-            show_message=lambda icon, title, text: self.show_themed_message(icon, title, text),
-            shortcut_mgr=self.shortcut_mgr,
-            text_replacer=self.text_replacer,
-        )
-        self.recognize_page = RecognizePage(
-            self,
-            get_config_path=self._get_config_path,
-            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
-            is_dark=lambda: self._current_theme_dark,
-            get_icons_dir=lambda: self._icons_dir,
-            get_icon_clr=lambda: self._icon_clr,
-            ocr_manager=self.ocr_manager,
-            translator=self.translator,
-            on_append_status=self._append_status,
-            on_switch_to_page=self._switch_page,
-        )
-        self.clipboard_page = self._create_clipboard_page()
-        self._clipboard.dataChanged.connect(self.clipboard_page._on_clipboard_changed)
-        self.memo_page = MemoPage(
-            self,
-            get_config_path=lambda: self._get_config_path(),
-            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
-            get_icons_dir=lambda: self._icons_dir,
-            get_icon_clr=lambda: self._icon_clr,
-            on_append_status=lambda msg: self._append_status(msg),
-            is_dark=lambda: self._current_theme_dark,
-            show_message=lambda icon, title, text: self.show_themed_message(icon, title, text),
-            get_current_lang=lambda: self._current_lang,
-        )
-        self.memo_data = self.memo_page.memo_data
-        self.memo_list = self.memo_page.memo_list
-        self.memo_title_input = self.memo_page.memo_title_input
-        self.memo_content_view = self.memo_page.memo_content_view
-        self.memo_stat_label = self.memo_page.memo_stat_label
-        self.memo_time_label = self.memo_page.memo_time_label
-        self.memo_btn_save = self.memo_page.memo_btn_save
-        self.memo_preview_toggle = self.memo_page.memo_preview_toggle
-        self._memo_left_frame = self.memo_page._memo_left_frame
-        self._memo_right_frame = self.memo_page._memo_right_frame
-        self._memo_btn_add = self.memo_page._memo_btn_add
-        self._memo_btn_import = self.memo_page._memo_btn_import
-        self._memo_btn_export = self.memo_page._memo_btn_export
-        self._memo_btn_delete = self.memo_page._memo_btn_delete
-        self._memo_editing = True
-        self._memo_saving = False
-        self._memo_current_idx = -1
-        self._memo_original = None
-        self._memo_md_source = ""
-
-        from ..keys.key_page import KeyPage
-        self.key_page = KeyPage(
-            self,
-            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
-            is_dark=lambda: self._current_theme_dark,
-            show_message=lambda icon, title, text: self.show_themed_message(icon, title, text),
-            get_icons_dir=lambda: self._icons_dir,
-            get_icon_clr=lambda: self._icon_clr,
-            get_current_lang=lambda: self._current_lang,
-        )
-
-        self.content_stack.addWidget(self.settings_page)
-        self.content_stack.addWidget(self.recognize_page)
-        self.content_stack.addWidget(self.clipboard_page)
-        self.content_stack.addWidget(self.memo_page)
-        self.content_stack.addWidget(self.key_page)
+        self.nav_sidebar, self.content_stack = build_pages(self)
         content_row.addWidget(self.nav_sidebar)
         content_row.addWidget(self.content_stack, 1)
         
@@ -367,9 +160,6 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     def _switch_page(self, page_name: str):
         self.nav_sidebar.switch_page(page_name)
     
-    def _rebuild_logo_row(self, centered: bool):
-        pass
-    
     # ── 窗口拖拽 ──
     def eventFilter(self, obj, event):
         from PySide6.QtCore import QEvent
@@ -385,71 +175,6 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
                 self._drag_pos = None
                 return False
         return super().eventFilter(obj, event)
-    
-    # ══════════════════════════════════════════════
-    #  剪切板页面
-    # ══════════════════════════════════════════════
-    def _create_clipboard_page(self):
-        page = ClipboardPage(
-            self,
-            get_config_path=self._get_config_path,
-            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
-            get_icons_dir=lambda: self._icons_dir,
-            get_icon_clr=lambda: self._icon_clr,
-            on_append_status=self._append_status,
-            get_clip_data=lambda: self.clipboard_data,
-            set_clip_data=lambda v: setattr(self, 'clipboard_data', v),
-            get_current_lang=lambda: self._current_lang,
-        )
-        self.clipboard_data = page.load_clipboard()
-        self.clipboard_list = page.clipboard_list
-        page._update_clipboard_list()
-        return page
-    
-    # ══════════════════════════════════════════════
-    #  备忘录页面（已提取到 memo_page.py）
-    # ══════════════════════════════════════════════
-    def add_memo(self):
-        self.memo_page.add_memo()
-
-    def delete_memo(self):
-        self.memo_page.delete_memo()
-
-    def _update_memo_list(self):
-        self.memo_page._update_memo_list()
-
-    def _select_memo(self, idx):
-        self.memo_page._select_memo(idx)
-
-    def _on_memo_selection_changed(self, idx):
-        self.memo_page._on_memo_selection_changed(idx)
-
-    def _show_memo_detail(self, idx):
-        self.memo_page._show_memo_detail(idx)
-
-    def _save_memo_edit(self, silent=False):
-        self.memo_page._save_memo_edit(silent)
-
-    def _toggle_memo_preview(self, checked):
-        self.memo_page._switch_memo_mode(checked)
-
-    def _on_memo_text_changed(self):
-        self.memo_page._on_memo_text_changed()
-
-    def _import_memo(self):
-        self.memo_page._import_memo()
-
-    def _export_memo(self):
-        self.memo_page._export_memo()
-
-    def load_memo(self):
-        return self.memo_page.load_memo()
-
-    def save_memo(self):
-        self.memo_page.save_memo()
-
-    def _clear_memo_detail(self):
-        self.memo_page._clear_memo_detail()
     
     # ══════════════════════════════════════════════
     #  通用功能
@@ -548,16 +273,6 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         """在贴图识别页面的操作历史里追加一条简短的提示"""
         if hasattr(self, 'recognize_page'):
             self.recognize_page._append_status(msg)
-    
-    def open_config(self):
-        config = self.load_config()
-        dlg = ConfigDialog(self, config, is_dark=self._current_theme_dark)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            new_config = dlg.get_config()
-            self.save_config(new_config)
-            self.ocr_manager.set_config(new_config)
-            self.settings_page._load_api_to_inputs()
-            self.show_themed_message(QMessageBox.Icon.Information, "提示", "配置已保存")
     
     def _get_config_path(self):
         ensure_config_dir()

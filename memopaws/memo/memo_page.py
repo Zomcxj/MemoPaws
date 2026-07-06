@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QSize, QTimer
 
 from ..core.utils import ensure_config_dir
 from .markdown_converter import markdown_to_html
+from .memo_search import memo_matches_query
 from .memo_storage import load_memos, resolve_memo_dir, safe_memo_path, save_memos
 from .memo_ui import build_memo_ui
 from ..core.themes import DARK, LIGHT, get_status_list_stylesheet, get_text_edit_stylesheet
@@ -135,18 +136,14 @@ class MemoPage(QWidget):
     def _update_memo_list(self):
         self.memo_list.blockSignals(True)
         self.memo_list.clear()
-        keyword = self.memo_search_input.text().strip().lower() if hasattr(self, 'memo_search_input') else ""
+        keyword = self.memo_search_input.text().strip() if hasattr(self, 'memo_search_input') else ""
+        visible_count = 0
         for m in self.memo_data:
             title = m.get("title", "备忘录") or "备忘录"
             content = m.get("content", "") or ""
             tags = m.get("tags", [])
-            # 搜索过滤：标题、内容、标签
-            if keyword:
-                match = (keyword in title.lower()
-                         or keyword in content.lower()
-                         or any(keyword in t.lower() for t in tags))
-                if not match:
-                    continue
+            if not memo_matches_query(m, keyword):
+                continue
             first_line = content.split("\n", 1)[0][:40]
             if not first_line:
                 first_line = "(空)"
@@ -157,7 +154,8 @@ class MemoPage(QWidget):
             item = QListWidgetItem(display)
             item.setSizeHint(QSize(-1, 50))
             self.memo_list.addItem(item)
-        self.memo_stat_label.setText(f"{len(self.memo_data)} 条")
+            visible_count += 1
+        self.memo_stat_label.setText(f"{visible_count}/{len(self.memo_data)} 条" if keyword else f"{len(self.memo_data)} 条")
         self.memo_list.blockSignals(False)
 
     def _filter_memo_list(self):

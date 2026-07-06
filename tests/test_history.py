@@ -25,7 +25,9 @@ def temp_dir():
 def history_manager(temp_dir):
     """创建临时目录中的 HistoryManager"""
     config_path = os.path.join(temp_dir, "MemoPaws.json")
-    return HistoryManager(lambda: config_path)
+    manager = HistoryManager(lambda: config_path, flush_interval=0)
+    yield manager
+    manager.flush()
 
 
 def test_add_record(history_manager):
@@ -47,9 +49,20 @@ def test_clear_history(history_manager):
 
 def test_load_save(history_manager):
     history_manager.add_record("识别", "test text")
+    history_manager.flush()
     history_manager.load()
     assert len(history_manager.history_data) == 1
     assert history_manager.history_data[0]["text"] == "test text"
+
+
+def test_add_record_defers_disk_write_until_flush(history_manager):
+    history_manager.add_record("识别", "batched text")
+    assert not os.path.exists(history_manager._history_file)
+    history_manager.flush()
+    assert os.path.exists(history_manager._history_file)
+    with open(history_manager._history_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data[0]["text"] == "batched text"
 
 
 def test_history_file_path(history_manager, temp_dir):

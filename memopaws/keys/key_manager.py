@@ -9,6 +9,8 @@ import time
 import uuid
 from datetime import datetime
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from ..core.utils import get_config_dir
 
 logger = logging.getLogger(__name__)
@@ -24,18 +26,23 @@ def _derive_key(master_password: str) -> bytes:
 
 
 def _encrypt(plaintext: str, key: bytes) -> str:
-    """简单 XOR 加密 + base64 编码"""
-    data = plaintext.encode("utf-8")
-    encrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
-    return base64.b64encode(encrypted).decode("ascii")
+    """AES-256-GCM 加密；v2 前缀用于兼容旧 XOR 密文。"""
+    if not plaintext:
+        return ""
+    nonce = os.urandom(12)
+    encrypted = AESGCM(key).encrypt(nonce, plaintext.encode("utf-8"), None)
+    return "v2:" + base64.b64encode(nonce + encrypted).decode("ascii")
 
 
 def _decrypt(ciphertext: str, key: bytes) -> str:
-    """base64 解码 + XOR 解密"""
+    """解密 v2 AES-GCM 密文；无版本前缀时走旧 XOR 兼容路径。"""
     try:
+        if ciphertext.startswith("v2:"):
+            data = base64.b64decode(ciphertext[3:])
+            nonce, encrypted = data[:12], data[12:]
+            return AESGCM(key).decrypt(nonce, encrypted, None).decode("utf-8")
         data = base64.b64decode(ciphertext)
-        decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
-        return decrypted.decode("utf-8")
+        return bytes(b ^ key[i % len(key)] for i, b in enumerate(data)).decode("utf-8")
     except Exception:
         return ""
 
@@ -195,6 +202,7 @@ class KeyManager:
                 se.pop("enc_value", None)
             save_entries.append(se)
         data = {
+            "version": 2,
             "master_hash": self._master_hash,
             "entries": save_entries,
         }

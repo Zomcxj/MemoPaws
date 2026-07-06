@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QFrame, QMenu, QDialog, QLineEdit
 )
 from PySide6.QtGui import QIcon, QFont, QGuiApplication
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 
 from ..core.utils import get_config_dir, ensure_config_dir, load_svg_icon
 from ..core.themes import DARK, LIGHT, get_status_list_stylesheet, get_clear_history_stylesheet
@@ -17,6 +17,8 @@ from .clipboard_dialog import ClipboardEditDialog
 
 
 class ClipboardPage(QWidget):
+    SEARCH_DEBOUNCE_MS = 180
+
     def __init__(self, parent, *,
                  get_config_path,
                  get_theme,
@@ -38,6 +40,10 @@ class ClipboardPage(QWidget):
         self._get_current_lang = get_current_lang
         self.clipboard_list = None
         self.search_input = None
+        self._search_debounce_timer = QTimer(self)
+        self._search_debounce_timer.setSingleShot(True)
+        self._search_debounce_timer.setInterval(self.SEARCH_DEBOUNCE_MS)
+        self._search_debounce_timer.timeout.connect(self._apply_clipboard_filter)
         self._multi_select_mode = False
         self._build_ui()
         if hasattr(parent, 'theme_changed'):
@@ -91,7 +97,7 @@ class ClipboardPage(QWidget):
                 font-size: 13px;
             }}
         """)
-        self.search_input.textChanged.connect(self._filter_clipboard)
+        self.search_input.textChanged.connect(self._queue_clipboard_filter)
         clip_header.addWidget(self.search_input, 1)
 
         self.btn_select_all = QPushButton("全选")
@@ -335,6 +341,13 @@ class ClipboardPage(QWidget):
         self._update_clipboard_list()
         if removed > 0:
             self._on_append_status(f"已清空 {removed} 条剪切板历史（保留 {len(self._clipboard_data)} 条锁定项）")
+
+    def _queue_clipboard_filter(self, _text=None):
+        self._search_debounce_timer.start()
+
+    def _apply_clipboard_filter(self):
+        text = self.search_input.text() if self.search_input is not None else ""
+        self._filter_clipboard(text)
 
     def _filter_clipboard(self, text):
         text = text.lower().strip()

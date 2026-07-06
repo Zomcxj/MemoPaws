@@ -1,20 +1,27 @@
 """历史记录管理模块"""
 
+import atexit
 import os
 import json
 import time
+import threading
 from typing import Optional, Callable, List, Any
 
 
 class HistoryManager:
     """历史记录管理器，独立于 UI"""
 
-    def __init__(self, get_config_path: Callable[[], str] = None):
+    def __init__(self, get_config_path: Callable[[], str] = None, flush_interval: float = 30.0):
         """
         初始化历史记录管理器
         """
         self.history_data: List[dict] = []
         self._get_config_path = get_config_path
+        self._flush_interval = flush_interval
+        self._dirty = False
+        self._flush_timer: Optional[threading.Timer] = None
+        self._lock = threading.RLock()
+        atexit.register(self.flush)
     
     @property
     def _history_file(self) -> str:
@@ -26,6 +33,7 @@ class HistoryManager:
 
     def load(self) -> List[dict]:
         """加载历史记录"""
+        self.flush()
         if os.path.exists(self._history_file):
             try:
                 with open(self._history_file, "r", encoding="utf-8") as f:
@@ -38,14 +46,40 @@ class HistoryManager:
         return self.history_data
     
     def save(self):
-        """保存历史记录到文件"""
+        """兼容旧调用：立即刷盘。"""
+        self.flush(force=True)
+
+    def flush(self, force: bool = False):
+        """将内存中的历史记录刷盘。
+
+        默认只在有变更时写入，避免重复 I/O；退出进程或显式 save() 时会强制检查并落盘。
+        """
+        with self._lock:
+            if self._flush_timer:
+                self._flush_timer.cancel()
+                self._flush_timer = None
+            if not self._dirty and not force:
+                return
+            if not self._dirty and force and os.path.exists(self._history_file):
+                return
+            data = list(self.history_data)
+            self._dirty = False
         try:
             path = self._history_file
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(self.history_data, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    def _mark_dirty(self):
+        """标记变更并安排 30 秒后批量刷盘。"""
+        with self._lock:
+            self._dirty = True
+            if self._flush_timer is None and self._flush_interval > 0:
+                self._flush_timer = threading.Timer(self._flush_interval, self.flush)
+                self._flush_timer.daemon = True
+                self._flush_timer.start()
     
     def add_record(self, action_type: str, text: str, **extra):
         """添加操作历史记录"""
@@ -70,18 +104,18 @@ class HistoryManager:
         except Exception:
             pass
         self.history_data = self.history_data[:max_items]
-        self.save()
+        self._mark_dirty()
     
     def clear(self):
         """清空历史记录"""
         self.history_data.clear()
-        self.save()
+        self._mark_dirty()
 
     def delete_record(self, index: int):
         """删除指定索引的历史记录"""
         if 0 <= index < len(self.history_data):
             self.history_data.pop(index)
-            self.save()
+            self._mark_dirty()
     
     @staticmethod
     def parse_translate_record(text: str) -> tuple:
