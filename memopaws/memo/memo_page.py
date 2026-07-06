@@ -7,6 +7,7 @@ from datetime import datetime
 
 from PySide6.QtWidgets import QWidget, QListWidgetItem, QFileDialog, QMessageBox
 from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtGui import QTextCursor
 
 from ..core.utils import ensure_config_dir
 from .markdown_converter import markdown_to_html
@@ -181,6 +182,25 @@ class MemoPage(QWidget):
         self.memo_list.blockSignals(False)
         self._memo_saving = False
         self._show_memo_detail(idx)
+
+    def open_memo_at_line(self, idx: int, line_number: int):
+        """选中备忘录并将编辑器滚动到指定行。"""
+        self._select_memo(idx)
+        if line_number <= 1:
+            return
+        editor = self.memo_content_view
+        def _locate():
+            doc = editor.document()
+            block = doc.findBlockByNumber(max(0, line_number - 1))
+            if not block.isValid():
+                return
+            cursor = QTextCursor(block)
+            editor.setTextCursor(cursor)
+            editor.ensureCursorVisible()
+            scrollbar = editor.verticalScrollBar()
+            if scrollbar is not None:
+                scrollbar.setValue(max(0, scrollbar.value() - 40))
+        QTimer.singleShot(0, _locate)
 
     def _on_memo_selection_changed(self, idx: int):
         if self._memo_saving:

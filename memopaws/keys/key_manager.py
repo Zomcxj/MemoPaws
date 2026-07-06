@@ -119,6 +119,7 @@ class KeyManager:
         """添加条目。entry_type: 'llm' | 'secret'"""
         if not self._unlocked:
             return
+        next_order = max((e.get("order", 0) for e in self._entries if e.get("type") == entry_type), default=-1) + 1
         entry = {
             "id": uuid.uuid4().int & ((1 << 53) - 1),
             "name": name,
@@ -127,6 +128,7 @@ class KeyManager:
             "url": url,
             "url_anthropic": url_anthropic,
             "note": note,
+            "order": next_order,
             "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         self._entries.append(entry)
@@ -168,14 +170,19 @@ class KeyManager:
             # 无主密码时，entries 直接含 value 明文
             if not self._master_hash:
                 self._entries = []
-                for e in raw_entries:
+                for idx, e in enumerate(raw_entries):
                     entry = dict(e)
                     # 兼容旧数据：有 enc_value 但无 value 时解密（理论上无密码不会有）
                     if "value" not in entry and "enc_value" in entry:
                         entry["value"] = entry.get("enc_value", "")
+                    entry.setdefault("order", idx)
                     self._entries.append(entry)
             else:
-                self._entries = raw_entries
+                self._entries = []
+                for idx, entry in enumerate(raw_entries):
+                    normalized = dict(entry)
+                    normalized.setdefault("order", idx)
+                    self._entries.append(normalized)
         except Exception:
             self._entries = []
             self._master_hash = ""

@@ -23,6 +23,7 @@ DEFAULT_SHORTCUTS = {
     "capture": "Alt+X",
     "canvas_fit": "Ctrl+F",
     "new_memo": "Ctrl+N",
+    "global_search": "Ctrl+Shift+F",
 }
 
 
@@ -225,6 +226,7 @@ class ShortcutManager:
             "capture": "截图识别",
             "canvas_fit": "画布自适应",
             "new_memo": "新建备忘录",
+            "global_search": "全局搜索",
             "toggle_clipboard": "开关剪切板",
         }
         # 从配置文件读取快捷键（包括尚未 load_and_apply 的情况）

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QDateEdit, QGridLayout, QSizePolicy, QSplitter,
 )
 from PySide6.QtCore import Qt, QDate, QMimeData, QByteArray, QTimer
-from PySide6.QtGui import QIcon, QDrag
+from PySide6.QtGui import QIcon, QDrag, QColor
 
 from .key_manager import KeyManager
 from .key_dialogs import UnlockDialog, EntryDialog, _t
@@ -80,6 +80,14 @@ class DraggableCard(QFrame):
         self.setAcceptDrops(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._drag_start_pos = None
+        self._drag_hint = QLabel("拖动中", self)
+        self._drag_hint.hide()
+        self._drag_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._drag_hint.setStyleSheet("background: rgba(0,0,0,0.35); color: white; border-radius: 8px; font-size: 12px;")
+
+    def resizeEvent(self, event):
+        self._drag_hint.setGeometry(self.rect())
+        super().resizeEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -91,11 +99,22 @@ class DraggableCard(QFrame):
         if self._drag_start_pos is not None:
             distance = (event.pos() - self._drag_start_pos).manhattanLength()
             if distance > 10:
+                for child in self.findChildren(QWidget):
+                    if child is not self._drag_hint:
+                        child.hide()
+                self._drag_hint.show()
                 drag = QDrag(self)
                 mime_data = QMimeData()
                 mime_data.setData("application/x-keycard", QByteArray(str(self.entry_id).encode()))
                 drag.setMimeData(mime_data)
+                pixmap = self.grab()
+                drag.setPixmap(pixmap)
+                drag.setHotSpot(event.pos())
                 drag.exec(Qt.DropAction.MoveAction)
+                self._drag_hint.hide()
+                for child in self.findChildren(QWidget):
+                    if child is not self._drag_hint:
+                        child.show()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -248,9 +267,11 @@ class KeyPage(QWidget):
         self._splitter.setHandleWidth(10)
         self._splitter.setStyleSheet("QSplitter::handle { background: transparent; margin: 0 3px; }")
         self._splitter.setChildrenCollapsible(False)
+        self._splitter.setOpaqueResize(True)
 
         # 左侧：大模型密钥卡片网格
         left_frame = QFrame()
+        left_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         left_frame.setStyleSheet("QFrame { background: transparent; border: none; }")
         left_layout = QVBoxLayout(left_frame)
         left_layout.setContentsMargins(0, 0, 4, 0)
@@ -264,6 +285,7 @@ class KeyPage(QWidget):
         left_layout.addWidget(left_title)
 
         self._llm_container = QWidget()
+        self._llm_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._llm_container.setStyleSheet("background: transparent; margin:0; padding:0;")
         self._llm_grid = QGridLayout(self._llm_container)
         self._llm_grid.setContentsMargins(0, 0, 0, 0)
@@ -275,6 +297,7 @@ class KeyPage(QWidget):
 
         # 右侧：普通密钥列表（用 QWidget + 垂直布局，不用 QListWidget）
         right_frame = QFrame()
+        right_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         right_frame.setStyleSheet("QFrame { background: transparent; border: none; }")
         right_layout = QVBoxLayout(right_frame)
         right_layout.setContentsMargins(4, 0, 0, 0)
@@ -293,6 +316,7 @@ class KeyPage(QWidget):
         self._secret_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; margin:0; padding:0; }")
         self._secret_scroll.viewport().setContentsMargins(0, 0, 0, 0)
         self._secret_container = QWidget()
+        self._secret_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._secret_container.setStyleSheet("background: transparent; margin:0; padding:0;")
         self._secret_vbox = QVBoxLayout(self._secret_container)
         self._secret_vbox.setContentsMargins(0, 0, 0, 0)
@@ -308,6 +332,10 @@ class KeyPage(QWidget):
         # 强制两个面板上对齐
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 1)
+        left_frame.setMinimumWidth(0)
+        right_frame.setMinimumWidth(0)
+        self._llm_container.setMinimumWidth(0)
+        self._secret_container.setMinimumWidth(0)
 
         layout.addWidget(self._splitter, 1)
 
@@ -420,8 +448,8 @@ class KeyPage(QWidget):
             return
 
         entries = self._km.get_entries()
-        llm_entries = [e for e in entries if e.get("type") == "llm"]
-        secret_entries = [e for e in entries if e.get("type") != "llm"]
+        llm_entries = sorted((e for e in entries if e.get("type") == "llm"), key=lambda e: (e.get("order", 0), e.get("created", "")))
+        secret_entries = sorted((e for e in entries if e.get("type") != "llm"), key=lambda e: (e.get("order", 0), e.get("created", "")))
 
         # 左侧：大模型密钥卡片
         if not llm_entries:
@@ -452,7 +480,7 @@ class KeyPage(QWidget):
     def _create_secret_row(self, entry, t, lang):
         """创建普通密钥单行卡片"""
         eid = entry["id"]
-        card = QFrame()
+        card = DraggableCard(eid)
         card.setStyleSheet(f"""
             QFrame {{
                 background: {t.bg_panel};
@@ -460,6 +488,8 @@ class KeyPage(QWidget):
                 border-radius: 6px;
             }}
         """)
+        card.setProperty("original_style", card.styleSheet())
+        card.setProperty("accent_color", t.accent)
         card.setFixedHeight(44)
         card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         card.customContextMenuRequested.connect(lambda pos, eid=eid: self._show_secret_menu(pos, eid))
@@ -538,7 +568,8 @@ class KeyPage(QWidget):
 
     def _create_llm_card(self, entry, t, lang):
         """创建大模型密钥卡片"""
-        card = QFrame()
+        eid = entry["id"]
+        card = DraggableCard(eid)
         card.setObjectName("key_card")
         card.setStyleSheet(f"""
             QFrame#key_card {{
@@ -548,12 +579,12 @@ class KeyPage(QWidget):
                 padding: 12px;
             }}
         """)
+        card.setProperty("original_style", card.styleSheet())
+        card.setProperty("accent_color", t.accent)
         card.setMinimumHeight(160)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(12, 10, 12, 10)
         card_layout.setSpacing(4)
-
-        eid = entry["id"]
 
         # 顶部行：名称 + 删除 + 编辑
         top_row = QHBoxLayout()
@@ -745,13 +776,17 @@ class KeyPage(QWidget):
         self._rebuild_list()
 
     def _swap_entries(self, source_id: int, target_id: int):
-        """交换两个密钥条目的顺序"""
+        """仅在同类型分区内交换两个密钥条目的顺序。"""
         entries = self._km.get_entries()
         source_idx = next((i for i, e in enumerate(entries) if e["id"] == source_id), -1)
         target_idx = next((i for i, e in enumerate(entries) if e["id"] == target_id), -1)
         if source_idx >= 0 and target_idx >= 0:
-            # 交换顺序
-            entries[source_idx], entries[target_idx] = entries[target_idx], entries[source_idx]
+            if entries[source_idx].get("type") != entries[target_idx].get("type"):
+                return
+            source_order = entries[source_idx].get("order", source_idx)
+            target_order = entries[target_idx].get("order", target_idx)
+            entries[source_idx]["order"] = target_order
+            entries[target_idx]["order"] = source_order
             self._km._entries = entries
             self._km._save()
             self._rebuild_list()

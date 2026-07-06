@@ -128,6 +128,27 @@ class HistoryManager:
             elif line.startswith("[译文] "):
                 target = line[len("[译文] "):]
         return source, target
+
+    def apply_record(self, record, ocr_text_widget, translate_text_widget):
+        if not record:
+            return
+        action_type = record.get("type", "")
+        if action_type.startswith("识别"):
+            ocr_text = record.get("ocr_text") or record.get("text", "")
+            ocr_text_widget.setPlainText(ocr_text)
+            translate_text_widget.clear()
+        elif action_type.startswith("翻译失败"):
+            err = record.get("text", "")
+            translate_text_widget.setPlainText(err)
+        elif action_type.startswith("翻译"):
+            source = record.get("source")
+            target = record.get("target")
+            if source is None or target is None:
+                source, target = self.parse_translate_record(record.get("text", ""))
+            if source is not None:
+                ocr_text_widget.setPlainText(source)
+            if target is not None:
+                translate_text_widget.setPlainText(target)
     
     def update_status_list(self, status_list):
         """更新状态列表 UI
@@ -162,25 +183,7 @@ class HistoryManager:
         if not record:
             return
         
-        action_type = record.get("type", "")
-        if action_type.startswith("识别"):
-            ocr_text = record.get("ocr_text") or record.get("text", "")
-            ocr_text_widget.setPlainText(ocr_text)
-            translate_text_widget.clear()
-        elif action_type.startswith("翻译失败"):
-            err = record.get("text", "")
-            translate_text_widget.setPlainText(err)
-        elif action_type.startswith("翻译"):
-            source = record.get("source")
-            target = record.get("target")
-            if source is None or target is None:
-                # 兼容老 record：从 text 字段解析
-                parsed_text = record.get("text", "")
-                source, target = self.parse_translate_record(parsed_text)
-            if source is not None:
-                ocr_text_widget.setPlainText(source)
-            if target is not None:
-                translate_text_widget.setPlainText(target)
+        self.apply_record(record, ocr_text_widget, translate_text_widget)
         
         # 切换到贴图识别页面
         if nav_sidebar:

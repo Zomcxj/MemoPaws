@@ -101,6 +101,7 @@ def _setup_managers(window):
     window.shortcut_mgr.register("capture", "Alt+X", lambda: window.recognize_page.start_capture())
     window.shortcut_mgr.register("canvas_fit", "Ctrl+F", lambda: window.recognize_page.canvas.zoom_fit())
     window.shortcut_mgr.register("new_memo", "Ctrl+N", lambda: window.memo_page.add_memo())
+    window.shortcut_mgr.register("global_search", "Ctrl+Shift+F", window._open_global_search)
     window.text_replacer = TextReplacerManager(window._get_config_path, window.save_config)
     window.text_replacer.load()
 

@@ -21,6 +21,8 @@ from ..core.themes import (
 )
 from ..ocr.ocr import OCRManager
 from ..ocr.translator import SimpleTranslator
+from ..search.global_search import search_all
+from ..search.global_search_dialog import GlobalSearchDialog
 from .frameless_window import FramelessWindowMixin
 from .tray import TrayMixin
 from .main_window_ui import build_pages, build_title_bar
@@ -153,12 +155,60 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         
         # 全局快捷键（统一由 shortcut_mgr 管理）
         self.shortcut_mgr.load_and_apply()
-        
         if not self._current_theme_dark:
             self._apply_theme(False)
     
     def _switch_page(self, page_name: str):
         self.nav_sidebar.switch_page(page_name)
+
+    def _open_global_search(self):
+        dialog = GlobalSearchDialog(
+            parent=self,
+            search_provider=self._search_all_content,
+            open_result=self._open_search_result,
+        )
+        dialog.search_input.setFocus()
+        dialog.exec()
+
+    def _search_all_content(self, query: str, scopes=None):
+        history = getattr(self.recognize_page.history_manager, "history_data", []) if hasattr(self, "recognize_page") else []
+        return search_all(
+            memos=getattr(self.memo_page, "memo_data", []),
+            clipboard=getattr(self, "clipboard_data", []),
+            history=history,
+            query=query,
+            scopes=scopes,
+        )
+
+    def _open_search_result(self, result: dict):
+        source = result.get("source")
+        if source == "memo":
+            self.nav_sidebar.switch_page("备忘录")
+            idx = result.get("index")
+            if idx is not None:
+                line_number = result.get("line_number", 1)
+                QTimer.singleShot(0, lambda i=idx, ln=line_number: self.memo_page.open_memo_at_line(i, ln) if 0 <= i < len(self.memo_page.memo_data) else None)
+        elif source == "clipboard":
+            self.nav_sidebar.switch_page("剪切板")
+            idx = result.get("target_id")
+            if idx is not None:
+                def select_clipboard(row=idx):
+                    if 0 <= row < self.clipboard_page.clipboard_list.count():
+                        self.clipboard_page.clipboard_list.setCurrentRow(row)
+                        self.clipboard_page.clipboard_list.scrollToItem(self.clipboard_page.clipboard_list.item(row), self.clipboard_page.clipboard_list.ScrollHint.PositionAtCenter)
+                QTimer.singleShot(0, select_clipboard)
+        elif source == "history":
+            self.nav_sidebar.switch_page("贴图识别")
+            idx = result.get("target_id")
+            if idx is not None:
+                def select_history(row=idx):
+                    records = self.recognize_page.history_manager.history_data
+                    if 0 <= row < len(records):
+                        self.recognize_page.show_history_record(records[row])
+                        if row < self.recognize_page.status_list.count():
+                            self.recognize_page.status_list.setCurrentRow(row)
+                            self.recognize_page.status_list.scrollToItem(self.recognize_page.status_list.item(row), self.recognize_page.status_list.ScrollHint.PositionAtCenter)
+                QTimer.singleShot(0, select_history)
     
     # ── 窗口拖拽 ──
     def eventFilter(self, obj, event):

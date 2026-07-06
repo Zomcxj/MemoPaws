@@ -56,6 +56,7 @@ def test_default_shortcuts_keys():
     assert "capture" in DEFAULT_SHORTCUTS
     assert "canvas_fit" in DEFAULT_SHORTCUTS
     assert "new_memo" in DEFAULT_SHORTCUTS
+    assert "global_search" in DEFAULT_SHORTCUTS
 
 
 class TestShortcutManagerParseHotkey:
@@ -134,3 +135,9 @@ class TestShortcutManagerRegister:
         assert len(actions) == 1
         assert actions[0][0] == "capture"
         assert actions[0][1] == "截图识别"
+
+    def test_get_all_actions_global_search(self, mgr):
+        mgr.register("global_search", "Ctrl+Shift+F", lambda: None)
+        actions = mgr.get_all_actions()
+        assert actions[0][0] == "global_search"
+        assert actions[0][1] == "全局搜索"

@@ -664,6 +664,9 @@ class RecognizePage(OCRTranslateMixin, QWidget):
             self._on_switch_to_page,
         )
 
+    def show_history_record(self, record: dict):
+        self.history_manager.apply_record(record, self.ocr_text, self.translate_text)
+
     def _on_history_context_menu(self, pos):
         """右键菜单：删除单条历史记录"""
         item = self.status_list.itemAt(pos)

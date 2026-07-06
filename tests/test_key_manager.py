@@ -100,6 +100,20 @@ class TestKeyManager:
         assert entries[0]["type"] == "llm"
         assert entries[0]["value"] == "sk-xxx"
         assert entries[0]["url"] == "https://api.test.com"
+        assert entries[0]["order"] == 0
+
+    def test_entry_order_is_scoped_per_type(self):
+        km = KeyManager()
+        km.add_entry("llm1", "llm", "a")
+        km.add_entry("secret1", "secret", "b")
+        km.add_entry("llm2", "llm", "c")
+
+        entries = km.get_entries()
+        llm_orders = [e["order"] for e in entries if e["type"] == "llm"]
+        secret_orders = [e["order"] for e in entries if e["type"] == "secret"]
+
+        assert llm_orders == [0, 1]
+        assert secret_orders == [0]
 
     def test_add_entry_locked(self):
         km = KeyManager()

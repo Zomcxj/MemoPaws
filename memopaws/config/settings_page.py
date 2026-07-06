@@ -233,8 +233,8 @@ class SettingsPage(QWidget):
                 if len(row_data) >= 4:
                     row_data[3].setText("Reset" if lang == "en" else "重置")
         # 快捷键标签名称同步
-        _shortcut_names_zh = {"capture": "截图识别", "canvas_fit": "画布自适应", "new_memo": "新建备忘录", "toggle_clipboard": "开关剪切板"}
-        _shortcut_names_en = {"capture": "Capture", "canvas_fit": "Canvas Fit", "new_memo": "New Memo", "toggle_clipboard": "Toggle Clipboard"}
+        _shortcut_names_zh = {"capture": "截图识别", "canvas_fit": "画布自适应", "new_memo": "新建备忘录", "global_search": "全局搜索", "toggle_clipboard": "开关剪切板"}
+        _shortcut_names_en = {"capture": "Capture", "canvas_fit": "Canvas Fit", "new_memo": "New Memo", "global_search": "Global Search", "toggle_clipboard": "Toggle Clipboard"}
         if hasattr(self, '_shortcut_edit_rows'):
             for row_data in self._shortcut_edit_rows:
                 if len(row_data) >= 2:
@@ -316,10 +316,6 @@ class SettingsPage(QWidget):
         self.close_btn_tray.setStyleSheet(active_text_ss if is_tray else btn_ss)
         self._close_seg_ctrl.set_accent(t.accent)
         self._close_seg_ctrl.update_position(animated=True)
-        # 更新文字
-        _lang = self._get_current_lang()
-        self.btn_theme_dark.setText("Dark" if _lang == "en" else "暗色")
-        self.btn_theme_light.setText("Light" if _lang == "en" else "亮色")
 
     # ── 快捷键编辑 ──
 

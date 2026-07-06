@@ -6,18 +6,22 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QFrame, QMenu, QDialog, QLineEdit
+    QListWidget, QListWidgetItem, QFrame, QMenu, QDialog, QLineEdit,
+    QScrollArea, QGridLayout, QStackedLayout, QSizePolicy, QCheckBox,
+    QAbstractScrollArea
 )
 from PySide6.QtGui import QIcon, QFont, QGuiApplication
 from PySide6.QtCore import Qt, QSize, QTimer
 
 from ..core.utils import get_config_dir, ensure_config_dir, load_svg_icon
 from ..core.themes import DARK, LIGHT, get_status_list_stylesheet, get_clear_history_stylesheet
+from ..ui.segmented_control import AnimatedSegmentedControl
 from .clipboard_dialog import ClipboardEditDialog
 
 
 class ClipboardPage(QWidget):
     SEARCH_DEBOUNCE_MS = 180
+    GRID_COLUMNS = 4
 
     def __init__(self, parent, *,
                  get_config_path,
@@ -40,12 +44,23 @@ class ClipboardPage(QWidget):
         self._get_current_lang = get_current_lang
         self.clipboard_list = None
         self.search_input = None
+        self.btn_view_list = None
+        self.btn_view_grid = None
+        self._view_seg_container = None
+        self._view_seg_ctrl = None
+        self._view_mode = "list"
+        self._clipboard_stack = None
+        self._grid_scroll = None
+        self._grid_container = None
+        self._grid_layout = None
+        self._grid_selected_indices = set()
         self._search_debounce_timer = QTimer(self)
         self._search_debounce_timer.setSingleShot(True)
         self._search_debounce_timer.setInterval(self.SEARCH_DEBOUNCE_MS)
         self._search_debounce_timer.timeout.connect(self._apply_clipboard_filter)
         self._multi_select_mode = False
         self._build_ui()
+        self._load_view_mode_setting()
         if hasattr(parent, 'theme_changed'):
             parent.theme_changed.connect(lambda _: self.apply_theme())
         if hasattr(parent, 'language_changed'):
@@ -100,6 +115,32 @@ class ClipboardPage(QWidget):
         self.search_input.textChanged.connect(self._queue_clipboard_filter)
         clip_header.addWidget(self.search_input, 1)
 
+        self._view_seg_container = QFrame()
+        self._view_seg_container.setObjectName("clipViewSegContainer")
+        self._view_seg_container.setFixedSize(162, 34)
+        self._view_seg_container.setStyleSheet(f"""
+            QFrame#clipViewSegContainer {{
+                background: {t.bg_neutral_button};
+                border: 1px solid {t.border_subtle};
+                border-radius: 8px;
+            }}
+        """)
+        seg_layout = QHBoxLayout(self._view_seg_container)
+        seg_layout.setContentsMargins(0, 0, 0, 0)
+        seg_layout.setSpacing(0)
+        self.btn_view_list = QPushButton("列表")
+        self.btn_view_list.setCheckable(True)
+        self.btn_view_list.setFixedSize(80, 32)
+        self.btn_view_list.clicked.connect(lambda: self._set_view_mode("list"))
+        seg_layout.addWidget(self.btn_view_list)
+        self.btn_view_grid = QPushButton("组件")
+        self.btn_view_grid.setCheckable(True)
+        self.btn_view_grid.setFixedSize(80, 32)
+        self.btn_view_grid.clicked.connect(lambda: self._set_view_mode("grid"))
+        seg_layout.addWidget(self.btn_view_grid)
+        self._view_seg_ctrl = AnimatedSegmentedControl(self._view_seg_container, self.btn_view_list, self.btn_view_grid)
+        clip_header.addWidget(self._view_seg_container, 0, Qt.AlignmentFlag.AlignRight)
+
         self.btn_select_all = QPushButton("全选")
         self.btn_select_all.setStyleSheet(get_clear_history_stylesheet(t))
         self.btn_select_all.clicked.connect(self._select_all)
@@ -122,6 +163,8 @@ class ClipboardPage(QWidget):
 
         clip_vbox.addLayout(clip_header)
 
+        self._clipboard_stack = QStackedLayout()
+
         self.clipboard_list = QListWidget()
         self.clipboard_list.setStyleSheet(get_status_list_stylesheet(t))
         self.clipboard_list.setMinimumHeight(200)
@@ -129,7 +172,30 @@ class ClipboardPage(QWidget):
         self.clipboard_list.customContextMenuRequested.connect(self._on_clipboard_context_menu)
         self.clipboard_list.itemChanged.connect(self._on_item_changed)
         self.clipboard_list.itemClicked.connect(self._on_item_clicked)
-        clip_vbox.addWidget(self.clipboard_list, 1)
+        self._clipboard_stack.addWidget(self.clipboard_list)
+
+        self._grid_scroll = QScrollArea()
+        self._grid_scroll.setWidgetResizable(True)
+        self._grid_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._grid_scroll.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+        self._grid_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._grid_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; margin:0; padding:0; }")
+        self._grid_container = QWidget()
+        self._grid_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._grid_container.setMinimumWidth(0)
+        self._grid_container.setStyleSheet("background: transparent; margin:0; padding:0;")
+        self._grid_layout = QGridLayout(self._grid_container)
+        self._grid_layout.setContentsMargins(0, 0, 0, 0)
+        self._grid_layout.setSpacing(8)
+        for col in range(self.GRID_COLUMNS):
+            self._grid_layout.setColumnStretch(col, 1)
+        self._grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._grid_scroll.setWidget(self._grid_container)
+        self._clipboard_stack.addWidget(self._grid_scroll)
+
+        clip_vbox.addLayout(self._clipboard_stack, 1)
+        self._clipboard_stack.setCurrentIndex(0)
 
         layout.addWidget(clip_frame, 1)
 
@@ -143,15 +209,64 @@ class ClipboardPage(QWidget):
 
         self._update_clipboard_list()
 
-    def _on_clipboard_context_menu(self, pos):
-        item = self.clipboard_list.itemAt(pos)
-        if not item:
+    def _set_view_mode(self, mode: str, *, save: bool = True):
+        self._view_mode = "grid" if mode == "grid" else "list"
+        if save:
+            self._save_view_mode_setting()
+        self._update_view_seg_style()
+        self._clipboard_stack.setCurrentIndex(0 if self._view_mode == "list" else 1)
+        if self._view_mode == "grid":
+            self._refresh_grid_view()
+
+    def _load_view_mode_setting(self):
+        try:
+            with open(self._get_config_path(), "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        self._set_view_mode(config.get("clipboard_view_mode", "list"), save=False)
+
+    def _update_view_seg_style(self):
+        if not self.btn_view_list or not self.btn_view_grid:
             return
-        idx = self.clipboard_list.row(item)
+        t = self._get_theme()
+        normal = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 6px; font-size: 13px; padding: 0; }}"
+        active = "QPushButton { background: transparent; color: #FFFFFF; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; padding: 0; }"
+        is_list = self._view_mode == "list"
+        self.btn_view_list.setChecked(is_list)
+        self.btn_view_grid.setChecked(not is_list)
+        self.btn_view_list.setStyleSheet(active if is_list else normal)
+        self.btn_view_grid.setStyleSheet(active if not is_list else normal)
+        if self._view_seg_container:
+            self._view_seg_container.setStyleSheet(f"""
+                QFrame#clipViewSegContainer {{
+                    background: {t.bg_neutral_button};
+                    border: 1px solid {t.border_subtle};
+                    border-radius: 8px;
+                }}
+            """)
+        if self._view_seg_ctrl:
+            self._view_seg_ctrl.set_accent(t.accent)
+            self._view_seg_ctrl.update_position(animated=True)
+
+    def _save_view_mode_setting(self):
+        try:
+            with open(self._get_config_path(), "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["clipboard_view_mode"] = self._view_mode
+        try:
+            with open(self._get_config_path(), "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _show_clipboard_menu(self, idx: int, global_pos):
         if not (0 <= idx < len(self._clipboard_data)):
             return
         record = self._clipboard_data[idx]
-        menu = QMenu(self.clipboard_list)
+        menu = QMenu(self)
         t = self._get_theme()
         menu.setStyleSheet(f"""
             QMenu {{
@@ -170,26 +285,14 @@ class ClipboardPage(QWidget):
                 background: {('rgba(255,255,255,0.06)' if t.is_dark else 'rgba(0,0,0,0.05)')};
                 color: {t.accent};
             }}
-            QMenu::separator {{
-                height: 1px;
-                background: {t.border_subtle};
-                margin: 4px 8px;
-            }}
         """)
         lang = self._get_current_lang()
         is_en = lang == "en"
         copy_action = menu.addAction("Copy" if is_en else "复制")
         edit_action = menu.addAction("Edit" if is_en else "编辑")
-        lock_action = menu.addAction("Unlock  " if record.get("locked") else "Lock  ") if is_en else menu.addAction("解锁  " if record.get("locked") else "锁定  ")
-        menu.addSeparator()
-        multi_action = menu.addAction("Multi-select" if is_en else "多选")
-        menu.addSeparator()
-        del_action = menu.addAction("Delete" if is_en else "删除")
-        for a in (copy_action, edit_action, lock_action, del_action):
-            f = a.font()
-            f.setStyleHint(QFont.StyleHint.Monospace)
-            a.setFont(f)
-        chosen = menu.exec(self.clipboard_list.mapToGlobal(pos))
+        lock_action = menu.addAction("Unlock" if record.get("locked") else "Lock") if is_en else menu.addAction("解锁" if record.get("locked") else "锁定")
+        delete_action = menu.addAction("Delete" if is_en else "删除")
+        chosen = menu.exec(global_pos)
         if chosen == copy_action:
             QGuiApplication.clipboard().setText(record["text"])
         elif chosen == edit_action:
@@ -199,21 +302,79 @@ class ClipboardPage(QWidget):
             self._sort_clipboard()
             self.save_clipboard()
             self._update_clipboard_list()
-        elif chosen == multi_action:
-            self._enter_selection_mode()
-        elif chosen == del_action:
-            first_visible = self.clipboard_list.indexAt(self.clipboard_list.viewport().rect().topLeft()).row()
+        elif chosen == delete_action:
             self._clipboard_data.pop(idx)
             self.save_clipboard()
             self._update_clipboard_list()
-            target = min(first_visible, max(0, self.clipboard_list.count() - 1))
-            if target >= 0:
-                self.clipboard_list.scrollToItem(self.clipboard_list.item(target), QListWidget.ScrollHint.PositionAtTop)
+
+    def _show_clipboard_actions_menu(self, idx: int, global_pos):
+        if not (0 <= idx < len(self._clipboard_data)):
+            return
+        record = self._clipboard_data[idx]
+        lang = self._get_current_lang()
+        is_en = lang == "en"
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy" if is_en else "复制")
+        edit_action = menu.addAction("Edit" if is_en else "编辑")
+        lock_action = menu.addAction("Unlock" if record.get("locked") else "Lock") if is_en else menu.addAction("解锁" if record.get("locked") else "锁定")
+        multi_action = menu.addAction("Multi-select" if is_en else "多选")
+        delete_action = menu.addAction("Delete" if is_en else "删除")
+        chosen = menu.exec(global_pos)
+        if chosen == copy_action:
+            QGuiApplication.clipboard().setText(record.get("text", ""))
+        elif chosen == edit_action:
+            self._edit_clipboard_record(record)
+        elif chosen == lock_action:
+            QTimer.singleShot(0, lambda rec=record: self._toggle_clipboard_lock_record(rec))
+        elif chosen == multi_action:
+            self._enter_selection_mode()
+        elif chosen == delete_action:
+            QTimer.singleShot(0, lambda rec=record: self._delete_clipboard_record(rec))
+
+    def _toggle_clipboard_lock(self, idx: int):
+        if not (0 <= idx < len(self._clipboard_data)):
+            return
+        self._clipboard_data[idx]["locked"] = not self._clipboard_data[idx].get("locked", False)
+        self._sort_clipboard()
+        self.save_clipboard()
+        self._update_clipboard_list()
+
+    def _toggle_clipboard_lock_record(self, record):
+        try:
+            idx = self._clipboard_data.index(record)
+        except ValueError:
+            return
+        self._toggle_clipboard_lock(idx)
+
+    def _delete_clipboard_row(self, idx: int):
+        if not (0 <= idx < len(self._clipboard_data)):
+            return
+        self._clipboard_data.pop(idx)
+        self.save_clipboard()
+        self._update_clipboard_list()
+
+    def _delete_clipboard_record(self, record):
+        try:
+            idx = self._clipboard_data.index(record)
+        except ValueError:
+            return
+        self._delete_clipboard_row(idx)
+
+    def _on_clipboard_context_menu(self, pos):
+        item = self.clipboard_list.itemAt(pos)
+        if not item:
+            return
+        idx = self.clipboard_list.row(item)
+        if not (0 <= idx < len(self._clipboard_data)):
+            return
+        self._show_clipboard_actions_menu(idx, self.clipboard_list.mapToGlobal(pos))
 
     def _edit_clipboard_item(self, idx: int):
         if not (0 <= idx < len(self._clipboard_data)):
             return
-        record = self._clipboard_data[idx]
+        self._edit_clipboard_record(self._clipboard_data[idx])
+
+    def _edit_clipboard_record(self, record):
         dlg = ClipboardEditDialog(self, record.get("text", ""), self._get_theme())
         if dlg.exec() == QDialog.DialogCode.Accepted:
             new_text = dlg.get_text()
@@ -275,6 +436,7 @@ class ClipboardPage(QWidget):
         """更新列表，restore_scroll=True 时保持滚动位置"""
         scroll_val = scroll_pos if scroll_pos is not None else (self.clipboard_list.verticalScrollBar().value() if restore_scroll else 0)
         self.clipboard_list.clear()
+        self._clipboard_stack.setCurrentIndex(0 if self._view_mode == "list" else 1)
         icons_dir = self._get_icons_dir()
         icon_clr = self._get_icon_clr()
         lock_icon = load_svg_icon(os.path.join(icons_dir, "lock.svg"), 14, icon_clr)
@@ -289,6 +451,119 @@ class ClipboardPage(QWidget):
             self.clipboard_list.addItem(item)
         if restore_scroll:
             self.clipboard_list.verticalScrollBar().setValue(min(scroll_val, self.clipboard_list.verticalScrollBar().maximum()))
+        self._refresh_grid_view()
+
+    def _filtered_clipboard_items(self):
+        keyword = self.search_input.text().lower().strip() if self.search_input else ""
+        if not keyword:
+            return list(enumerate(self._clipboard_data[:200]))
+        return [
+            (idx, r)
+            for idx, r in enumerate(self._clipboard_data[:200])
+            if keyword in f"{r.get('time', '')} {r.get('text', '')}".lower()
+        ]
+
+    def _refresh_grid_view(self):
+        if not self._grid_layout:
+            return
+        try:
+            for i in reversed(range(self._grid_layout.count())):
+                widget = self._grid_layout.itemAt(i).widget()
+                if widget:
+                    widget.deleteLater()
+        except RuntimeError:
+            return
+        entries = self._filtered_clipboard_items()
+        for visible_idx, (source_idx, record) in enumerate(entries):
+            row = visible_idx // self.GRID_COLUMNS
+            col = visible_idx % self.GRID_COLUMNS
+            self._grid_layout.addWidget(self._create_grid_card(source_idx, record), row, col)
+
+    def _create_grid_card(self, source_idx: int, record):
+        t = self._get_theme()
+        card = QFrame()
+        card.setObjectName("clipboardGridCard")
+        card.setStyleSheet(f"""
+            QFrame#clipboardGridCard {{
+                background: {t.bg_panel};
+                border: 1px solid {t.border_subtle};
+                border-radius: 10px;
+            }}
+        """)
+        card.setMinimumWidth(0)
+        card.setMinimumHeight(120)
+        card.setMaximumHeight(120)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
+        title = QLabel(record.get("time", ""))
+        title.setMinimumWidth(0)
+        title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        title.setStyleSheet(f"font-size:11px; color:{t.text_muted}; border:none;")
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(4)
+        check = None
+        if self._multi_select_mode and not record.get("locked"):
+            check = QCheckBox()
+            check.setChecked(source_idx in self._grid_selected_indices)
+            check.stateChanged.connect(lambda state, row_idx=source_idx: self._toggle_grid_selection(row_idx, state == Qt.CheckState.Checked.value))
+            top_row.addWidget(check)
+        top_row.addWidget(title, 1)
+        layout.addLayout(top_row)
+        content = QLabel((record.get("text", "") or "")[:120].replace("\n", " "))
+        content.setWordWrap(True)
+        content.setMinimumWidth(0)
+        content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        content.setStyleSheet(f"font-size:12px; color:{t.text_primary}; border:none;")
+        layout.addWidget(content, 1)
+        badge = None
+        if record.get("locked"):
+            badge = QLabel("[锁定]" if self._get_current_lang() != "en" else "[Locked]")
+            badge.setMinimumWidth(0)
+            badge.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            badge.setStyleSheet(f"font-size:11px; color:{t.accent}; border:none;")
+            layout.addWidget(badge)
+
+        selected = source_idx in self._grid_selected_indices
+        if self._multi_select_mode and selected:
+            card.setStyleSheet(f"""
+                QFrame#clipboardGridCard {{
+                    background: {t.bg_panel};
+                    border: 2px solid {t.accent};
+                    border-radius: 10px;
+                }}
+            """)
+        card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        card.customContextMenuRequested.connect(lambda pos, row_idx=source_idx, widget=card: self._show_clipboard_actions_menu(row_idx, widget.mapToGlobal(pos)))
+        for widget in (title, content, badge, check):
+            if widget is None:
+                continue
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            widget.customContextMenuRequested.connect(lambda pos, row_idx=source_idx, w=widget: self._show_clipboard_actions_menu(row_idx, w.mapToGlobal(pos)))
+
+        def mousePressEvent(event, row_idx=source_idx):
+            if self._multi_select_mode and not record.get("locked"):
+                self._toggle_grid_selection(row_idx, row_idx not in self._grid_selected_indices)
+                event.accept()
+                return
+            QFrame.mousePressEvent(card, event)
+
+        def mouseDoubleClickEvent(event, text=record.get("text", "")):
+            QGuiApplication.clipboard().setText(text)
+
+        card.mousePressEvent = mousePressEvent
+        card.mouseDoubleClickEvent = mouseDoubleClickEvent
+        return card
+
+    def _toggle_grid_selection(self, row_idx: int, checked: bool):
+        if checked:
+            self._grid_selected_indices.add(row_idx)
+        else:
+            self._grid_selected_indices.discard(row_idx)
+        self._refresh_grid_view()
+        self._update_delete_btn_state()
 
     def _copy_clipboard_item(self, item: QListWidgetItem):
         idx = self.clipboard_list.row(item)
@@ -348,6 +623,7 @@ class ClipboardPage(QWidget):
     def _apply_clipboard_filter(self):
         text = self.search_input.text() if self.search_input is not None else ""
         self._filter_clipboard(text)
+        self._refresh_grid_view()
 
     def _filter_clipboard(self, text):
         text = text.lower().strip()
@@ -361,10 +637,12 @@ class ClipboardPage(QWidget):
     def _enter_selection_mode(self):
         """右键选择'多选'后进入多选模式，显示复选框"""
         self._multi_select_mode = True
+        self._grid_selected_indices.clear()
         self.btn_select_all.setVisible(True)
         self.btn_cancel_select.setVisible(True)
         self.btn_delete_selected.setVisible(True)
         self._show_checkboxes(True)
+        self._refresh_grid_view()
         self._update_delete_btn_state()
 
     def _on_item_clicked(self, item):
@@ -402,6 +680,15 @@ class ClipboardPage(QWidget):
 
     def _select_all(self):
         """全选/取消全选切换"""
+        if self._view_mode == "grid":
+            visible = [idx for idx, record in self._filtered_clipboard_items() if not record.get("locked")]
+            if all(idx in self._grid_selected_indices for idx in visible):
+                self._grid_selected_indices.difference_update(visible)
+            else:
+                self._grid_selected_indices.update(visible)
+            self._refresh_grid_view()
+            self._update_delete_btn_state()
+            return
         # 检查是否已经全选
         all_checked = all(
             self.clipboard_list.item(i).checkState() == Qt.CheckState.Checked
@@ -417,13 +704,33 @@ class ClipboardPage(QWidget):
         self._update_delete_btn_state()
 
     def _update_delete_btn_state(self):
-        count = sum(1 for i in range(self.clipboard_list.count())
-                    if self.clipboard_list.item(i).checkState() == Qt.CheckState.Checked)
+        if self._view_mode == "grid":
+            count = len(self._grid_selected_indices)
+        else:
+            count = sum(1 for i in range(self.clipboard_list.count())
+                        if self.clipboard_list.item(i).checkState() == Qt.CheckState.Checked)
         self.btn_delete_selected.setEnabled(count > 0)
         self.btn_delete_selected.setText(f"删除选中({count})" if count else "删除选中")
 
     def _delete_selected(self):
         """删除勾选的条目"""
+        if self._view_mode == "grid":
+            selected_indices = sorted(self._grid_selected_indices)
+            if not selected_indices:
+                return
+            for i in reversed(selected_indices):
+                if 0 <= i < len(self._clipboard_data):
+                    self._clipboard_data.pop(i)
+            self._grid_selected_indices.clear()
+            self.save_clipboard()
+            self._multi_select_mode = False
+            self.btn_select_all.setVisible(False)
+            self.btn_cancel_select.setVisible(False)
+            self.btn_delete_selected.setVisible(False)
+            self.btn_delete_selected.setText("删除选中")
+            self._update_clipboard_list()
+            self._on_append_status(f"已删除 {len(selected_indices)} 条记录")
+            return
         selected_indices = []
         for i in range(self.clipboard_list.count()):
             if self.clipboard_list.item(i).checkState() == Qt.CheckState.Checked:
@@ -453,6 +760,7 @@ class ClipboardPage(QWidget):
     def _exit_selection_mode(self):
         """退出多选模式，重建列表去除复选框"""
         self._multi_select_mode = False
+        self._grid_selected_indices.clear()
         self.btn_select_all.setVisible(False)
         self.btn_cancel_select.setVisible(False)
         self.btn_delete_selected.setVisible(False)
@@ -461,6 +769,7 @@ class ClipboardPage(QWidget):
         self.clipboard_list.blockSignals(True)
         self._update_clipboard_list()
         self.clipboard_list.blockSignals(False)
+        self._refresh_grid_view()
 
     def apply_theme(self):
         """刷新剪切板页主题样式"""
@@ -479,12 +788,21 @@ class ClipboardPage(QWidget):
         for btn_attr in ('btn_select_all', 'btn_cancel_select', 'btn_delete_selected'):
             if hasattr(self, btn_attr):
                 getattr(self, btn_attr).setStyleSheet(get_clear_history_stylesheet(t))
+        self._update_view_seg_style()
 
     def apply_language(self, lang: str):
         if hasattr(self, 'search_input'):
             self.search_input.setPlaceholderText("Search..." if lang == "en" else "搜索...")
         if hasattr(self, 'btn_delete_selected'):
             self.btn_delete_selected.setText("Delete Selected" if lang == "en" else "删除选中")
+        if hasattr(self, 'btn_view_list'):
+            self.btn_view_list.setText("List" if lang == "en" else "列表")
+        if hasattr(self, 'btn_view_grid'):
+            self.btn_view_grid.setText("Grid" if lang == "en" else "组件")
+        self._update_view_seg_style()
+        if hasattr(self, 'view_mode_combo'):
+            self.view_mode_combo.setItemText(0, "List" if lang == "en" else "列表模式")
+            self.view_mode_combo.setItemText(1, "Grid" if lang == "en" else "组件模式")
         if hasattr(self, 'btn_select_all'):
             self.btn_select_all.setText("Select All" if lang == "en" else "全选")
         if hasattr(self, 'btn_cancel_select'):
