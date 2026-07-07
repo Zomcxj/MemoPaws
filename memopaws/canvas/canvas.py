@@ -335,7 +335,21 @@ class CanvasWidget(QLabel):
                 else:
                     text = "选区太小，未裁剪"
                     self.selection_changed.emit(text)
-    
+
+    def contextMenuEvent(self, event):
+        from PySide6.QtWidgets import QMenu, QApplication
+        menu = QMenu(self)
+        copy_action = menu.addAction("复制图片")
+        paste_action = menu.addAction("粘贴图片")
+        action = menu.exec(event.globalPos())
+        if action == copy_action:
+            if self.display_pixmap:
+                QApplication.clipboard().setImage(self.display_pixmap.toImage())
+        elif action == paste_action:
+            pixmap = QApplication.clipboard().pixmap()
+            if not pixmap.isNull():
+                self.load_pixmap(pixmap)
+
     def apply_mosaic_at(self, point):
         """在指定位置应用马赛克"""
         if not self.display_pixmap:

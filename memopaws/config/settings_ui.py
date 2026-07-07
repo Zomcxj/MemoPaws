@@ -493,6 +493,61 @@ def build_settings_ui(page):
 
     layout.addWidget(shortcut_group)
 
+    floating_group = QFrame()
+    floating_group.setObjectName("card")
+    floating_group.setStyleSheet(f"""
+        QFrame#card {{
+            background: {_t.bg_panel};
+            border: 1px solid {_t.border_subtle};
+            border-radius: 12px;
+            padding: 16px;
+        }}
+    """)
+    floating_layout = QVBoxLayout(floating_group)
+    floating_main_row = QHBoxLayout()
+    floating_main_row.setContentsMargins(0, 0, 0, 0)
+    floating_main_row.setSpacing(8)
+    self.floating_title_lbl = QLabel("悬浮窗")
+    self.floating_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{_t.text_primary}; border:none; background:transparent;")
+    self.floating_title_lbl.setFixedHeight(24)
+    self.floating_title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    floating_main_row.addWidget(self.floating_title_lbl)
+    floating_main_row.addStretch()
+    config = self._load_config()
+    is_floating_visible = config.get("show_floating_widget", True)
+    self._floating_seg = QFrame()
+    self._floating_seg.setFixedHeight(34)
+    self._floating_seg.setFixedWidth(162)
+    self._floating_seg.setStyleSheet(f"""
+        QFrame {{
+            background: {_t.bg_neutral_button};
+            border: 1px solid {_t.border_subtle};
+            border-radius: 8px;
+        }}
+    """)
+    floating_seg_layout = QHBoxLayout(self._floating_seg)
+    floating_seg_layout.setContentsMargins(0, 0, 0, 0)
+    floating_seg_layout.setSpacing(0)
+    self.floating_btn_show = QPushButton("显示" if self._get_current_lang() == "zh" else "Show")
+    self.floating_btn_show.setCheckable(True)
+    self.floating_btn_show.setChecked(is_floating_visible)
+    self.floating_btn_show.setFixedWidth(80)
+    self.floating_btn_show.setFixedHeight(32)
+    self.floating_btn_show.clicked.connect(lambda: self._set_floating_widget_visible(True))
+    floating_seg_layout.addWidget(self.floating_btn_show)
+    self.floating_btn_hide = QPushButton("隐藏" if self._get_current_lang() == "zh" else "Hide")
+    self.floating_btn_hide.setCheckable(True)
+    self.floating_btn_hide.setChecked(not is_floating_visible)
+    self.floating_btn_hide.setFixedWidth(80)
+    self.floating_btn_hide.setFixedHeight(32)
+    self.floating_btn_hide.clicked.connect(lambda: self._set_floating_widget_visible(False))
+    floating_seg_layout.addWidget(self.floating_btn_hide)
+    self._floating_seg_ctrl = AnimatedSegmentedControl(self._floating_seg, self.floating_btn_show, self.floating_btn_hide)
+    self.settings_floating_widget_switch = self.floating_btn_show
+    floating_main_row.addWidget(self._floating_seg)
+    floating_layout.addLayout(floating_main_row)
+    layout.addWidget(floating_group)
+
     # ── 关闭窗口行为（分段按钮）──
     close_group = QFrame()
     close_group.setObjectName("card")
@@ -521,7 +576,7 @@ def build_settings_ui(page):
 
     self._close_seg = QFrame()
     self._close_seg.setFixedHeight(34)
-    self._close_seg.setFixedWidth(222)
+    self._close_seg.setFixedWidth(162)
     self._close_seg.setStyleSheet(f"""
         QFrame {{
             background: {_t.bg_neutral_button};
@@ -533,18 +588,18 @@ def build_settings_ui(page):
     close_seg_layout.setContentsMargins(0, 0, 0, 0)
     close_seg_layout.setSpacing(0)
 
-    self.close_btn_exit = QPushButton("Exit")
+    self.close_btn_exit = QPushButton("关闭")
     self.close_btn_exit.setCheckable(True)
     self.close_btn_exit.setChecked(not is_tray)
-    self.close_btn_exit.setFixedWidth(110)
+    self.close_btn_exit.setFixedWidth(80)
     self.close_btn_exit.setFixedHeight(32)
     self.close_btn_exit.clicked.connect(lambda: self._set_close_behavior("exit"))
     close_seg_layout.addWidget(self.close_btn_exit)
 
-    self.close_btn_tray = QPushButton("Tray")
+    self.close_btn_tray = QPushButton("最小化")
     self.close_btn_tray.setCheckable(True)
     self.close_btn_tray.setChecked(is_tray)
-    self.close_btn_tray.setFixedWidth(110)
+    self.close_btn_tray.setFixedWidth(80)
     self.close_btn_tray.setFixedHeight(32)
     self.close_btn_tray.clicked.connect(lambda: self._set_close_behavior("tray"))
     close_seg_layout.addWidget(self.close_btn_tray)

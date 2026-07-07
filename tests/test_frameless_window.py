@@ -38,3 +38,21 @@ class TestFramelessWindowMixin:
         assert hasattr(FramelessWindowMixin, "_hit_test")
         assert hasattr(FramelessWindowMixin, "_toggle_maximize")
         assert hasattr(FramelessWindowMixin, "_is_on_interactive_widget")
+
+    def test_maximized_window_disables_rounded_paint(self, qapp):
+        class DummyWindow(FramelessWindowMixin, QWidget):
+            def __init__(self):
+                super().__init__()
+
+            def isMaximized(self):
+                return True
+
+        window = DummyWindow()
+        assert window._use_rounded_window() is False
+
+    def test_maximized_rect_uses_work_area(self):
+        class DummyWindow(FramelessWindowMixin, QWidget):
+            pass
+
+        window = DummyWindow()
+        assert window._clamp_maximized_rect((0, 0, 1920, 1080), (0, 0, 1920, 1040)) == (0, 0, 1920, 1040)

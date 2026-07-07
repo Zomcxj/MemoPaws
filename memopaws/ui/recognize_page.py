@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
     QSplitter, QFrame, QSlider, QSizePolicy, QListWidget,
     QListWidgetItem, QComboBox, QFileDialog, QMessageBox, QApplication,
+    QDialog,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, QSize, QPropertyAnimation, QEasingCurve, Property, Signal
 from PySide6.QtGui import QIcon, QPixmap, QShortcut, QKeySequence, QPainter, QColor, QPen
@@ -525,6 +526,12 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     def _on_capture_copy(self, pixmap):
         """截图覆盖层：复制图片到剪切板，恢复主窗口但不抢焦点"""
         QApplication.clipboard().setImage(pixmap.toImage())
+        w = self.window()
+        if hasattr(w, 'clipboard_page'):
+            try:
+                w.clipboard_page._add_clipboard_image_record(pixmap)
+            except Exception:
+                pass
         self.window().showMinimized()
 
     def _cleanup_old_worker(self, attr_name: str):
@@ -537,6 +544,179 @@ class RecognizePage(OCRTranslateMixin, QWidget):
                     worker.wait(500)
             except RuntimeError:
                 pass
+
+    def _get_pixmap_from_clipboard(self):
+        clipboard = QApplication.clipboard()
+        mime = clipboard.mimeData()
+        pixmap = clipboard.pixmap()
+        if pixmap.isNull() and mime and mime.hasImage():
+            image = clipboard.image()
+            if not image.isNull():
+                pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull() and mime and mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile():
+                    path = url.toLocalFile()
+                    if os.path.splitext(path)[1].lower() in {".png", ".jpg", ".jpeg", ".bmp", ".webp"}:
+                        loaded = QPixmap(path)
+                        if not loaded.isNull():
+                            pixmap = loaded
+                            break
+        if pixmap.isNull():
+            w = self.window()
+            if hasattr(w, "clipboard_page"):
+                latest = w.clipboard_page.latest_image_record()
+                if latest and latest.get("image_path"):
+                    loaded = QPixmap(latest["image_path"])
+                    if not loaded.isNull():
+                        pixmap = loaded
+        return pixmap
+
+    def paste_ocr_from_clipboard(self):
+        pixmap = self._get_pixmap_from_clipboard()
+        if pixmap.isNull():
+            self._show_message(QMessageBox.Icon.Information, "提示", "剪贴板中没有图片")
+            return
+        self.canvas.load_pixmap(pixmap)
+        self._run_ocr_ai()
+
+    def paste_ocr_simple(self):
+        """粘贴图片OCR，弹窗显示OCR+翻译结果，复用截图覆盖层结果面板风格"""
+        pixmap = self._get_pixmap_from_clipboard()
+        if pixmap.isNull():
+            self._show_message(QMessageBox.Icon.Information, "提示", "剪贴板中没有图片")
+            return
+        self.canvas.load_pixmap(pixmap)
+
+        t = self._get_theme()
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle("识别结果")
+        dlg.resize(520, 400)
+        dlg.setStyleSheet(f"QDialog {{ background: {t.bg_panel}; }}")
+
+        vbox = QVBoxLayout(dlg)
+        vbox.setContentsMargins(12, 10, 12, 10)
+        vbox.setSpacing(8)
+
+        header_css = f"color: {t.text_primary}; font-size: 12px; font-weight: 600; background: transparent; border: none;"
+        text_css = f"""
+            QTextEdit {{
+                background: {t.bg_input};
+                color: {t.text_primary};
+                border: 1px solid {t.border_subtle};
+                border-radius: 8px;
+                padding: 6px;
+                font-size: 12px;
+            }}
+        """
+        copy_btn_css = f"""
+            QPushButton {{
+                background: {t.bg_neutral_button};
+                color: {t.text_primary};
+                border: none;
+                border-radius: 6px;
+                padding: 2px 8px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{ background: {t.border_subtle}; }}
+        """
+
+        # OCR 结果区
+        ocr_header = QHBoxLayout()
+        ocr_lbl = QLabel("识别结果")
+        ocr_lbl.setStyleSheet(header_css)
+        ocr_header.addWidget(ocr_lbl)
+        ocr_header.addStretch()
+        ocr_copy_btn = QPushButton("复制")
+        ocr_copy_btn.setStyleSheet(copy_btn_css)
+        ocr_header.addWidget(ocr_copy_btn)
+        vbox.addLayout(ocr_header)
+
+        ocr_te = QTextEdit()
+        ocr_te.setReadOnly(True)
+        ocr_te.setMinimumHeight(80)
+        ocr_te.setStyleSheet(text_css)
+        ocr_te.setPlainText("识别中...")
+        vbox.addWidget(ocr_te, 1)
+
+        # 翻译结果区
+        trans_header = QHBoxLayout()
+        trans_lbl = QLabel("翻译结果")
+        trans_lbl.setStyleSheet(header_css)
+        trans_header.addWidget(trans_lbl)
+        trans_header.addStretch()
+        trans_copy_btn = QPushButton("复制")
+        trans_copy_btn.setStyleSheet(copy_btn_css)
+        trans_header.addWidget(trans_copy_btn)
+        vbox.addLayout(trans_header)
+
+        trans_te = QTextEdit()
+        trans_te.setReadOnly(True)
+        trans_te.setMinimumHeight(80)
+        trans_te.setStyleSheet(text_css)
+        vbox.addWidget(trans_te, 1)
+
+        # 底部按钮
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {t.bg_neutral_button}; color: {t.text_primary};
+                border: none; border-radius: 6px;
+                padding: 6px; font-size: 12px;
+            }}
+            QPushButton:hover {{ background: {t.border_subtle}; }}
+        """)
+        close_btn.clicked.connect(dlg.close)
+        bottom_row = QHBoxLayout()
+        bottom_row.addWidget(close_btn)
+        bottom_row.addStretch()
+        vbox.addLayout(bottom_row)
+
+        ocr_copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(ocr_te.toPlainText()))
+        trans_copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(trans_te.toPlainText()))
+
+        def on_ocr_done(text):
+            ocr_te.setPlainText(text)
+            self.ocr_text.setPlainText(text)
+
+        def on_translate_done(ocr_text, translated):
+            ocr_te.setPlainText(ocr_text)
+            trans_te.setPlainText(translated)
+            self.ocr_text.setPlainText(ocr_text)
+            self.translate_text.setPlainText(translated)
+
+        self._cleanup_old_worker('_ocr_worker')
+        self._ocr_worker = _CaptureOCRWorker(self.ocr_manager, pixmap)
+        self._ocr_worker.finished.connect(on_ocr_done)
+        self._ocr_worker.finished.connect(self._ocr_worker.deleteLater)
+        self._ocr_worker.start()
+
+        target = getattr(self, 'translate_target', '英文')
+        self._translate_worker = _CaptureTranslateWorker(self.ocr_manager, self.translator, target, pixmap)
+        self._translate_worker.translate_done.connect(on_translate_done)
+        self._translate_worker.finished.connect(self._translate_worker.deleteLater)
+        self._translate_worker.start()
+
+        def _cleanup_on_close():
+            if self._ocr_worker is not None:
+                try:
+                    self._ocr_worker.finished.disconnect(on_ocr_done)
+                except RuntimeError:
+                    pass
+            if self._translate_worker is not None:
+                try:
+                    self._translate_worker.translate_done.disconnect(on_translate_done)
+                except RuntimeError:
+                    pass
+
+        dlg.finished.connect(lambda _: _cleanup_on_close())
+        dlg.exec()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_V and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.paste_ocr_from_clipboard()
+            return
+        super().keyPressEvent(event)
 
     def _on_capture_save(self, pixmap):
         """截图覆盖层：保存图片到文件，恢复主窗口但不抢焦点"""
@@ -632,6 +812,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self.canvas.update_view()
         self.ocr_text.clear()
         self.translate_text.clear()
+
 
     # ══════════════════════════════════════════════
     #  历史记录

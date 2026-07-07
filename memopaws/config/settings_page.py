@@ -34,6 +34,7 @@ class SettingsPage(QWidget):
                  get_current_lang,
                  get_current_theme_dark,
                  on_save_clipboard,
+                 on_set_floating_widget_visible,
                  show_message,
                  shortcut_mgr=None,
                  text_replacer=None):
@@ -50,8 +51,10 @@ class SettingsPage(QWidget):
         self._get_current_lang = get_current_lang
         self._get_current_theme_dark = get_current_theme_dark
         self._on_save_clipboard = on_save_clipboard
+        self._on_set_floating_widget_visible = on_set_floating_widget_visible
         self._show_message = show_message
         self._shortcut_mgr = shortcut_mgr
+        self._floating_widget_visible = self._load_config().get("show_floating_widget", True)
 
         self._create_ui()
         self.apply_theme()  # 初始化时应用主题色
@@ -69,6 +72,7 @@ class SettingsPage(QWidget):
         self._update_theme_seg_style()
         self._update_lang_seg_style()
         self._update_close_seg_style()
+        self._update_floating_seg_style()
 
     # ── 样式刷新 ──
 
@@ -98,6 +102,8 @@ class SettingsPage(QWidget):
         self.lang_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         self.api_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         self.clip_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
+        if hasattr(self, 'floating_title_lbl'):
+            self.floating_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         if hasattr(self, 'hist_title_lbl'):
             self.hist_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
         self.shortcut_title_lbl.setStyleSheet(f"font-size:16px; font-weight:600; color:{t.text_primary}; border:none; background:transparent;")
@@ -142,7 +148,6 @@ class SettingsPage(QWidget):
             self._memo_browse_btn.setStyleSheet(_reset_ss)
         if hasattr(self, 'memo_path_tip'):
             self.memo_path_tip.setStyleSheet(f"font-size:11px; color:{t.text_muted}; border:none; background:transparent;")
-
         # 主题分段按钮容器
         if hasattr(self, '_theme_seg'):
             self._theme_seg.setStyleSheet(f"""
@@ -164,6 +169,16 @@ class SettingsPage(QWidget):
                 }}
             """)
         self._update_lang_seg_style()
+
+        if hasattr(self, '_floating_seg'):
+            self._floating_seg.setStyleSheet(f"""
+                QFrame {{
+                    background: {t.bg_neutral_button};
+                    border: 1px solid {t.border_subtle};
+                    border-radius: 8px;
+                }}
+            """)
+        self._update_floating_seg_style()
 
         # 关闭行为分段按钮容器
         if hasattr(self, '_close_seg'):
@@ -197,6 +212,11 @@ class SettingsPage(QWidget):
             self.api_title_lbl.setText("API Configuration" if lang == "en" else "API 配置")
         if hasattr(self, 'clip_title_lbl'):
             self.clip_title_lbl.setText("Clipboard Settings" if lang == "en" else "剪切板设置")
+        if hasattr(self, 'floating_title_lbl'):
+            self.floating_title_lbl.setText("Floating Widget" if lang == "en" else "悬浮窗")
+        if hasattr(self, 'floating_btn_show'):
+            self.floating_btn_show.setText("Show" if lang == "en" else "显示")
+            self.floating_btn_hide.setText("Hide" if lang == "en" else "隐藏")
         if hasattr(self, 'shortcut_title_lbl'):
             self.shortcut_title_lbl.setText("Keyboard Shortcuts" if lang == "en" else "键盘快捷键")
         if hasattr(self, 'close_title_lbl'):
@@ -220,8 +240,8 @@ class SettingsPage(QWidget):
                 else "(超出时自动删除最旧记录)")
         # 关闭行为分段按钮
         if hasattr(self, 'close_btn_exit'):
-            self.close_btn_exit.setText("Exit" if lang == "en" else "直接关闭")
-            self.close_btn_tray.setText("Tray" if lang == "en" else "最小化到任务栏")
+            self.close_btn_exit.setText("Exit" if lang == "en" else "关闭")
+            self.close_btn_tray.setText("Minimize" if lang == "en" else "最小化")
         # 同步分段按钮选中状态
         self._update_close_seg_style()
         # 快捷键芯片名称
@@ -259,6 +279,7 @@ class SettingsPage(QWidget):
                 if lang == "en" else "(总条数上限；超出时自动删除最旧的非锁定项)")
         # 同步分段按钮选中状态
         self._update_lang_seg_style()
+        self._update_floating_seg_style()
 
     def _update_lang_seg_style(self):
         """刷新语言分段按钮的选中样式"""
@@ -294,6 +315,20 @@ class SettingsPage(QWidget):
         self._theme_seg_ctrl.set_accent(t.accent)
         self._theme_seg_ctrl.update_position(animated=True)
 
+    def _update_floating_seg_style(self):
+        if not hasattr(self, 'floating_btn_show'):
+            return
+        t = DARK if self._is_dark() else LIGHT
+        is_visible = getattr(self, '_floating_widget_visible', True)
+        self.floating_btn_show.setChecked(is_visible)
+        self.floating_btn_hide.setChecked(not is_visible)
+        btn_ss = f"QPushButton {{ background: transparent; color: {t.text_secondary}; border: none; border-radius: 8px; font-size: 13px; padding: 0 0 2px 0; }}"
+        active_text_ss = f"QPushButton {{ background: transparent; color: #FFFFFF; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 0 0 2px 0; }}"
+        self.floating_btn_show.setStyleSheet(active_text_ss if is_visible else btn_ss)
+        self.floating_btn_hide.setStyleSheet(active_text_ss if not is_visible else btn_ss)
+        self._floating_seg_ctrl.set_accent(t.accent)
+        self._floating_seg_ctrl.update_position(animated=True)
+
     def _set_close_behavior(self, behavior: str):
         self._close_behavior = behavior
         self._update_close_seg_style()
@@ -316,6 +351,14 @@ class SettingsPage(QWidget):
         self.close_btn_tray.setStyleSheet(active_text_ss if is_tray else btn_ss)
         self._close_seg_ctrl.set_accent(t.accent)
         self._close_seg_ctrl.update_position(animated=True)
+
+    def _set_floating_widget_visible(self, checked: bool):
+        self._floating_widget_visible = bool(checked)
+        config = self._load_config()
+        config["show_floating_widget"] = bool(checked)
+        self._save_config(config)
+        self._on_set_floating_widget_visible(bool(checked))
+        self._update_floating_seg_style()
 
     # ── 快捷键编辑 ──
 
@@ -394,6 +437,7 @@ class SettingsPage(QWidget):
         config["api_url"] = self._normalize_api_url(self.settings_url_input.text().strip())
         config["api_model"] = self.settings_model_input.text().strip() or "glm-4-flash"
         config["close_behavior"] = getattr(self, '_close_behavior', 'exit')
+        config["show_floating_widget"] = self.settings_floating_widget_switch.isChecked()
         config["history_max_items"] = int(self.settings_hist_max_input.value())
 
         # 存储目录

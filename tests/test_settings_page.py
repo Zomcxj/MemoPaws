@@ -40,9 +40,12 @@ class TestSettingsPage:
             get_current_lang=lambda: "zh",
             get_current_theme_dark=lambda: True,
             on_save_clipboard=lambda c: None,
+            on_set_floating_widget_visible=lambda visible: None,
             show_message=lambda *a, **kw: None,
         )
         assert page is not None
+        assert getattr(page, '_floating_widget_visible', True) is True
+        assert hasattr(page, "_floating_seg")
 
     def test_normalize_api_url(self, qapp, parent, tmp_config):
         page = SettingsPage(
@@ -59,6 +62,7 @@ class TestSettingsPage:
             get_current_lang=lambda: "zh",
             get_current_theme_dark=lambda: True,
             on_save_clipboard=lambda c: None,
+            on_set_floating_widget_visible=lambda visible: None,
             show_message=lambda *a, **kw: None,
         )
         url = page._normalize_api_url("https://api.test.com/v1")
@@ -79,10 +83,43 @@ class TestSettingsPage:
             get_current_lang=lambda: "zh",
             get_current_theme_dark=lambda: True,
             on_save_clipboard=lambda c: None,
+            on_set_floating_widget_visible=lambda visible: None,
             show_message=lambda *a, **kw: None,
         )
         full_url = "https://api.test.com/v1/chat/completions"
         assert page._normalize_api_url(full_url) == full_url
+
+    def test_toggle_floating_widget_saves_config(self, qapp, parent, tmp_config):
+        saved = {}
+
+        def load_config():
+            return dict(saved)
+
+        def save_config(config):
+            saved.clear()
+            saved.update(config)
+
+        state = {"visible": None}
+        page = SettingsPage(
+            parent,
+            get_config_path=lambda: tmp_config,
+            get_theme=lambda: DARK,
+            is_dark=lambda: True,
+            load_config=load_config,
+            save_config=save_config,
+            ocr_manager=None,
+            on_toggle_theme=lambda: None,
+            on_set_theme=lambda t: None,
+            on_set_language=lambda l: None,
+            get_current_lang=lambda: "zh",
+            get_current_theme_dark=lambda: True,
+            on_save_clipboard=lambda c: None,
+            on_set_floating_widget_visible=lambda visible: state.__setitem__("visible", visible),
+            show_message=lambda *a, **kw: None,
+        )
+        page.floating_btn_hide.click()
+        assert saved["show_floating_widget"] is False
+        assert state["visible"] is False
 
     def test_api_test_starts_background_thread_without_blocking(self, qapp, monkeypatch):
         class SignalStub:

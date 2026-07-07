@@ -2,6 +2,8 @@
 
 import os
 import json
+import hashlib
+import uuid
 from datetime import datetime
 
 from PySide6.QtWidgets import (
@@ -10,7 +12,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGridLayout, QStackedLayout, QSizePolicy, QCheckBox,
     QAbstractScrollArea
 )
-from PySide6.QtGui import QIcon, QFont, QGuiApplication
+from PySide6.QtGui import QIcon, QFont, QGuiApplication, QPixmap, QImage
 from PySide6.QtCore import Qt, QSize, QTimer
 
 from ..core.utils import get_config_dir, ensure_config_dir, load_svg_icon
@@ -303,9 +305,8 @@ class ClipboardPage(QWidget):
             self.save_clipboard()
             self._update_clipboard_list()
         elif chosen == delete_action:
-            self._clipboard_data.pop(idx)
-            self.save_clipboard()
-            self._update_clipboard_list()
+            self._delete_clipboard_row(idx)
+            return
 
     def _show_clipboard_actions_menu(self, idx: int, global_pos):
         if not (0 <= idx < len(self._clipboard_data)):
@@ -349,6 +350,13 @@ class ClipboardPage(QWidget):
     def _delete_clipboard_row(self, idx: int):
         if not (0 <= idx < len(self._clipboard_data)):
             return
+        record = self._clipboard_data[idx]
+        if record.get("kind") == "image" and record.get("image_path"):
+            try:
+                if os.path.exists(record["image_path"]):
+                    os.remove(record["image_path"])
+            except Exception:
+                pass
         self._clipboard_data.pop(idx)
         self.save_clipboard()
         self._update_clipboard_list()
@@ -386,22 +394,94 @@ class ClipboardPage(QWidget):
 
     def _on_clipboard_changed(self):
         clipboard = QGuiApplication.clipboard()
+        mime = clipboard.mimeData()
+        pixmap = clipboard.pixmap()
+        if not pixmap.isNull():
+            self._add_clipboard_image_record(pixmap)
+            return
+        image = clipboard.image()
+        if not image.isNull():
+            self._add_clipboard_image_record(QPixmap.fromImage(image))
+            return
+        if mime and mime.hasImage():
+            var = mime.imageData()
+            if var.isValid():
+                qimg = var.value()
+                if isinstance(qimg, QImage) and not qimg.isNull():
+                    self._add_clipboard_image_record(QPixmap.fromImage(qimg))
+                    return
+        if mime and mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile():
+                    path = url.toLocalFile()
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in {".png", ".jpg", ".jpeg", ".bmp", ".webp"}:
+                        loaded = QPixmap(path)
+                        if not loaded.isNull():
+                            self._add_clipboard_image_record(loaded)
+                            return
         text = clipboard.text().strip()
         if text and len(text) > 1:
-            # 全量去重：检查所有条目
-            for existing in self._clipboard_data:
-                if existing.get("text", "").strip() == text:
-                    return
-            record = {
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "text": text[:2000],
-                "locked": False,
-            }
-            self._clipboard_data.insert(0, record)
-            self._sort_clipboard()
-            self._trim_clipboard()
-            self.save_clipboard()
-            self._update_clipboard_list()
+            self._add_clipboard_text_record(text)
+
+    def _clipboard_images_dir(self) -> str:
+        return os.path.join(get_config_dir(), "clipboard_images")
+
+    def _add_clipboard_text_record(self, text: str):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for existing in self._clipboard_data:
+            if existing.get("kind", "text") == "text" and existing.get("text", "").strip() == text:
+                existing["time"] = now
+                self._sort_clipboard()
+                self.save_clipboard()
+                self._update_clipboard_list()
+                return
+        record = {"time": now, "text": text[:2000], "locked": False, "kind": "text"}
+        self._clipboard_data.insert(0, record)
+        self._sort_clipboard()
+        self._trim_clipboard()
+        self.save_clipboard()
+        self._update_clipboard_list()
+
+    def _add_clipboard_image_record(self, pixmap: QPixmap):
+        ensure_config_dir()
+        image_bytes = self._pixmap_bytes(pixmap)
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for existing in self._clipboard_data:
+            if existing.get("kind") == "image" and existing.get("image_hash") == image_hash:
+                existing["time"] = now
+                self._sort_clipboard()
+                self.save_clipboard()
+                self._update_clipboard_list()
+                return
+        os.makedirs(self._clipboard_images_dir(), exist_ok=True)
+        filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.png"
+        image_path = os.path.join(self._clipboard_images_dir(), filename)
+        pixmap.save(image_path, "PNG")
+        record = {
+            "time": now,
+            "text": filename,
+            "locked": False,
+            "kind": "image",
+            "image_path": image_path,
+            "image_hash": image_hash,
+            "image_size": [pixmap.width(), pixmap.height()],
+        }
+        self._clipboard_data.insert(0, record)
+        self._sort_clipboard()
+        self._trim_clipboard()
+        self.save_clipboard()
+        self._update_clipboard_list()
+
+    def _pixmap_bytes(self, pixmap: QPixmap) -> bytes:
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+        array = QByteArray()
+        buffer = QBuffer(array)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        pixmap.save(buffer, "PNG")
+        return bytes(array)
 
     def _get_clipboard_max(self) -> int:
         try:
@@ -443,7 +523,10 @@ class ClipboardPage(QWidget):
         lang = self._get_current_lang()
         lock_text = "[Locked]" if lang == "en" else "[锁定]"
         for r in self._clipboard_data[:200]:
-            preview = r["text"][:60].replace("\n", " ")
+            if r.get("kind") == "image":
+                preview = f"[图片] {os.path.basename(r.get('image_path', r.get('text', '')))}"
+            else:
+                preview = r["text"][:60].replace("\n", " ")
             if r.get("locked"):
                 item = QListWidgetItem(lock_icon, f"{r['time']} {preview}")
             else:
@@ -512,7 +595,16 @@ class ClipboardPage(QWidget):
             top_row.addWidget(check)
         top_row.addWidget(title, 1)
         layout.addLayout(top_row)
-        content = QLabel((record.get("text", "") or "")[:120].replace("\n", " "))
+        if record.get("kind") == "image" and record.get("image_path") and os.path.exists(record.get("image_path")):
+            thumb = QLabel()
+            pixmap = QPixmap(record["image_path"])
+            thumb.setPixmap(pixmap.scaled(120, 60, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(thumb)
+            content_text = os.path.basename(record["image_path"])
+        else:
+            content_text = (record.get("text", "") or "")[:120].replace("\n", " ")
+        content = QLabel(content_text)
         content.setWordWrap(True)
         content.setMinimumWidth(0)
         content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
@@ -550,8 +642,15 @@ class ClipboardPage(QWidget):
                 return
             QFrame.mousePressEvent(card, event)
 
-        def mouseDoubleClickEvent(event, text=record.get("text", "")):
-            QGuiApplication.clipboard().setText(text)
+        def mouseDoubleClickEvent(event, row_idx=source_idx, rec=record):
+            if rec.get("kind") == "image" and rec.get("image_path") and os.path.exists(rec["image_path"]):
+                QGuiApplication.clipboard().setImage(QPixmap(rec["image_path"]).toImage())
+            else:
+                QGuiApplication.clipboard().setText(rec.get("text", ""))
+            rec["time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._sort_clipboard()
+            self.save_clipboard()
+            self._update_clipboard_list()
 
         card.mousePressEvent = mousePressEvent
         card.mouseDoubleClickEvent = mouseDoubleClickEvent
@@ -610,7 +709,15 @@ class ClipboardPage(QWidget):
 
     def clear_clipboard(self):
         before = len(self._clipboard_data)
+        removed_records = [r for r in self._clipboard_data if not r.get("locked")]
         self._clipboard_data = [r for r in self._clipboard_data if r.get("locked")]
+        for record in removed_records:
+            if record.get("kind") == "image" and record.get("image_path"):
+                try:
+                    if os.path.exists(record["image_path"]):
+                        os.remove(record["image_path"])
+                except Exception:
+                    pass
         removed = before - len(self._clipboard_data)
         self.save_clipboard()
         self._update_clipboard_list()
@@ -648,6 +755,11 @@ class ClipboardPage(QWidget):
     def _on_item_clicked(self, item):
         """点击条目直接切换复选框"""
         if not self._multi_select_mode:
+            idx = self.clipboard_list.row(item)
+            if 0 <= idx < len(self._clipboard_data):
+                record = self._clipboard_data[idx]
+                if record.get("kind") == "image" and record.get("image_path"):
+                    self._preview_clipboard_image(record.get("image_path"))
             return
         # 锁定项不允许勾选
         idx = self.clipboard_list.row(item)
@@ -720,6 +832,13 @@ class ClipboardPage(QWidget):
                 return
             for i in reversed(selected_indices):
                 if 0 <= i < len(self._clipboard_data):
+                    record = self._clipboard_data[i]
+                    if record.get("kind") == "image" and record.get("image_path"):
+                        try:
+                            if os.path.exists(record["image_path"]):
+                                os.remove(record["image_path"])
+                        except Exception:
+                            pass
                     self._clipboard_data.pop(i)
             self._grid_selected_indices.clear()
             self.save_clipboard()
@@ -741,6 +860,13 @@ class ClipboardPage(QWidget):
         first_visible = self.clipboard_list.indexAt(self.clipboard_list.viewport().rect().topLeft()).row()
         for i in reversed(selected_indices):
             if 0 <= i < len(self._clipboard_data):
+                record = self._clipboard_data[i]
+                if record.get("kind") == "image" and record.get("image_path"):
+                    try:
+                        if os.path.exists(record["image_path"]):
+                            os.remove(record["image_path"])
+                    except Exception:
+                        pass
                 self._clipboard_data.pop(i)
         self.save_clipboard()
         self._multi_select_mode = False
@@ -756,6 +882,26 @@ class ClipboardPage(QWidget):
             self.clipboard_list.scrollToItem(self.clipboard_list.item(target), QListWidget.ScrollHint.PositionAtTop)
         self.clipboard_list.blockSignals(False)
         self._on_append_status(f"已删除 {len(selected_indices)} 条记录")
+
+    def _preview_clipboard_image(self, image_path: str):
+        if not image_path or not os.path.exists(image_path):
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("图片预览")
+        vbox = QVBoxLayout(dlg)
+        label = QLabel()
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pixmap = QPixmap(image_path)
+        label.setPixmap(pixmap.scaled(900, 700, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        vbox.addWidget(label)
+        dlg.resize(920, 720)
+        dlg.exec()
+
+    def latest_image_record(self):
+        for record in self._clipboard_data:
+            if record.get("kind") == "image" and record.get("image_path") and os.path.exists(record.get("image_path")):
+                return record
+        return None
 
     def _exit_selection_mode(self):
         """退出多选模式，重建列表去除复选框"""
@@ -807,3 +953,4 @@ class ClipboardPage(QWidget):
             self.btn_select_all.setText("Select All" if lang == "en" else "全选")
         if hasattr(self, 'btn_cancel_select'):
             self.btn_cancel_select.setText("Cancel" if lang == "en" else "取消")
+        self._update_clipboard_list()

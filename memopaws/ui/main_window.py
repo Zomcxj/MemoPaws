@@ -23,6 +23,7 @@ from ..ocr.ocr import OCRManager
 from ..ocr.translator import SimpleTranslator
 from ..search.global_search import search_all
 from ..search.global_search_dialog import GlobalSearchDialog
+from .floating_widget import FloatingWidget
 from .frameless_window import FramelessWindowMixin
 from .tray import TrayMixin
 from .main_window_ui import build_pages, build_title_bar
@@ -87,6 +88,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         QTimer.singleShot(100, lambda: self._safe_set_title_bar_color())
         
         self._tray_icon = None
+        self._floating_widget = None
         self._setup_tray()
         
         # 剪贴板监听（延迟连接，等待 clipboard_page 创建）
@@ -94,6 +96,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         
         self.init_ui()
         self._setup_frameless()
+        self._setup_floating_widget()
         QTimer.singleShot(0, lambda: self.recognize_page._update_status_list())
         QTimer.singleShot(100, lambda: self._apply_language(self._current_lang))
     
@@ -209,11 +212,27 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
                             self.recognize_page.status_list.setCurrentRow(row)
                             self.recognize_page.status_list.scrollToItem(self.recognize_page.status_list.item(row), self.recognize_page.status_list.ScrollHint.PositionAtCenter)
                 QTimer.singleShot(0, select_history)
+
+    def _setup_floating_widget(self):
+        self._floating_widget = FloatingWidget(
+            get_config_path=self._get_config_path,
+            get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
+            on_capture_ocr=lambda: self.recognize_page.start_capture(),
+            on_paste_ocr=self.recognize_page.paste_ocr_simple,
+            on_open_clipboard=lambda: self.nav_sidebar.switch_page("剪切板"),
+            on_open_memo=lambda: self.nav_sidebar.switch_page("备忘录"),
+            on_open_settings=lambda: self.nav_sidebar.switch_page("设置"),
+        )
+        if self.load_config().get("show_floating_widget", True):
+            self._floating_widget.show()
     
     # ── 窗口拖拽 ──
     def eventFilter(self, obj, event):
         from PySide6.QtCore import QEvent
         if obj == self.nav_sidebar.nav_frame:
+            if self.isMaximized():
+                self._drag_pos = None
+                return False
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
                 return False
@@ -258,6 +277,16 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     def _apply_language(self, lang: str):
         """应用语言设置，通过信号分发给各模块"""
         self.language_changed.emit(lang)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        self._sync_window_surface()
+
+    def _sync_window_surface(self):
+        # 最大化时不要透明外壳，避免无边框窗口客户区边缘被系统裁掉。
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, not self.isMaximized())
+        self.update()
+
     def show_themed_message(self, icon, title, text):
         msg = QMessageBox(self)
         msg.setIcon(icon)
@@ -321,8 +350,19 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     
     def _append_status(self, msg: str):
         """在贴图识别页面的操作历史里追加一条简短的提示"""
+        if msg.startswith("悬浮窗"):
+            return
         if hasattr(self, 'recognize_page'):
             self.recognize_page._append_status(msg)
+
+    def _set_floating_widget_visible(self, visible: bool):
+        if not self._floating_widget:
+            return
+        if visible:
+            self._floating_widget.show()
+            self._floating_widget.raise_()
+        else:
+            self._floating_widget.hide()
     
     def _get_config_path(self):
         ensure_config_dir()

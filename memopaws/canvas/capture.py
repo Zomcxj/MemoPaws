@@ -1,6 +1,6 @@
 """截图覆盖层模块"""
 
-from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QTextEdit
+from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QTextEdit, QMenu
 from PySide6.QtCore import Qt, QPoint, QRect, Signal, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QGuiApplication, QPixmap, QFont, QPainterPath
 
@@ -153,7 +153,7 @@ class ScreenCaptureOverlay(QWidget):
         """右侧结果面板（空白区域拖动，右下角缩放）"""
         self._result_panel = QWidget(self)
         self._result_panel.hide()
-        self._result_panel.setFixedSize(316, 416)
+        self._result_panel.setFixedSize(466, 549)
         self._result_panel.setStyleSheet("""
             QWidget {
                 background: #2C2C2B;
@@ -271,8 +271,8 @@ class ScreenCaptureOverlay(QWidget):
         self._resizing = False
         self._resize_start_pos = None
         self._resize_start_geo = None
-        self._min_w, self._min_h = 300, 400
-        self._max_w, self._max_h = 600, 600
+        self._min_w, self._min_h = 450, 533
+        self._max_w, self._max_h = 900, 800
 
         # 给面板安装事件过滤器（处理空白区域拖动）
         self._result_panel.installEventFilter(self)
@@ -788,6 +788,44 @@ class ScreenCaptureOverlay(QWidget):
             self.trans_text_edit.clear()
         self._stop_flash()
         self.update()
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #2C2C2B; color: #F1F1EF;
+                border: 1px solid #3E3E38; border-radius: 8px; padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px; border-radius: 4px; font-size: 12px;
+            }
+            QMenu::item:selected { background: rgba(255,255,255,0.08); color: #D97757; }
+        """)
+        if self.selection_done and not self.get_selection_rect().isNull():
+            a_ocr = menu.addAction("OCR 识别")
+            a_trans = menu.addAction("翻译")
+            a_copy = menu.addAction("复制选区")
+            a_save = menu.addAction("保存选区")
+            menu.addSeparator()
+            a_cancel = menu.addAction("取消选区")
+            chosen = menu.exec(event.globalPos())
+            if chosen == a_ocr:
+                self._on_ocr()
+            elif chosen == a_trans:
+                self._on_translate()
+            elif chosen == a_copy:
+                self._on_copy()
+            elif chosen == a_save:
+                self._on_save()
+            elif chosen == a_cancel:
+                self._reset()
+        else:
+            a_exit = menu.addAction("退出截图")
+            chosen = menu.exec(event.globalPos())
+            if chosen == a_exit:
+                self._restore_main_window()
+                self.close()
+        event.accept()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

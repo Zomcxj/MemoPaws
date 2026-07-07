@@ -47,8 +47,8 @@ def build_title_bar(window, theme):
     window.close_btn.clicked.connect(window.close)
     title_bar_layout.addWidget(window.close_btn)
 
-    title_bar.mousePressEvent = lambda e: setattr(window, '_drag_pos', e.globalPosition().toPoint() - window.frameGeometry().topLeft()) if e.button() == Qt.MouseButton.LeftButton else None
-    title_bar.mouseMoveEvent = lambda e: window.move(e.globalPosition().toPoint() - window._drag_pos) if e.buttons() & Qt.MouseButton.LeftButton and getattr(window, '_drag_pos', None) else None
+    title_bar.mousePressEvent = lambda e: setattr(window, '_drag_pos', e.globalPosition().toPoint() - window.frameGeometry().topLeft()) if (not window.isMaximized() and e.button() == Qt.MouseButton.LeftButton) else None
+    title_bar.mouseMoveEvent = lambda e: window.move(e.globalPosition().toPoint() - window._drag_pos) if (not window.isMaximized() and e.buttons() & Qt.MouseButton.LeftButton and getattr(window, '_drag_pos', None)) else None
     title_bar.mouseReleaseEvent = lambda e: setattr(window, '_drag_pos', None)
     title_bar.mouseDoubleClickEvent = lambda e: window._toggle_maximize()
     return title_bar
@@ -124,6 +124,7 @@ def _setup_pages(window):
             window.clipboard_page._trim_clipboard(),
             window.clipboard_page._update_clipboard_list(),
         ),
+        on_set_floating_widget_visible=window._set_floating_widget_visible,
         show_message=window.show_themed_message,
         shortcut_mgr=window.shortcut_mgr,
         text_replacer=window.text_replacer,
