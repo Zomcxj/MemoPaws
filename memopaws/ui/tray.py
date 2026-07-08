@@ -29,6 +29,9 @@ class TrayMixin:
             action_show = QAction("显示窗口", self)
             action_show.triggered.connect(self._show_from_tray)
             tray_menu.addAction(action_show)
+            action_show_floating = QAction("显示悬浮窗", self)
+            action_show_floating.triggered.connect(self._show_floating_widget_from_tray)
+            tray_menu.addAction(action_show_floating)
             tray_menu.addSeparator()
             action_quit = QAction("退出", self)
             action_quit.triggered.connect(self._quit_app)
@@ -50,6 +53,10 @@ class TrayMixin:
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def _show_floating_widget_from_tray(self):
+        if hasattr(self, '_set_floating_widget_visible'):
+            self._set_floating_widget_visible(True)
 
     def _quit_app(self):
         if self._tray_icon:

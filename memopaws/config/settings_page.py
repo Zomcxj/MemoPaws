@@ -360,6 +360,10 @@ class SettingsPage(QWidget):
         self._on_set_floating_widget_visible(bool(checked))
         self._update_floating_seg_style()
 
+    def _sync_floating_widget_visibility(self, visible: bool):
+        self._floating_widget_visible = bool(visible)
+        self._update_floating_seg_style()
+
     # ── 快捷键编辑 ──
 
     def eventFilter(self, obj, event):

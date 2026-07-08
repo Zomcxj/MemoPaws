@@ -4,6 +4,8 @@ from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QL
 from PySide6.QtCore import Qt, QPoint, QRect, Signal, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QGuiApplication, QPixmap, QFont, QPainterPath
 
+from ..ui.ocr_result_widget import OCRResultWidget
+
 
 class ScreenCaptureOverlay(QWidget):
     """全屏截图覆盖层"""
@@ -180,62 +182,16 @@ class ScreenCaptureOverlay(QWidget):
         panel_lay.setContentsMargins(12, 10, 12, 10)
         panel_lay.setSpacing(8)
 
-        header_css = "color: #F1F1EF; font-size: 12px; font-weight: 600; background: transparent; border: none;"
-        text_css = """
-            QTextEdit {
-                background: #1B1B19;
-                color: #F1F1EF;
-                border: 1px solid #52514A;
-                border-radius: 8px;
-                padding: 6px;
-                font-size: 12px;
-            }
-        """
-        copy_btn_css = """
-            QPushButton {
-                background: #3E3E38;
-                color: #F1F1EF;
-                border: none;
-                border-radius: 6px;
-                padding: 2px 8px;
-                font-size: 11px;
-            }
-            QPushButton:hover { background: #52514A; }
-        """
+        class _OverlayTheme:
+            text_primary = "#F1F1EF"
+            bg_input = "#1B1B19"
+            border_subtle = "#52514A"
+            bg_neutral_button = "#3E3E38"
 
-        ocr_header = QHBoxLayout()
-        ocr_lbl = QLabel("OCR 结果")
-        ocr_lbl.setStyleSheet(header_css)
-        ocr_header.addWidget(ocr_lbl)
-        ocr_header.addStretch()
-        ocr_copy_btn = QPushButton("复制")
-        ocr_copy_btn.setStyleSheet(copy_btn_css)
-        ocr_copy_btn.clicked.connect(lambda: self._copy_text(self.ocr_text_edit))
-        ocr_header.addWidget(ocr_copy_btn)
-        panel_lay.addLayout(ocr_header)
-
-        self.ocr_text_edit = QTextEdit()
-        self.ocr_text_edit.setMinimumHeight(80)
-        self.ocr_text_edit.setReadOnly(True)
-        self.ocr_text_edit.setStyleSheet(text_css)
-        panel_lay.addWidget(self.ocr_text_edit, 1)
-
-        trans_header = QHBoxLayout()
-        trans_lbl = QLabel("翻译结果")
-        trans_lbl.setStyleSheet(header_css)
-        trans_header.addWidget(trans_lbl)
-        trans_header.addStretch()
-        trans_copy_btn = QPushButton("复制")
-        trans_copy_btn.setStyleSheet(copy_btn_css)
-        trans_copy_btn.clicked.connect(lambda: self._copy_text(self.trans_text_edit))
-        trans_header.addWidget(trans_copy_btn)
-        panel_lay.addLayout(trans_header)
-
-        self.trans_text_edit = QTextEdit()
-        self.trans_text_edit.setMinimumHeight(80)
-        self.trans_text_edit.setReadOnly(True)
-        self.trans_text_edit.setStyleSheet(text_css)
-        panel_lay.addWidget(self.trans_text_edit, 1)
+        result_widget = OCRResultWidget(_OverlayTheme(), self._result_panel)
+        self.ocr_text_edit = result_widget.ocr_text_edit
+        self.trans_text_edit = result_widget.trans_text_edit
+        panel_lay.addWidget(result_widget, 1)
 
         # 底部栏：关闭 + 缩放手柄
         bottom_row = QHBoxLayout()

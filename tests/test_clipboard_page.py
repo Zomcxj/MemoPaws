@@ -130,3 +130,84 @@ class TestClipboardPage:
 
         labels = [w.text() for w in page._grid_container.findChildren(QLabel)]
         assert "[Locked]" in labels
+
+    def test_grid_card_height_is_increased(self, qapp, parent, icons_dir):
+        data = [{"time": "2024-01-01 09:00:00", "text": "same", "locked": False, "kind": "text"}]
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: "",
+            get_theme=lambda: DARK,
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: "#fff",
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: data,
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+
+        card = page._create_grid_card(0, data[0])
+
+        assert card.minimumHeight() == 160
+        assert card.maximumHeight() == 160
+
+    def test_grid_image_thumbnail_area_height_is_increased(self, qapp, parent, icons_dir, tmp_path, monkeypatch):
+        data = []
+        config = tmp_path / "MemoPaws.json"
+        config.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr("memopaws.clipboard.clipboard_page.get_config_dir", lambda: str(tmp_path))
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: str(config),
+            get_theme=lambda: DARK,
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: "#fff",
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: data,
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+        pixmap = QPixmap(20, 20)
+        page._add_clipboard_image_record(pixmap)
+
+        card = page._create_grid_card(0, data[0])
+        thumbs = card.findChildren(QLabel, "clipboardThumb")
+
+        assert thumbs
+        assert thumbs[0].minimumHeight() == 80
+        assert thumbs[0].pixmap().height() == 80
+
+    def test_apply_theme_refreshes_grid_card_style(self, qapp, parent, icons_dir):
+        class LightTheme:
+            bg_panel = "#FFFFFF"
+            border_subtle = "#E0DCD8"
+            text_primary = "#1C1B1A"
+            text_muted = "#9A9590"
+            accent = "#D97757"
+            bg_input = "#F5F3F0"
+            bg_neutral_button = "#F0EDE8"
+            bg_active = "#E8E5E0"
+            text_secondary = "#6B6560"
+            is_dark = False
+
+        data = [{"time": "2024-01-01 09:00:00", "text": "same", "locked": False, "kind": "text"}]
+        theme = {"value": DARK}
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: "",
+            get_theme=lambda: theme["value"],
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: "#fff",
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: data,
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+
+        page._set_view_mode("grid", save=False)
+        theme["value"] = LightTheme()
+        page.apply_theme()
+        qapp.processEvents()
+
+        card = page._grid_layout.itemAt(0).widget()
+        assert card is not None
+        assert "#FFFFFF" in card.styleSheet()

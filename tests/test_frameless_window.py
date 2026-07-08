@@ -2,6 +2,8 @@
 
 import pytest
 from unittest.mock import patch, MagicMock
+import ctypes
+import ctypes.wintypes
 
 from PySide6.QtWidgets import QWidget
 
@@ -56,3 +58,27 @@ class TestFramelessWindowMixin:
 
         window = DummyWindow()
         assert window._clamp_maximized_rect((0, 0, 1920, 1080), (0, 0, 1920, 1040)) == (0, 0, 1920, 1040)
+
+    def test_native_event_uses_msg_lparam_for_nccalcsize(self, qapp):
+        class DummyWindow(FramelessWindowMixin, QWidget):
+            def __init__(self):
+                super().__init__()
+                self.called_with = None
+
+            def isMaximized(self):
+                return True
+
+            def _apply_maximized_work_area(self, message_ptr):
+                self.called_with = message_ptr
+
+        window = DummyWindow()
+        msg = ctypes.wintypes.MSG()
+        msg.message = WM_NCCALCSIZE
+        msg.wParam = 1
+        msg.lParam = 123456
+
+        handled, result = window.nativeEvent(b"windows_generic_MSG", ctypes.addressof(msg))
+
+        assert handled is True
+        assert result == 0
+        assert window.called_with == 123456

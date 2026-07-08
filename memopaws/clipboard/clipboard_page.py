@@ -551,8 +551,10 @@ class ClipboardPage(QWidget):
             return
         try:
             for i in reversed(range(self._grid_layout.count())):
-                widget = self._grid_layout.itemAt(i).widget()
+                item = self._grid_layout.takeAt(i)
+                widget = item.widget() if item else None
                 if widget:
+                    widget.setParent(None)
                     widget.deleteLater()
         except RuntimeError:
             return
@@ -574,8 +576,8 @@ class ClipboardPage(QWidget):
             }}
         """)
         card.setMinimumWidth(0)
-        card.setMinimumHeight(120)
-        card.setMaximumHeight(120)
+        card.setMinimumHeight(160)
+        card.setMaximumHeight(160)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(10, 8, 10, 8)
@@ -597,8 +599,11 @@ class ClipboardPage(QWidget):
         layout.addLayout(top_row)
         if record.get("kind") == "image" and record.get("image_path") and os.path.exists(record.get("image_path")):
             thumb = QLabel()
+            thumb.setObjectName("clipboardThumb")
             pixmap = QPixmap(record["image_path"])
-            thumb.setPixmap(pixmap.scaled(120, 60, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            thumb.setMinimumHeight(80)
+            thumb.setMaximumHeight(80)
+            thumb.setPixmap(pixmap.scaled(160, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(thumb)
             content_text = os.path.basename(record["image_path"])
@@ -935,6 +940,7 @@ class ClipboardPage(QWidget):
             if hasattr(self, btn_attr):
                 getattr(self, btn_attr).setStyleSheet(get_clear_history_stylesheet(t))
         self._update_view_seg_style()
+        self._update_clipboard_list()
 
     def apply_language(self, lang: str):
         if hasattr(self, 'search_input'):

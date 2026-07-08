@@ -89,6 +89,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         
         self._tray_icon = None
         self._floating_widget = None
+        self._pending_show_floating_widget = saved_config.get("show_floating_widget", True)
         self._setup_tray()
         
         # 剪贴板监听（延迟连接，等待 clipboard_page 创建）
@@ -96,7 +97,6 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         
         self.init_ui()
         self._setup_frameless()
-        self._setup_floating_widget()
         QTimer.singleShot(0, lambda: self.recognize_page._update_status_list())
         QTimer.singleShot(100, lambda: self._apply_language(self._current_lang))
     
@@ -214,6 +214,8 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
                 QTimer.singleShot(0, select_history)
 
     def _setup_floating_widget(self):
+        if self._floating_widget is not None:
+            return
         self._floating_widget = FloatingWidget(
             get_config_path=self._get_config_path,
             get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
@@ -222,9 +224,8 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             on_open_clipboard=lambda: self.nav_sidebar.switch_page("剪切板"),
             on_open_memo=lambda: self.nav_sidebar.switch_page("备忘录"),
             on_open_settings=lambda: self.nav_sidebar.switch_page("设置"),
+            on_hide_floating=lambda: self._set_floating_widget_visible(False),
         )
-        if self.load_config().get("show_floating_widget", True):
-            self._floating_widget.show()
     
     # ── 窗口拖拽 ──
     def eventFilter(self, obj, event):
@@ -281,6 +282,14 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
     def changeEvent(self, event):
         super().changeEvent(event)
         self._sync_window_surface()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._floating_widget is None:
+            self._setup_floating_widget()
+        if self._pending_show_floating_widget and self._floating_widget and not self._floating_widget.isVisible():
+            self._pending_show_floating_widget = False
+            QTimer.singleShot(0, self._floating_widget.show)
 
     def _sync_window_surface(self):
         # 最大化时不要透明外壳，避免无边框窗口客户区边缘被系统裁掉。
@@ -356,8 +365,21 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             self.recognize_page._append_status(msg)
 
     def _set_floating_widget_visible(self, visible: bool):
+        self._pending_show_floating_widget = bool(visible)
         if not self._floating_widget:
-            return
+            if not visible:
+                config = self.load_config()
+                config["show_floating_widget"] = False
+                self.save_config(config)
+                if hasattr(self, 'settings_page'):
+                    self.settings_page._sync_floating_widget_visibility(False)
+                return
+            self._setup_floating_widget()
+        config = self.load_config()
+        config["show_floating_widget"] = bool(visible)
+        self.save_config(config)
+        if hasattr(self, 'settings_page'):
+            self.settings_page._sync_floating_widget_visibility(bool(visible))
         if visible:
             self._floating_widget.show()
             self._floating_widget.raise_()

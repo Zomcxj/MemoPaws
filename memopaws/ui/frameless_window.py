@@ -84,7 +84,7 @@ class FramelessWindowMixin:
             msg = ctypes.wintypes.MSG.from_address(int(message))
             if msg.message == WM_NCCALCSIZE and msg.wParam:
                 if self.isMaximized():
-                    self._apply_maximized_work_area(message)
+                    self._apply_maximized_work_area(msg.lParam)
                 return True, 0
             elif msg.message == WM_NCHITTEST:
                 result = self._hit_test(msg.lParam)

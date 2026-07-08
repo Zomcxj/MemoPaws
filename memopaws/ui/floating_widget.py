@@ -14,7 +14,7 @@ class FloatingWidget(QWidget):
     DEFAULT_RIGHT_MARGIN = DEFAULT_EDGE_MARGIN
 
     def __init__(self, *, get_config_path, get_theme, on_capture_ocr, on_paste_ocr,
-                 on_open_clipboard, on_open_memo, on_open_settings):
+                 on_open_clipboard, on_open_memo, on_open_settings, on_hide_floating):
         super().__init__(None)
         self._get_config_path = get_config_path
         self._get_theme = get_theme
@@ -23,6 +23,7 @@ class FloatingWidget(QWidget):
         self._on_open_clipboard = on_open_clipboard
         self._on_open_memo = on_open_memo
         self._on_open_settings = on_open_settings
+        self._on_hide_floating = on_hide_floating
         self._menu_open = False
         self._drag_offset = None
         self._dragging = False
@@ -115,6 +116,7 @@ class FloatingWidget(QWidget):
             ("剪切板", self._on_open_clipboard),
             ("备忘录", self._on_open_memo),
             ("设置", self._on_open_settings),
+            ("退出悬浮窗", self._on_hide_floating),
         ]:
             btn = QPushButton(text)
             btn.setFixedWidth(100)

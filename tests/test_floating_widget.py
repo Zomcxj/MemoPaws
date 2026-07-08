@@ -16,13 +16,16 @@ def test_floating_widget_toggle_menu(qapp, tmp_path):
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
         on_open_settings=lambda: None,
+        on_hide_floating=lambda: None,
     )
     widget._toggle_menu()
     assert widget._menu_open
     assert widget._menu_panel is not None
     assert widget._menu_panel.isVisible()
     assert widget._menu_panel.windowFlags() & Qt.WindowType.Tool
-    assert len(widget._menu_panel.findChildren(QPushButton)) == 5
+    texts = [btn.text() for btn in widget._menu_panel.findChildren(QPushButton)]
+    assert len(texts) == 6
+    assert "退出悬浮窗" in texts
     widget._close_menu()
     assert not widget._menu_open
 
@@ -38,6 +41,7 @@ def test_floating_widget_saves_position(qapp, tmp_path):
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
         on_open_settings=lambda: None,
+        on_hide_floating=lambda: None,
     )
     widget.move(100, 140)
     widget._save_position()
@@ -58,6 +62,7 @@ def test_floating_widget_load_position_keeps_button_inside_screen(qapp, tmp_path
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
         on_open_settings=lambda: None,
+        on_hide_floating=lambda: None,
     )
     screen = QGuiApplication.primaryScreen().availableGeometry()
     assert widget.x() <= screen.right() - widget.width() - widget.DEFAULT_RIGHT_MARGIN
@@ -76,6 +81,7 @@ def test_floating_widget_snaps_to_nearest_edge(qapp, tmp_path):
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
         on_open_settings=lambda: None,
+        on_hide_floating=lambda: None,
     )
     screen = QGuiApplication.primaryScreen().availableGeometry()
     widget.move(screen.center().x(), 140)
@@ -95,6 +101,7 @@ def test_floating_widget_has_no_black_outer_frame(qapp, tmp_path):
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
         on_open_settings=lambda: None,
+        on_hide_floating=lambda: None,
     )
     assert widget.windowFlags() & Qt.WindowType.Tool
     assert not hasattr(widget, "outer")

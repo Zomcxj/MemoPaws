@@ -68,3 +68,11 @@ def test_normal_window_keeps_translucent_background(qapp):
     window._sync_window_surface()
 
     assert window.testAttribute(QtCoreQt.WidgetAttribute.WA_TranslucentBackground) is True
+
+
+def test_floating_widget_created_after_show(qapp):
+    window = MainWindow()
+    assert window._floating_widget is None
+    window.show()
+    qapp.processEvents()
+    assert window._floating_widget is not None
