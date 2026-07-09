@@ -1,5 +1,6 @@
 import json
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, QEvent, Qt
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QPushButton
 
 from memopaws.ui.floating_widget import FloatingWidget
@@ -105,3 +106,43 @@ def test_floating_widget_has_no_black_outer_frame(qapp, tmp_path):
     )
     assert widget.windowFlags() & Qt.WindowType.Tool
     assert not hasattr(widget, "outer")
+
+
+def test_floating_widget_drag_cursor_changes_only_while_dragging(qapp, tmp_path):
+    config = tmp_path / "MemoPaws.json"
+    config.write_text("{}", encoding="utf-8")
+    widget = FloatingWidget(
+        get_config_path=lambda: str(config),
+        get_theme=lambda: type("T", (), {"bg_panel": "#fff", "border_subtle": "#ddd", "bg_neutral_button": "#eee", "text_primary": "#111", "bg_active": "#ccc", "accent": "#f60"})(),
+        on_capture_ocr=lambda: None,
+        on_paste_ocr=lambda: None,
+        on_open_clipboard=lambda: None,
+        on_open_memo=lambda: None,
+        on_open_settings=lambda: None,
+        on_hide_floating=lambda: None,
+    )
+    assert widget.main_btn.cursor().shape() == Qt.CursorShape.OpenHandCursor
+
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(8, 8),
+        QPointF(8, 8),
+        QPointF(widget.x() + 8, widget.y() + 8),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(8, 8),
+        QPointF(8, 8),
+        QPointF(widget.x() + 8, widget.y() + 8),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    widget.eventFilter(widget.main_btn, press)
+    assert widget.main_btn.cursor().shape() == Qt.CursorShape.ClosedHandCursor
+    widget.eventFilter(widget.main_btn, release)
+    assert widget.main_btn.cursor().shape() == Qt.CursorShape.OpenHandCursor

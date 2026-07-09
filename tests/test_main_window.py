@@ -76,3 +76,13 @@ def test_floating_widget_created_after_show(qapp):
     window.show()
     qapp.processEvents()
     assert window._floating_widget is not None
+
+
+def test_toggle_floating_widget_syncs_settings_page(qapp, monkeypatch):
+    window = MainWindow()
+    window.settings_page._sync_floating_widget_visibility = MagicMock()
+    window._floating_widget = MagicMock()
+
+    window._set_floating_widget_visible(False)
+
+    window.settings_page._sync_floating_widget_visibility.assert_called_once_with(False)

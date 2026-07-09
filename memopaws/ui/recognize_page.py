@@ -497,14 +497,19 @@ class RecognizePage(OCRTranslateMixin, QWidget):
 
     def start_capture(self):
         w = self.window()
-        w.showMinimized()
         w.hide()
-        QTimer.singleShot(100, self._start_capture_overlay)
+        QApplication.processEvents()
+        QTimer.singleShot(220, self._start_capture_overlay)
 
     def _start_capture_overlay(self):
+        w = self.window()
+        if hasattr(w, 'isVisible') and w.isVisible():
+            QTimer.singleShot(50, self._start_capture_overlay)
+            return
         self.capture_overlay = ScreenCaptureOverlay()
         self.capture_overlay.captured.connect(self.on_capture_finished)
         self.capture_overlay.copy_requested.connect(self._on_capture_copy)
+        self.capture_overlay.capture_to_recognize_requested.connect(self._on_capture_to_recognize)
         self.capture_overlay.saved.connect(self._on_capture_save)
         self.capture_overlay.ocr_requested.connect(self._on_capture_ocr)
         self.capture_overlay.translate_requested.connect(self._on_capture_translate)
@@ -533,6 +538,17 @@ class RecognizePage(OCRTranslateMixin, QWidget):
             except Exception:
                 pass
         self.window().showMinimized()
+
+    def _on_capture_to_recognize(self, pixmap):
+        """截图覆盖层：发送截图到主界面贴图识别"""
+        QApplication.clipboard().setImage(pixmap.toImage())
+        w = self.window()
+        if hasattr(w, 'clipboard_page'):
+            try:
+                w.clipboard_page._add_clipboard_image_record(pixmap)
+            except Exception:
+                pass
+        self.paste_ocr_simple()
 
     def _cleanup_old_worker(self, attr_name: str):
         """清理指定属性上的旧 QThread worker"""
@@ -690,6 +706,11 @@ class RecognizePage(OCRTranslateMixin, QWidget):
 
     def clear_image(self):
         """清空图片和识别结果"""
+        self.cleanup_threads()
+        self._cleanup_old_worker('_ocr_worker')
+        self._cleanup_old_worker('_translate_worker')
+        self._ocr_worker = None
+        self._translate_worker = None
         self.canvas.original_pixmap = None
         self.canvas.display_pixmap = None
         self.canvas.update_view()

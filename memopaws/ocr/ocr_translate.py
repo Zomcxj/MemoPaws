@@ -41,8 +41,10 @@ class OCRTranslateMixin:
         self.ocr_worker.finished.connect(self.ocr_thread.quit)
         self.ocr_worker.finished.connect(self.ocr_worker.deleteLater)
         self.ocr_thread.finished.connect(self.ocr_thread.deleteLater)
+        self._ocr_request_id = getattr(self, '_ocr_request_id', 0) + 1
+        request_id = self._ocr_request_id
         self._ocr_pending_callback = callback
-        self.ocr_worker.finished.connect(self._on_ocr_finished)
+        self.ocr_worker.finished.connect(lambda text, rid=request_id: self._on_ocr_finished(text, rid))
         self.ocr_thread.start()
 
     def _cleanup_ocr_thread(self):
@@ -73,7 +75,9 @@ class OCRTranslateMixin:
         
         self.run_ocr_async(pixmap, on_result)
     
-    def _on_ocr_finished(self, text):
+    def _on_ocr_finished(self, text, request_id=None):
+        if request_id is not None and request_id != getattr(self, '_ocr_request_id', 0):
+            return
         self.ocr_running = False
         self._glow_ocr.stop()
         if not text:
@@ -151,8 +155,10 @@ class OCRTranslateMixin:
             else None
         )
 
-        self.translate_worker.finished.connect(self._on_translate_finished)
-        self.translate_worker.error.connect(self._on_translate_error)
+        self._translate_request_id = getattr(self, '_translate_request_id', 0) + 1
+        request_id = self._translate_request_id
+        self.translate_worker.finished.connect(lambda translated, rid=request_id: self._on_translate_finished(translated, rid))
+        self.translate_worker.error.connect(lambda err_msg, rid=request_id: self._on_translate_error(err_msg, rid))
 
         self._glow_trans.start()
         self.btn_trans_online.setEnabled(False)
@@ -169,8 +175,20 @@ class OCRTranslateMixin:
                     thread.wait(500)
             except RuntimeError:
                 pass
+        self.ocr_running = False
+        self._ocr_pending_callback = None
+        self._ocr_request_id = getattr(self, '_ocr_request_id', 0) + 1
+        self._translate_request_id = getattr(self, '_translate_request_id', 0) + 1
+        self._glow_ocr.stop()
+        self._glow_trans.stop()
+        if hasattr(self, 'btn_trans_online'):
+            self.btn_trans_online.setEnabled(True)
+        if hasattr(self, 'btn_trans_ai'):
+            self.btn_trans_ai.setEnabled(True)
     
-    def _on_translate_finished(self, translated):
+    def _on_translate_finished(self, translated, request_id=None):
+        if request_id is not None and request_id != getattr(self, '_translate_request_id', 0):
+            return
         self._glow_trans.stop()
         self.btn_trans_online.setEnabled(True)
         self.btn_trans_ai.setEnabled(True)
@@ -188,7 +206,9 @@ class OCRTranslateMixin:
         )
         self.history_manager.update_status_list(self.status_list)
     
-    def _on_translate_error(self, err_msg):
+    def _on_translate_error(self, err_msg, request_id=None):
+        if request_id is not None and request_id != getattr(self, '_translate_request_id', 0):
+            return
         self._glow_trans.stop()
         self.btn_trans_online.setEnabled(True)
         self.btn_trans_ai.setEnabled(True)

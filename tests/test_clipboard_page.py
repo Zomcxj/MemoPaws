@@ -65,6 +65,21 @@ class TestClipboardPage:
 
         assert [page.clipboard_list.item(i).isHidden() for i in range(page.clipboard_list.count())] == [False, True]
 
+    def test_search_input_height_matches_view_switch_container(self, qapp, parent, icons_dir):
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: "",
+            get_theme=lambda: DARK,
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: "#fff",
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: [],
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+
+        assert page.search_input.height() == page._view_seg_container.height()
+
     def test_duplicate_text_refreshes_time(self, qapp, parent, icons_dir):
         data = [{"time": "2024-01-01 09:00:00", "text": "same", "locked": False, "kind": "text"}]
         page = ClipboardPage(

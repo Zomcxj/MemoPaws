@@ -1,10 +1,13 @@
 """截图覆盖层模块"""
 
-from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QTextEdit, QMenu
+import os
+
+from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QTextEdit, QMenu
 from PySide6.QtCore import Qt, QPoint, QRect, Signal, QTimer
-from PySide6.QtGui import QPainter, QColor, QPen, QGuiApplication, QPixmap, QFont, QPainterPath
+from PySide6.QtGui import QPainter, QColor, QPen, QGuiApplication, QPixmap, QFont, QPainterPath, QIcon
 
 from ..ui.ocr_result_widget import OCRResultWidget
+from ..core.utils import BUNDLE_DIR, load_svg_icon
 
 
 class ScreenCaptureOverlay(QWidget):
@@ -13,6 +16,7 @@ class ScreenCaptureOverlay(QWidget):
     captured = Signal(QPixmap, str, str)  # (pixmap, ocr_text, trans_text)
     saved = Signal(QPixmap)
     copy_requested = Signal(QPixmap)
+    capture_to_recognize_requested = Signal(QPixmap)
     ocr_requested = Signal(QPixmap)
     translate_requested = Signal(QPixmap)
 
@@ -22,6 +26,7 @@ class ScreenCaptureOverlay(QWidget):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
 
         screen = QGuiApplication.primaryScreen()
         geo = screen.geometry()
@@ -32,9 +37,14 @@ class ScreenCaptureOverlay(QWidget):
         self.is_selecting = False
         self.selection_done = False
         self._is_dragging = False
+        self._is_resizing = False
+        self._resize_handle = None
+        self._resize_base_rect = QRect()
         self._drag_offset = None
         self._drag_rect_width = 0
         self._drag_rect_height = 0
+        self._mouse_pos = QPoint()
+        self._pick_color_mode = False
 
         # 闪烁状态
         self._flash_active = False
@@ -63,93 +73,77 @@ class ScreenCaptureOverlay(QWidget):
             QPushButton {
                 background: rgba(40,40,40,200); color: #FFF;
                 border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
-                padding: 4px 14px; font-size: 12px; font-weight: 600;
+                padding: 0; min-width: 28px; max-width: 28px; font-size: 12px; font-weight: 600;
             }
             QPushButton:hover { background: rgba(60,60,60,220); }
         """
-        input_css = """
-            QLineEdit {
-                background: rgba(0,0,0,200); color: #FFF;
-                border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
-                padding: 2px 6px; font-size: 12px; font-weight: bold;
-            }
-        """
 
-        self.input_w = QLineEdit()
-        self.input_w.setFixedSize(60, 28)
-        self.input_w.setStyleSheet(input_css)
-        self.input_w.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.input_w.returnPressed.connect(self._apply_size)
-        bar.addWidget(self.input_w)
+        icons_dir = os.path.join(BUNDLE_DIR, "assets", "icons")
 
-        x_label = QLabel("×")
-        x_label.setStyleSheet("color: #FFF; font-size: 14px; font-weight: bold; background: transparent; border: none;")
-        bar.addWidget(x_label)
+        def _icon_btn(icon_name, tooltip, handler):
+            btn = QPushButton()
+            btn.setFixedSize(28, 28)
+            btn.setStyleSheet(btn_css)
+            btn.setToolTip(tooltip)
+            icon = load_svg_icon(os.path.join(icons_dir, icon_name), 16, "#FFFFFF")
+            btn.setIcon(QIcon(icon))
+            btn.setIconSize(icon.size())
+            btn.clicked.connect(handler)
+            return btn
 
-        self.input_h = QLineEdit()
-        self.input_h.setFixedSize(60, 28)
-        self.input_h.setStyleSheet(input_css)
-        self.input_h.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.input_h.returnPressed.connect(self._apply_size)
-        bar.addWidget(self.input_h)
-
-        self.btn_apply = QPushButton("确定")
-        self.btn_apply.setFixedHeight(28)
-        self.btn_apply.setStyleSheet(btn_css)
-        self.btn_apply.clicked.connect(self._apply_size)
-        bar.addWidget(self.btn_apply)
-
-        self.btn_copy = QPushButton("复制")
-        self.btn_copy.setFixedHeight(28)
-        self.btn_copy.setStyleSheet(btn_css)
-        self.btn_copy.clicked.connect(self._on_copy)
+        self.btn_copy = _icon_btn("camera.svg", "发送到贴图识别", self._on_send_to_recognize)
         bar.addWidget(self.btn_copy)
 
-        self.btn_save = QPushButton("保存")
-        self.btn_save.setFixedHeight(28)
-        self.btn_save.setStyleSheet(btn_css)
-        self.btn_save.clicked.connect(self._on_save)
+        self.btn_pick_color = _icon_btn("eyedropper.svg", "取色", self._toggle_pick_color_mode)
+        bar.addWidget(self.btn_pick_color)
+
+        self.btn_save = _icon_btn("download.svg", "下载", self._on_save)
         bar.addWidget(self.btn_save)
 
-        self.btn_ocr = QPushButton("OCR")
-        self.btn_ocr.setFixedHeight(28)
-        self.btn_ocr.setStyleSheet(btn_css)
-        self.btn_ocr.clicked.connect(self._on_ocr)
-        bar.addWidget(self.btn_ocr)
-
-        self.btn_trans = QPushButton("翻译")
-        self.btn_trans.setFixedHeight(28)
-        self.btn_trans.setStyleSheet(btn_css)
-        self.btn_trans.clicked.connect(self._on_translate)
+        self.btn_trans = _icon_btn("online-trans.svg", "翻译", self._on_translate)
         bar.addWidget(self.btn_trans)
 
-        # 分隔线
-        sep = QLabel("|")
-        sep.setStyleSheet("color: rgba(255,255,255,0.3); font-size: 14px; background: transparent; border: none;")
-        bar.addWidget(sep)
+        self.btn_ocr = _icon_btn("ai-ocr.svg", "识别", self._on_ocr)
+        bar.addWidget(self.btn_ocr)
 
-        # 确认和取消按钮（和其他按钮放一起）
-        confirm_btn_css = """
-            QPushButton {
-                background: rgba(255,255,255,0.9); color: #000;
-                border: none; border-radius: 6px;
-                padding: 4px 10px; font-size: 12px; font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(255,255,255,1); }
-        """
-        self.btn_confirm = QPushButton("确认")
-        self.btn_confirm.setFixedHeight(28)
-        self.btn_confirm.setStyleSheet(confirm_btn_css)
-        self.btn_confirm.setToolTip("确认截图，返回界面")
-        self.btn_confirm.clicked.connect(self._on_confirm)
+        self.btn_cancel = _icon_btn("close.svg", "退出截图", self._on_cancel)
+        bar.addWidget(self.btn_cancel)
+
+        self.btn_confirm = _icon_btn("check.svg", "复制并退出", self._on_confirm)
         bar.addWidget(self.btn_confirm)
 
-        self.btn_cancel = QPushButton("取消")
-        self.btn_cancel.setFixedHeight(28)
-        self.btn_cancel.setStyleSheet(confirm_btn_css)
-        self.btn_cancel.setToolTip("退出截图")
-        self.btn_cancel.clicked.connect(self._on_cancel)
-        bar.addWidget(self.btn_cancel)
+        self.size_label = QLabel(self)
+        self.size_label.hide()
+        size_font = QFont("JetBrains Mono", 9)
+        size_font.setWeight(QFont.Weight.DemiBold)
+        self.size_label.setFont(size_font)
+        self.size_label.setStyleSheet(
+            "color:#FFFFFF; background: transparent; border: 1px solid rgba(214,179,106,0.9); border-radius:6px; padding: 4px 6px;"
+        )
+
+        self.magnifier_label = QLabel(self)
+        self.magnifier_label.hide()
+        self.magnifier_label.setFixedSize(156, 156)
+        self.magnifier_label.setStyleSheet("background: rgba(0,0,0,0.72); border: 1px solid rgba(214,179,106,0.9); border-radius: 10px;")
+        self._magnifier_crosshair = True
+
+        self.color_label = QLabel(self)
+        self.color_label.hide()
+        self.color_label.setFont(QFont("JetBrains Mono", 9))
+        self.color_label.setFixedWidth(self.magnifier_label.width())
+        self.color_label.setWordWrap(False)
+        self.color_label.setStyleSheet("color:#FFFFFF; background: rgba(0,0,0,0.72); border: 1px solid rgba(214,179,106,0.9); border-top: none; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; padding: 6px 8px;")
+
+    def _get_resize_cursor(self, handle):
+        if handle in ("tm", "bm"):
+            return Qt.CursorShape.SizeVerCursor
+        if handle in ("lm", "rm"):
+            return Qt.CursorShape.SizeHorCursor
+        if handle in ("tl", "br"):
+            return Qt.CursorShape.SizeFDiagCursor
+        if handle in ("tr", "bl"):
+            return Qt.CursorShape.SizeBDiagCursor
+        return Qt.CursorShape.OpenHandCursor
 
     def _init_result_panel(self):
         """右侧结果面板（空白区域拖动，右下角缩放）"""
@@ -387,6 +381,7 @@ class ScreenCaptureOverlay(QWidget):
         painter.drawPixmap(0, 0, self.full_pixmap)
 
         rect = self.get_selection_rect()
+        self._update_size_label(rect)
 
         # 暗色遮罩（非居中模式）
         if not self._is_centered:
@@ -408,30 +403,178 @@ class ScreenCaptureOverlay(QWidget):
             pen = QPen(QColor("#d6b36a"), 2, Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.drawRect(rect)
+            self._draw_anchor_points(painter, rect)
 
-            # 尺寸标签
-            size_text = f"{rect.width()} × {rect.height()}"
-            font = QFont("Microsoft YaHei UI", 11)
-            font.setWeight(QFont.Weight.DemiBold)
-            painter.setFont(font)
-            fm = painter.fontMetrics()
-            tw = fm.horizontalAdvance(size_text)
-            th = fm.height()
-            pad = 6
-            lx = rect.right() + 4
-            ly = rect.bottom() + 4
-            if lx + tw + pad * 2 > self.width():
-                lx = rect.left() - tw - pad * 2 - 4
-            if ly + th + pad * 2 > self.height():
-                ly = rect.bottom() - th - pad * 2 - 4
-            bg = QRect(lx, ly, tw + pad * 2, th + pad * 2)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 0, 0, 180))
-            painter.drawRoundedRect(bg, 4, 4)
-            painter.setPen(QColor("#FFFFFF"))
-            painter.drawText(lx + pad, ly + pad + fm.ascent(), size_text)
+        self._draw_magnifier()
+
+
+    def _update_size_label(self, rect):
+        if rect.isNull() or rect.width() < 2 or rect.height() < 2:
+            self.size_label.hide()
+            return
+        self.size_label.setText(f"{rect.width()} × {rect.height()}")
+        self.size_label.adjustSize()
+        x = rect.left()
+        y = rect.top() - self.size_label.height() - 8
+        if y < 0:
+            y = rect.top() + 8
+        if x + self.size_label.width() > self.width():
+            x = max(0, self.width() - self.size_label.width())
+        self.size_label.move(x, y)
+        self.size_label.show()
+
+    def _get_anchor_points(self):
+        rect = self.get_selection_rect()
+        if rect.isNull() or rect.width() < 2 or rect.height() < 2:
+            return []
+        center_x = rect.left() + rect.width() // 2
+        center_y = rect.top() + rect.height() // 2
+        return [
+            QPoint(rect.left(), rect.top()),
+            QPoint(center_x, rect.top()),
+            QPoint(rect.right(), rect.top()),
+            QPoint(rect.right(), center_y),
+            QPoint(rect.right(), rect.bottom()),
+            QPoint(center_x, rect.bottom()),
+            QPoint(rect.left(), rect.bottom()),
+            QPoint(rect.left(), center_y),
+        ]
+
+    def _draw_anchor_points(self, painter, rect):
+        painter.setPen(QPen(QColor("#d6b36a"), 1))
+        painter.setBrush(QColor("#2C2C2B"))
+        for point in self._get_anchor_points():
+            painter.drawEllipse(point, 4, 4)
+
+    def _get_resize_handle(self, pos):
+        anchor_points = self._get_anchor_points()
+        if not anchor_points:
+            return None
+        handle_names = ["tl", "tm", "tr", "rm", "br", "bm", "bl", "lm"]
+        hit_radius = 10
+        for name, point in zip(handle_names, anchor_points):
+            if abs(pos.x() - point.x()) <= hit_radius and abs(pos.y() - point.y()) <= hit_radius:
+                return name
+        return None
+
+    def _set_selection_cursor(self, pos=None):
+        if self._pick_color_mode:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
+        if self.is_selecting or self._is_dragging:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
+        if self._is_resizing:
+            self.setCursor(self._get_resize_cursor(self._resize_handle))
+            return
+        if not self.selection_done:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            return
+        rect = self.get_selection_rect()
+        handle = self._get_resize_handle(pos)
+        if handle:
+            self.setCursor(self._get_resize_cursor(handle))
+        elif rect.contains(pos):
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _apply_resize(self, pos):
+        rect = QRect(self._resize_base_rect)
+        left = rect.left()
+        right = rect.right()
+        top = rect.top()
+        bottom = rect.bottom()
+        min_span = 9
+
+        if self._resize_handle in ("tl", "lm", "bl"):
+            left = min(pos.x(), right - min_span)
+        if self._resize_handle in ("tr", "rm", "br"):
+            right = max(pos.x(), left + min_span)
+        if self._resize_handle in ("tl", "tm", "tr"):
+            top = min(pos.y(), bottom - min_span)
+        if self._resize_handle in ("bl", "bm", "br"):
+            bottom = max(pos.y(), top + min_span)
+
+        self.start_point = QPoint(left, top)
+        self.end_point = QPoint(right, bottom)
+
+    def _draw_magnifier(self):
+        if self._is_dragging:
+            self.magnifier_label.hide()
+            self.color_label.hide()
+            return
+        if self.selection_done and not self._pick_color_mode:
+            if not self._is_resizing:
+                self.magnifier_label.hide()
+                self.color_label.hide()
+                return
+        if self._mouse_pos.isNull():
+            self.magnifier_label.hide()
+            self.color_label.hide()
+            return
+        sample_rect = QRect(self._mouse_pos.x() - 6, self._mouse_pos.y() - 6, 12, 12).intersected(self.rect())
+        if sample_rect.isNull():
+            return
+        sample = self.full_pixmap.copy(sample_rect).scaled(
+            self.magnifier_label.size(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self.magnifier_label.setPixmap(sample)
+        crosshair = QPixmap(sample)
+        painter = QPainter(crosshair)
+        pen = QPen(QColor("#D6B36A"), 1)
+        painter.setPen(pen)
+        center_x = crosshair.width() // 2
+        center_y = crosshair.height() // 2
+        painter.drawLine(0, center_y, crosshair.width() - 1, center_y)
+        painter.drawLine(center_x, 0, center_x, crosshair.height() - 1)
+        painter.end()
+        self.magnifier_label.setPixmap(crosshair)
+        mx = self._mouse_pos.x() + 20
+        my = self._mouse_pos.y() + 20
+        if mx + self.magnifier_label.width() > self.width():
+            mx = self._mouse_pos.x() - self.magnifier_label.width() - 20
+        if my + self.magnifier_label.height() > self.height():
+            my = self._mouse_pos.y() - self.magnifier_label.height() - 20
+        self.magnifier_label.move(mx, my)
+        self.magnifier_label.show()
+        color = self._get_pixel_color(self._mouse_pos)
+        self.color_label.setText(
+            f"RGB({color.red()}, {color.green()}, {color.blue()})\n#{color.red():02X}{color.green():02X}{color.blue():02X}\n按住 C 复制色值"
+        )
+        self.color_label.adjustSize()
+        self.color_label.setFixedWidth(self.magnifier_label.width())
+        self.color_label.move(mx, my + self.magnifier_label.height() + 6)
+        self.color_label.show()
+
+    def _get_pixel_color(self, pos):
+        image = self.full_pixmap.toImage()
+        x = max(0, min(image.width() - 1, pos.x()))
+        y = max(0, min(image.height() - 1, pos.y()))
+        return image.pixelColor(x, y)
+
+    def _copy_color_at_cursor(self):
+        color = self._get_pixel_color(self._mouse_pos)
+        text = f"RGB({color.red()}, {color.green()}, {color.blue()}) #{color.red():02X}{color.green():02X}{color.blue():02X}"
+        QGuiApplication.clipboard().setText(text)
+
+    def _toggle_pick_color_mode(self):
+        self._pick_color_mode = not self._pick_color_mode
+        self._set_selection_cursor(self._mouse_pos)
+        self.update()
 
     def mousePressEvent(self, event):
+        self._mouse_pos = event.position().toPoint()
+        if event.button() == Qt.MouseButton.RightButton:
+            if self._pick_color_mode and self.selection_done:
+                self._pick_color_mode = False
+                self._set_selection_cursor(self._mouse_pos)
+                self.update()
+            else:
+                self._on_cancel()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.position().toPoint()
@@ -444,11 +587,23 @@ class ScreenCaptureOverlay(QWidget):
 
         if self.selection_done:
             rect = self.get_selection_rect().adjusted(-4, -4, 4, 4)
+            resize_handle = self._get_resize_handle(pos)
+            if resize_handle is not None:
+                self._drag_rect_width = self.get_selection_rect().width()
+                self._drag_rect_height = self.get_selection_rect().height()
+                self._resize_handle = resize_handle
+                self._resize_base_rect = self.get_selection_rect()
+                self._is_resizing = True
+                self.setCursor(self._get_resize_cursor(resize_handle))
+                self._btn_bar.hide()
+                self.update()
+                return
             if rect.contains(pos):
                 self._drag_offset = pos - self.start_point
                 self._drag_rect_width = self.get_selection_rect().width()
                 self._drag_rect_height = self.get_selection_rect().height()
                 self._is_dragging = True
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self._btn_bar.hide()
                 self.update()
                 return
@@ -459,16 +614,23 @@ class ScreenCaptureOverlay(QWidget):
         self._centered_pixmap = None
         self._original_cropped = None
         self._is_centered = False
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
         self.start_point = pos
         self.end_point = pos
         self.is_selecting = True
         self._btn_bar.hide()
         self._result_panel.hide()
+        self._draw_magnifier()
         self.update()
 
     def mouseMoveEvent(self, event):
         pos = event.position().toPoint()
-        if self._is_dragging:
+        self._mouse_pos = pos
+        if self._is_resizing:
+            self._apply_resize(pos)
+            self._draw_magnifier()
+            self.update()
+        elif self._is_dragging:
             self.start_point = pos - self._drag_offset
             self.end_point = QPoint(
                 self.start_point.x() + self._drag_rect_width - 1,
@@ -482,17 +644,32 @@ class ScreenCaptureOverlay(QWidget):
             self.update()
         elif self.is_selecting:
             self.end_point = pos
+            self._draw_magnifier()
+            self.update()
+        else:
+            self._set_selection_cursor(pos)
+            self._draw_magnifier()
             self.update()
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        if self._is_dragging:
+        self._mouse_pos = event.position().toPoint()
+        if self._is_resizing:
+            self._is_resizing = False
+            self._resize_handle = None
+            self.selection_done = True
+            rect = self.get_selection_rect()
+            self._show_action_bar(rect)
+            self._set_selection_cursor(self._mouse_pos)
+            self.update()
+        elif self._is_dragging:
             self._is_dragging = False
             self._drag_offset = None
             self.selection_done = True
             rect = self.get_selection_rect()
             self._show_action_bar(rect)
+            self._set_selection_cursor(self._mouse_pos)
             self.update()
         elif self.is_selecting:
             self.is_selecting = False
@@ -500,11 +677,10 @@ class ScreenCaptureOverlay(QWidget):
             if rect.width() > 5 and rect.height() > 5:
                 self.selection_done = True
                 self._show_action_bar(rect)
+            self._set_selection_cursor(self._mouse_pos)
             self.update()
 
     def _show_action_bar(self, rect):
-        self.input_w.setText(str(rect.width()))
-        self.input_h.setText(str(rect.height()))
         bar_w = self._btn_bar.sizeHint().width()
         bar_h = 32
         x = max(0, rect.right() - bar_w)
@@ -515,19 +691,12 @@ class ScreenCaptureOverlay(QWidget):
         self._btn_bar.show()
         self._btn_bar.raise_()
 
-    def _apply_size(self):
-        try:
-            w = max(10, int(self.input_w.text()))
-            h = max(10, int(self.input_h.text()))
-        except ValueError:
-            return
-        self.end_point = QPoint(self.start_point.x() + w - 1, self.start_point.y() + h - 1)
-        rect = self.get_selection_rect()
-        self._show_action_bar(rect)
-        self.update()
-
     def _on_copy(self):
         self.copy_requested.emit(self.full_pixmap.copy(self.get_selection_rect()))
+        self.close()
+
+    def _on_send_to_recognize(self):
+        self.capture_to_recognize_requested.emit(self.full_pixmap.copy(self.get_selection_rect()))
         self.close()
 
     def _on_save(self):
@@ -676,15 +845,12 @@ class ScreenCaptureOverlay(QWidget):
         self._stop_flash()
 
     def _on_confirm(self):
-        """确认按钮：截图，返回主界面"""
+        """确认按钮：复制截图并退出"""
         if self.selection_done:
-            ocr_text = self.ocr_text_edit.toPlainText().strip()
-            trans_text = self.trans_text_edit.toPlainText().strip()
             if self._is_centered and self._original_cropped is not None:
-                self.captured.emit(self._original_cropped, ocr_text, trans_text)
+                self.copy_requested.emit(self._original_cropped)
             else:
-                self.captured.emit(self.full_pixmap.copy(self.get_selection_rect()), ocr_text, trans_text)
-        self._restore_main_window()
+                self.copy_requested.emit(self.full_pixmap.copy(self.get_selection_rect()))
         self.close()
 
     def _on_cancel(self):
@@ -731,11 +897,19 @@ class ScreenCaptureOverlay(QWidget):
 
     def _reset(self):
         self.selection_done = False
+        self._is_dragging = False
+        self._is_resizing = False
+        self._drag_offset = None
         self.start_point = QPoint()
         self.end_point = QPoint()
         self._original_cropped = None
         self._is_centered = False
         self._btn_bar.hide()
+        self.size_label.hide()
+        self.magnifier_label.hide()
+        self.color_label.hide()
+        self._pick_color_mode = False
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._result_panel.hide()
         self.stop_all_pulses()
         if hasattr(self, 'ocr_text_edit'):
@@ -790,6 +964,14 @@ class ScreenCaptureOverlay(QWidget):
             else:
                 self._restore_main_window()
                 self.close()
+        elif event.key() == Qt.Key.Key_C:
+            if not self.selection_done:
+                self._copy_color_at_cursor()
+            elif self._pick_color_mode:
+                self._copy_color_at_cursor()
+                self._pick_color_mode = False
+                self._set_selection_cursor(self._mouse_pos)
+                self.update()
         elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if self.selection_done:
                 ocr_text = self.ocr_text_edit.toPlainText().strip()

@@ -104,6 +104,7 @@ class ClipboardPage(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索...")
+        self.search_input.setFixedHeight(34)
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
                 background: {t.bg_input};

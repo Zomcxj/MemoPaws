@@ -51,7 +51,7 @@ class FloatingWidget(QWidget):
 
         self.main_btn = QPushButton()
         self.main_btn.setFixedSize(56, 56)
-        self.main_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.main_btn.setCursor(Qt.CursorShape.OpenHandCursor)
         self.main_btn.setMouseTracking(True)
         self.main_btn.setStyleSheet(
             "QPushButton { border-radius: 28px; border: none; background: #FDF4EA; }"
@@ -157,6 +157,7 @@ class FloatingWidget(QWidget):
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._dragging = False
                 self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                self.main_btn.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self._close_menu()
                 return True
             if event.type() == QEvent.Type.MouseMove and self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
@@ -165,6 +166,7 @@ class FloatingWidget(QWidget):
                 return True
             if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
                 self._drag_offset = None
+                self.main_btn.setCursor(Qt.CursorShape.OpenHandCursor)
                 self._snap_inside_screen()
                 self._save_position()
                 QTimer.singleShot(0, lambda: setattr(self, '_dragging', False))
