@@ -19,6 +19,7 @@ class ScreenCaptureOverlay(QWidget):
     capture_to_recognize_requested = Signal(QPixmap)
     ocr_requested = Signal(QPixmap)
     translate_requested = Signal(QPixmap)
+    closed = Signal()  # 覆盖层关闭时发射
 
     def __init__(self):
         super().__init__()
@@ -200,7 +201,7 @@ class ScreenCaptureOverlay(QWidget):
             }
             QPushButton:hover { background: rgba(255,255,255,0.2); }
         """)
-        close_btn.clicked.connect(lambda: self._result_panel.hide())
+        close_btn.clicked.connect(lambda: (self.stop_all_pulses(), self._result_panel.hide()))
         bottom_row.addWidget(close_btn)
 
         bottom_row.addStretch()
@@ -266,6 +267,8 @@ class ScreenCaptureOverlay(QWidget):
             QGuiApplication.clipboard().setText(text)
 
     def show_ocr_result(self, text):
+        if not self.isVisible():
+            return
         self.ocr_text_edit.setPlainText(text)
         self.stop_all_pulses()
         self._result_panel.show()
@@ -273,6 +276,8 @@ class ScreenCaptureOverlay(QWidget):
         self._position_result_to_screenshot()
 
     def show_translate_result(self, text):
+        if not self.isVisible():
+            return
         self.trans_text_edit.setPlainText(text)
         self.stop_all_pulses()
         self._result_panel.show()
@@ -294,6 +299,9 @@ class ScreenCaptureOverlay(QWidget):
 
     def _on_pulse_ocr_tick(self):
         """OCR框脉动回调"""
+        if not self.isVisible():
+            self._stop_pulse_ocr()
+            return
         import math
         self._pulse_ocr_phase = (self._pulse_ocr_phase + 1) % 40
         brightness = 0.4 + 0.6 * abs(math.sin(self._pulse_ocr_phase * math.pi / 20))
@@ -327,6 +335,9 @@ class ScreenCaptureOverlay(QWidget):
 
     def _on_pulse_trans_tick(self):
         """翻译框脉动回调"""
+        if not self.isVisible():
+            self._stop_pulse_trans()
+            return
         import math
         self._pulse_trans_phase = (self._pulse_trans_phase + 1) % 40
         brightness = 0.4 + 0.6 * abs(math.sin(self._pulse_trans_phase * math.pi / 20))
@@ -461,14 +472,17 @@ class ScreenCaptureOverlay(QWidget):
         if self._pick_color_mode:
             self.setCursor(Qt.CursorShape.ArrowCursor)
             return
-        if self.is_selecting or self._is_dragging:
+        if self.is_selecting:
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            return
+        if self._is_dragging:
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
         if self._is_resizing:
             self.setCursor(self._get_resize_cursor(self._selection_resize_handle))
             return
         if not self.selection_done:
-            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.setCursor(Qt.CursorShape.CrossCursor)
             return
         rect = self.get_selection_rect()
         handle = self._get_resize_handle(pos)
@@ -614,7 +628,7 @@ class ScreenCaptureOverlay(QWidget):
         self._centered_pixmap = None
         self._original_cropped = None
         self._is_centered = False
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.setCursor(Qt.CursorShape.SizeFDiagCursor)
         self.start_point = pos
         self.end_point = pos
         self.is_selecting = True
@@ -860,6 +874,7 @@ class ScreenCaptureOverlay(QWidget):
         """取消按钮：直接关闭，不返回主界面"""
         self._stop_flash()
         self.stop_all_pulses()
+        self.closed.emit()
         self.close()
 
     def _start_flash(self, color: str):
@@ -883,6 +898,7 @@ class ScreenCaptureOverlay(QWidget):
 
     def _restore_main_window(self):
         """恢复主窗口显示"""
+        self.closed.emit()
         from PySide6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
             if widget.windowTitle() == "MemoPaws" or (hasattr(widget, '_is_main_window') and widget._is_main_window):
@@ -912,7 +928,7 @@ class ScreenCaptureOverlay(QWidget):
         self.magnifier_label.hide()
         self.color_label.hide()
         self._pick_color_mode = False
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setCursor(Qt.CursorShape.CrossCursor)
         self._result_panel.hide()
         self.stop_all_pulses()
         if hasattr(self, 'ocr_text_edit'):

@@ -377,7 +377,7 @@ class TestScreenCaptureOverlay:
         assert overlay.cursor().shape() == Qt.CursorShape.SizeHorCursor
         overlay.close()
 
-    def test_capture_overlay_uses_closed_hand_cursor_while_selecting(self, qapp):
+    def test_capture_overlay_uses_size_fdiag_cursor_while_selecting(self, qapp):
         overlay = ScreenCaptureOverlay()
         event = QMouseEvent(
             QMouseEvent.Type.MouseButtonPress,
@@ -391,7 +391,7 @@ class TestScreenCaptureOverlay:
 
         overlay.mousePressEvent(event)
 
-        assert overlay.cursor().shape() == Qt.CursorShape.ClosedHandCursor
+        assert overlay.cursor().shape() == Qt.CursorShape.SizeFDiagCursor
         overlay.close()
 
     def test_capture_overlay_uses_open_hand_cursor_when_hovering_selection_area(self, qapp):

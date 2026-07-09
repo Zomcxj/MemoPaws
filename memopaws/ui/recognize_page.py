@@ -532,6 +532,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self.capture_overlay.saved.connect(self._on_capture_save)
         self.capture_overlay.ocr_requested.connect(self._on_capture_ocr)
         self.capture_overlay.translate_requested.connect(self._on_capture_translate)
+        self.capture_overlay.closed.connect(self._on_capture_overlay_closed)
         self.capture_overlay.showFullScreen()
         self.capture_overlay.activateWindow()
         self.capture_overlay.raise_()
@@ -652,9 +653,13 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     def _on_capture_ocr(self, pixmap):
         """截图覆盖层：OCR 识别，结果显示在覆盖层"""
         def on_done(text):
-            if hasattr(self, 'capture_overlay') and self.capture_overlay:
-                self.capture_overlay.show_ocr_result(text)
-                self.capture_overlay.on_result_received()
+            overlay = getattr(self, 'capture_overlay', None)
+            if overlay is not None:
+                try:
+                    overlay.show_ocr_result(text)
+                    overlay.on_result_received()
+                except RuntimeError:
+                    pass
 
         self._cleanup_old_worker('_ocr_worker')
         self._ocr_worker = _CaptureOCRWorker(self.ocr_manager, qpixmap_to_numpy(pixmap))
@@ -667,17 +672,25 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     def _on_capture_translate(self, pixmap):
         """截图覆盖层：先 OCR 再翻译，结果显示在覆盖层"""
         def on_ocr_done(text):
-            if hasattr(self, 'capture_overlay') and self.capture_overlay:
-                self.capture_overlay.show_ocr_result(text)
-                self.capture_overlay.stop_all_pulses()
-                self.capture_overlay._start_pulse_trans()
+            overlay = getattr(self, 'capture_overlay', None)
+            if overlay is not None:
+                try:
+                    overlay.show_ocr_result(text)
+                    overlay.stop_all_pulses()
+                    overlay._start_pulse_trans()
+                except RuntimeError:
+                    pass
 
         def on_translate_done(ocr_text, translated):
-            if hasattr(self, 'capture_overlay') and self.capture_overlay:
-                if ocr_text:
-                    self.capture_overlay.show_ocr_result(ocr_text)
-                self.capture_overlay.show_translate_result(translated)
-                self.capture_overlay.on_result_received()
+            overlay = getattr(self, 'capture_overlay', None)
+            if overlay is not None:
+                try:
+                    if ocr_text:
+                        overlay.show_ocr_result(ocr_text)
+                    overlay.show_translate_result(translated)
+                    overlay.on_result_received()
+                except RuntimeError:
+                    pass
 
         self._cleanup_old_worker('_translate_worker')
         target = getattr(self, 'translate_target', '英文')
@@ -688,6 +701,10 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self._translate_worker.finished.connect(lambda: self._capture_workers.discard(self._translate_worker))
         self._translate_worker.finished.connect(self._translate_worker.deleteLater)
         self._translate_worker.start()
+
+    def _on_capture_overlay_closed(self):
+        """覆盖层关闭时清理引用"""
+        self.capture_overlay = None
 
     def _on_image_dropped(self, file_path):
         pixmap = QPixmap(file_path)
