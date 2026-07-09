@@ -302,6 +302,39 @@ class TestScreenCaptureOverlay:
         assert rect.bottom() == 160
         overlay.close()
 
+    def test_capture_overlay_resize_keeps_selection_at_least_3x3(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay.start_point = QPoint(80, 80)
+        overlay.end_point = QPoint(180, 160)
+        overlay.selection_done = True
+
+        press_event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(180, 160),
+            QPointF(180, 160),
+            QPointF(180, 160),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        overlay.mousePressEvent(press_event)
+
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(81, 81),
+            QPointF(81, 81),
+            QPointF(81, 81),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        overlay.mouseMoveEvent(move_event)
+
+        rect = overlay.get_selection_rect()
+        assert rect.width() == 3
+        assert rect.height() == 3
+        overlay.close()
+
     def test_capture_overlay_uses_closed_hand_cursor_while_dragging_selection_done(self, qapp):
         overlay = ScreenCaptureOverlay()
         overlay.start_point = QPoint(80, 80)
@@ -552,4 +585,127 @@ class TestScreenCaptureOverlay:
 
         assert captured == []
         assert len(copied) == 1
+        overlay.close()
+
+    def test_result_panel_can_resize_from_bottom_right_handle(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay.show()
+        overlay.start_point = QPoint(80, 80)
+        overlay.end_point = QPoint(180, 160)
+        overlay.selection_done = True
+        overlay.show_ocr_result("hello")
+        panel = overlay._result_panel
+        start_size = panel.size()
+
+        press_event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(8, 8),
+            QPointF(8, 8),
+            QPointF(300, 300),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(20, 20),
+            QPointF(20, 20),
+            QPointF(360, 360),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        release_event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(20, 20),
+            QPointF(20, 20),
+            QPointF(360, 360),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        assert overlay.eventFilter(overlay._result_resize_handle, press_event) is True
+        assert overlay.eventFilter(overlay._result_resize_handle, move_event) is True
+        assert overlay.eventFilter(overlay._result_resize_handle, release_event) is True
+        assert panel.width() > start_size.width()
+        assert panel.height() > start_size.height()
+        overlay.close()
+
+    def test_result_panel_follows_selection_while_dragging(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay.show()
+        overlay.start_point = QPoint(80, 80)
+        overlay.end_point = QPoint(180, 160)
+        overlay.selection_done = True
+        overlay.show_ocr_result("hello")
+        press_event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(100, 100),
+            QPointF(100, 100),
+            QPointF(100, 100),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(130, 120),
+            QPointF(130, 120),
+            QPointF(130, 120),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        overlay.mousePressEvent(press_event)
+        overlay.mouseMoveEvent(move_event)
+
+        rect = overlay.get_selection_rect()
+        panel = overlay._result_panel.geometry()
+        expected_x = rect.right() + 16
+        if expected_x + panel.width() > overlay.width() - 10:
+            expected_x = rect.left() - panel.width() - 16
+        expected_y = rect.top() + rect.height() // 2 - panel.height() // 2
+        assert panel.left() == expected_x
+        assert panel.top() == expected_y
+        overlay.close()
+
+    def test_result_panel_follows_selection_while_resizing(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay.show()
+        overlay.start_point = QPoint(80, 80)
+        overlay.end_point = QPoint(180, 160)
+        overlay.selection_done = True
+        overlay.show_ocr_result("hello")
+        press_event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(180, 120),
+            QPointF(180, 120),
+            QPointF(180, 120),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(220, 120),
+            QPointF(220, 120),
+            QPointF(220, 120),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        overlay.mousePressEvent(press_event)
+        overlay.mouseMoveEvent(move_event)
+
+        rect = overlay.get_selection_rect()
+        panel = overlay._result_panel.geometry()
+        expected_x = rect.right() + 16
+        if expected_x + panel.width() > overlay.width() - 10:
+            expected_x = rect.left() - panel.width() - 16
+        expected_y = rect.top() + rect.height() // 2 - panel.height() // 2
+        assert panel.left() == expected_x
+        assert panel.top() == expected_y
         overlay.close()

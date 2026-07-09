@@ -38,7 +38,7 @@ class ScreenCaptureOverlay(QWidget):
         self.selection_done = False
         self._is_dragging = False
         self._is_resizing = False
-        self._resize_handle = None
+        self._selection_resize_handle = None
         self._resize_base_rect = QRect()
         self._drag_offset = None
         self._drag_rect_width = 0
@@ -212,7 +212,7 @@ class ScreenCaptureOverlay(QWidget):
         resize_handle.setStyleSheet("color: #555; font-size: 14px; background: transparent; border: none;")
         resize_handle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         resize_handle.installEventFilter(self)
-        self._resize_handle = resize_handle
+        self._result_resize_handle = resize_handle
         bottom_row.addWidget(resize_handle)
 
         panel_lay.addLayout(bottom_row)
@@ -465,7 +465,7 @@ class ScreenCaptureOverlay(QWidget):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
         if self._is_resizing:
-            self.setCursor(self._get_resize_cursor(self._resize_handle))
+            self.setCursor(self._get_resize_cursor(self._selection_resize_handle))
             return
         if not self.selection_done:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -485,15 +485,15 @@ class ScreenCaptureOverlay(QWidget):
         right = rect.right()
         top = rect.top()
         bottom = rect.bottom()
-        min_span = 9
+        min_span = 2
 
-        if self._resize_handle in ("tl", "lm", "bl"):
+        if self._selection_resize_handle in ("tl", "lm", "bl"):
             left = min(pos.x(), right - min_span)
-        if self._resize_handle in ("tr", "rm", "br"):
+        if self._selection_resize_handle in ("tr", "rm", "br"):
             right = max(pos.x(), left + min_span)
-        if self._resize_handle in ("tl", "tm", "tr"):
+        if self._selection_resize_handle in ("tl", "tm", "tr"):
             top = min(pos.y(), bottom - min_span)
-        if self._resize_handle in ("bl", "bm", "br"):
+        if self._selection_resize_handle in ("bl", "bm", "br"):
             bottom = max(pos.y(), top + min_span)
 
         self.start_point = QPoint(left, top)
@@ -591,7 +591,7 @@ class ScreenCaptureOverlay(QWidget):
             if resize_handle is not None:
                 self._drag_rect_width = self.get_selection_rect().width()
                 self._drag_rect_height = self.get_selection_rect().height()
-                self._resize_handle = resize_handle
+                self._selection_resize_handle = resize_handle
                 self._resize_base_rect = self.get_selection_rect()
                 self._is_resizing = True
                 self.setCursor(self._get_resize_cursor(resize_handle))
@@ -628,6 +628,10 @@ class ScreenCaptureOverlay(QWidget):
         self._mouse_pos = pos
         if self._is_resizing:
             self._apply_resize(pos)
+            if self._result_panel.isVisible():
+                self._position_result_to_screenshot()
+            if self._btn_bar.isVisible():
+                self._position_action_bar()
             self._draw_magnifier()
             self.update()
         elif self._is_dragging:
@@ -635,12 +639,11 @@ class ScreenCaptureOverlay(QWidget):
             self.end_point = QPoint(
                 self.start_point.x() + self._drag_rect_width - 1,
                 self.start_point.y() + self._drag_rect_height - 1)
-            # 同步移动结果框和按钮栏
-            if self._is_centered:
+            # 结果面板一旦显示，就跟着选区走
+            if self._result_panel.isVisible():
                 self._position_result_to_screenshot()
-                bar_w = self._btn_bar.sizeHint().width()
-                rect = self.get_selection_rect()
-                self._btn_bar.move(rect.right() - bar_w, rect.bottom() + 10)
+            if self._btn_bar.isVisible():
+                self._position_action_bar()
             self.update()
         elif self.is_selecting:
             self.end_point = pos
@@ -657,7 +660,7 @@ class ScreenCaptureOverlay(QWidget):
         self._mouse_pos = event.position().toPoint()
         if self._is_resizing:
             self._is_resizing = False
-            self._resize_handle = None
+            self._selection_resize_handle = None
             self.selection_done = True
             rect = self.get_selection_rect()
             self._show_action_bar(rect)
@@ -768,7 +771,7 @@ class ScreenCaptureOverlay(QWidget):
         from PySide6.QtCore import QEvent
 
         # 缩放手柄
-        if obj is self._resize_handle:
+        if obj is self._result_resize_handle:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._resizing = True
                 self._resize_start_pos = event.globalPosition().toPoint()
