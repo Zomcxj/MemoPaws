@@ -5,7 +5,9 @@ import tempfile
 import shutil
 import os
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QByteArray, QMimeData, QPoint, Qt
+from PySide6.QtGui import QDragEnterEvent, QMouseEvent
+from PySide6.QtWidgets import QLabel, QWidget
 
 from memopaws.keys.key_page import KeyPage, DraggableCard, _run_llm_entry_tests
 from memopaws.core.themes import DARK
@@ -112,3 +114,103 @@ class TestKeyPage:
 
         cards = [page._llm_grid.itemAt(i).widget() for i in range(page._llm_grid.count())]
         assert any(isinstance(card, DraggableCard) for card in cards)
+
+    def test_drag_enter_keeps_card_stylesheet_valid(self, qapp):
+        card = DraggableCard(1)
+        card.setStyleSheet("QFrame { border: 1px solid #333; background: #111; }")
+        card.setProperty("original_style", card.styleSheet())
+        card.setProperty("accent_color", "#2563EB")
+        mime = QMimeData()
+        mime.setData("application/x-keycard", QByteArray(b"2"))
+        event = QDragEnterEvent(QPoint(5, 5), Qt.DropAction.MoveAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+
+        card.dragEnterEvent(event)
+
+        assert "border: 2px solid #2563EB;" in card.styleSheet()
+
+    def test_drop_event_on_child_forwards_to_card_drop_handler(self, qapp, parent):
+        page = KeyPage(
+            parent,
+            get_theme=lambda: DARK,
+            is_dark=lambda: True,
+            show_message=lambda *a, **kw: None,
+            get_icons_dir=lambda: "",
+            get_icon_clr=lambda: "#fff",
+            get_current_lang=lambda: "zh",
+        )
+        page._km.add_entry("llm", "llm", "a")
+        page._km.add_entry("llm", "llm", "b")
+        page._rebuild_list()
+        target_card = page._llm_grid.itemAt(1).widget()
+        source_id = page._km.get_entries()[0]["id"]
+        child = target_card.findChildren(QWidget)[0]
+        called = []
+        target_card.dropEvent = lambda event: called.append(True)
+
+        class FakeDropEvent:
+            def type(self):
+                return QtCore.QEvent.Type.Drop
+
+            def mimeData(self):
+                mime = QMimeData()
+                mime.setData("application/x-keycard", QByteArray(str(source_id).encode()))
+                return mime
+
+            def acceptProposedAction(self):
+                pass
+
+        from PySide6 import QtCore
+        event = FakeDropEvent()
+
+        target_card.eventFilter(child, event)
+
+        assert called == [True]
+
+    def test_drag_preview_uses_original_card_content_before_placeholder(self, qapp, monkeypatch):
+        card = DraggableCard(1)
+        child = QLabel("original", card)
+        child.show()
+        card.resize(120, 60)
+        card.show()
+        card._drag_start_pos = QPoint(0, 0)
+        states = []
+
+        original_grab = card.grab
+
+        def capture_grab(*args, **kwargs):
+            states.append(child.isHidden())
+            return original_grab(*args, **kwargs)
+
+        monkeypatch.setattr(card, "grab", capture_grab)
+
+        class FakeDrag:
+            def __init__(self, widget):
+                pass
+
+            def setMimeData(self, mime):
+                pass
+
+            def setPixmap(self, pixmap):
+                pass
+
+            def setHotSpot(self, pos):
+                pass
+
+            def exec(self, action):
+                return action
+
+        monkeypatch.setattr("memopaws.keys.key_page.QDrag", FakeDrag)
+
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPoint(20, 0),
+            QPoint(20, 0),
+            QPoint(20, 0),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        card.mouseMoveEvent(move_event)
+
+        assert states == [False]

@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QCloseEvent, QPixmap
 
 from memopaws.ui.recognize_page import RecognizePage
 from memopaws.core.themes import DARK
@@ -228,3 +228,106 @@ def test_capture_to_recognize_reuses_paste_ocr_simple(qapp):
     page._on_capture_to_recognize(pixmap)
 
     assert called == [True]
+
+
+def test_close_event_stops_running_capture_workers(qapp):
+    parent = QWidget()
+    page = RecognizePage(
+        parent,
+        get_config_path=lambda: "",
+        get_theme=lambda: DARK,
+        is_dark=lambda: True,
+        get_icons_dir=lambda: "",
+        get_icon_clr=lambda: "#fff",
+        ocr_manager=MagicMock(),
+        translator=MagicMock(),
+        on_append_status=lambda *args: None,
+        on_switch_to_page=lambda name: None,
+    )
+
+    class FakeWorker:
+        def __init__(self):
+            self.interruption_requested = False
+            self.wait_called = False
+            self.running = True
+
+        def requestInterruption(self):
+            self.interruption_requested = True
+
+        def isRunning(self):
+            return self.running
+
+        def wait(self, timeout=None):
+            self.wait_called = True
+            self.running = False
+            return True
+
+    page._ocr_worker = FakeWorker()
+    page._translate_worker = FakeWorker()
+    page._capture_workers = {page._ocr_worker, page._translate_worker}
+
+    page.closeEvent(QCloseEvent())
+
+    assert page._ocr_worker is None
+    assert page._translate_worker is None
+
+
+def test_capture_save_uses_memopaws_timestamp_name(qapp, monkeypatch):
+    parent = QWidget()
+    page = RecognizePage(
+        parent,
+        get_config_path=lambda: "",
+        get_theme=lambda: DARK,
+        is_dark=lambda: True,
+        get_icons_dir=lambda: "",
+        get_icon_clr=lambda: "#fff",
+        ocr_manager=MagicMock(),
+        translator=MagicMock(),
+        on_append_status=lambda *args: None,
+        on_switch_to_page=lambda name: None,
+    )
+    pixmap = QPixmap(10, 10)
+    seen = {}
+    def fake_get_save_file_name(*args):
+        seen["default"] = args[2]
+        return ("", "")
+    monkeypatch.setattr(
+        "memopaws.ui.recognize_page.QFileDialog.getSaveFileName",
+        fake_get_save_file_name,
+    )
+    page.window = lambda: type("W", (), {"showMinimized": lambda self: None})()
+
+    page._on_capture_save(pixmap)
+
+    assert seen["default"].startswith("memopaws_")
+    assert seen["default"].endswith(".png")
+
+
+def test_export_image_uses_memopaws_timestamp_name(qapp, monkeypatch):
+    parent = QWidget()
+    page = RecognizePage(
+        parent,
+        get_config_path=lambda: "",
+        get_theme=lambda: DARK,
+        is_dark=lambda: True,
+        get_icons_dir=lambda: "",
+        get_icon_clr=lambda: "#fff",
+        ocr_manager=MagicMock(),
+        translator=MagicMock(),
+        on_append_status=lambda *args: None,
+        on_switch_to_page=lambda name: None,
+    )
+    page.canvas.display_pixmap = QPixmap(10, 10)
+    seen = {}
+    def fake_get_save_file_name(*args):
+        seen["default"] = args[2]
+        return ("", "")
+    monkeypatch.setattr(
+        "memopaws.ui.recognize_page.QFileDialog.getSaveFileName",
+        fake_get_save_file_name,
+    )
+
+    page.export_image()
+
+    assert seen["default"].startswith("memopaws_")
+    assert seen["default"].endswith(".png")

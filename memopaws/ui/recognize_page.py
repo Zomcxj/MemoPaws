@@ -4,6 +4,7 @@ import os
 import re
 import cv2
 import numpy as np
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
@@ -34,14 +35,17 @@ class _CaptureOCRWorker(QThread):
     """截图覆盖层 OCR 线程"""
     finished = Signal(str)
 
-    def __init__(self, ocr_manager, pixmap):
+    def __init__(self, ocr_manager, image_array):
         super().__init__()
         self.ocr_manager = ocr_manager
-        self.pixmap = pixmap
+        self.image_array = image_array
 
     def run(self):
-        arr = qpixmap_to_numpy(self.pixmap)
-        text = self.ocr_manager.run_ocr(arr)
+        if self.isInterruptionRequested():
+            return
+        text = self.ocr_manager.run_ocr(self.image_array)
+        if self.isInterruptionRequested():
+            return
         self.finished.emit(text or "(无识别结果)")
 
 
@@ -50,21 +54,28 @@ class _CaptureTranslateWorker(QThread):
     ocr_done = Signal(str)
     translate_done = Signal(str, str)
 
-    def __init__(self, ocr_manager, translator, target, pixmap):
+    def __init__(self, ocr_manager, translator, target, image_array):
         super().__init__()
         self.ocr_manager = ocr_manager
         self.translator = translator
         self.target = target
-        self.pixmap = pixmap
+        self.image_array = image_array
 
     def run(self):
-        arr = qpixmap_to_numpy(self.pixmap)
-        text = self.ocr_manager.run_ocr(arr)
+        if self.isInterruptionRequested():
+            return
+        text = self.ocr_manager.run_ocr(self.image_array)
+        if self.isInterruptionRequested():
+            return
         if not text:
             self.translate_done.emit("", "(无识别结果)")
             return
         self.ocr_done.emit(text)
+        if self.isInterruptionRequested():
+            return
         result = self.translator.translate(text, target_lang=self.target)
+        if self.isInterruptionRequested():
+            return
         self.translate_done.emit(text, result or "(翻译失败)")
 
 
@@ -107,6 +118,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self._translate_source_text = ""
         self._translate_mode = ""
         self._current_lang = "zh"
+        self._capture_workers = set()
 
         self._build_ui()
 
@@ -465,7 +477,14 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     def closeEvent(self, event):
         """清理线程"""
         self.cleanup_threads()
+        self._cleanup_old_worker('_ocr_worker')
+        self._cleanup_old_worker('_translate_worker')
+        self._ocr_worker = None
+        self._translate_worker = None
         super().closeEvent(event)
+
+    def _default_png_name(self):
+        return datetime.now().strftime("memopaws_%Y%m%d_%H%M%S.png")
 
     def eventFilter(self, obj, event):
         """跟踪 ocr_text / translate_text 尺寸变化，同步 glow 覆盖层"""
@@ -556,10 +575,15 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         if worker is not None:
             try:
                 if worker.isRunning():
-                    worker.quit()
+                    if hasattr(worker, 'requestInterruption'):
+                        worker.requestInterruption()
+                    elif hasattr(worker, 'quit'):
+                        worker.quit()
                     worker.wait(500)
             except RuntimeError:
                 pass
+            self._capture_workers.discard(worker)
+            setattr(self, attr_name, None)
 
     def _get_pixmap_from_clipboard(self):
         clipboard = QApplication.clipboard()
@@ -620,7 +644,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
     def _on_capture_save(self, pixmap):
         """截图覆盖层：保存图片到文件，恢复主窗口但不抢焦点"""
         file_path, _ = QFileDialog.getSaveFileName(
-            None, "保存截图", "screenshot.png", "PNG Files (*.png)")
+            None, "保存截图", self._default_png_name(), "PNG Files (*.png)")
         if file_path:
             pixmap.save(file_path, "PNG")
         self.window().showMinimized()
@@ -633,8 +657,10 @@ class RecognizePage(OCRTranslateMixin, QWidget):
                 self.capture_overlay.on_result_received()
 
         self._cleanup_old_worker('_ocr_worker')
-        self._ocr_worker = _CaptureOCRWorker(self.ocr_manager, pixmap)
+        self._ocr_worker = _CaptureOCRWorker(self.ocr_manager, qpixmap_to_numpy(pixmap))
+        self._capture_workers.add(self._ocr_worker)
         self._ocr_worker.finished.connect(on_done)
+        self._ocr_worker.finished.connect(lambda: self._capture_workers.discard(self._ocr_worker))
         self._ocr_worker.finished.connect(self._ocr_worker.deleteLater)
         self._ocr_worker.start()
 
@@ -655,9 +681,11 @@ class RecognizePage(OCRTranslateMixin, QWidget):
 
         self._cleanup_old_worker('_translate_worker')
         target = getattr(self, 'translate_target', '英文')
-        self._translate_worker = _CaptureTranslateWorker(self.ocr_manager, self.translator, target, pixmap)
+        self._translate_worker = _CaptureTranslateWorker(self.ocr_manager, self.translator, target, qpixmap_to_numpy(pixmap))
+        self._capture_workers.add(self._translate_worker)
         self._translate_worker.ocr_done.connect(on_ocr_done)
         self._translate_worker.translate_done.connect(on_translate_done)
+        self._translate_worker.finished.connect(lambda: self._capture_workers.discard(self._translate_worker))
         self._translate_worker.finished.connect(self._translate_worker.deleteLater)
         self._translate_worker.start()
 
@@ -697,7 +725,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         if not self.canvas.display_pixmap:
             self._show_message(QMessageBox.Icon.Information, "提示", "没有可导出的图片")
             return
-        file_path, _ = QFileDialog.getSaveFileName(self.window(), "导出图片", "memopaws_output.png", "PNG Files (*.png)")
+        file_path, _ = QFileDialog.getSaveFileName(self.window(), "导出图片", self._default_png_name(), "PNG Files (*.png)")
         if file_path:
             self.canvas.export_image(file_path)
 

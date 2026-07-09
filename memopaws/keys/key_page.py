@@ -6,7 +6,7 @@ import json
 import random
 import time
 from functools import partial
-from PySide6.QtCore import QThread, Signal as pyqtSignal
+from PySide6.QtCore import QThread, Signal as pyqtSignal, QEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QFrame, QComboBox, QScrollArea, QMessageBox,
@@ -85,6 +85,24 @@ class DraggableCard(QFrame):
         self._drag_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._drag_hint.setStyleSheet("background: rgba(0,0,0,0.35); color: white; border-radius: 8px; font-size: 12px;")
 
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.DragEnter and hasattr(event, "mimeData") and event.mimeData().hasFormat("application/x-keycard"):
+            self.dragEnterEvent(event)
+            return True
+        if event.type() == QEvent.Type.DragLeave:
+            self.dragLeaveEvent(event)
+            return True
+        if event.type() == QEvent.Type.Drop and hasattr(event, "mimeData") and event.mimeData().hasFormat("application/x-keycard"):
+            self.dropEvent(event)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _install_drag_forwarding(self):
+        for child in self.findChildren(QWidget):
+            if child is not self:
+                child.setAcceptDrops(True)
+                child.installEventFilter(self)
+
     def resizeEvent(self, event):
         self._drag_hint.setGeometry(self.rect())
         super().resizeEvent(event)
@@ -99,6 +117,7 @@ class DraggableCard(QFrame):
         if self._drag_start_pos is not None:
             distance = (event.pos() - self._drag_start_pos).manhattanLength()
             if distance > 10:
+                pixmap = self.grab()
                 for child in self.findChildren(QWidget):
                     if child is not self._drag_hint:
                         child.hide()
@@ -107,7 +126,6 @@ class DraggableCard(QFrame):
                 mime_data = QMimeData()
                 mime_data.setData("application/x-keycard", QByteArray(str(self.entry_id).encode()))
                 drag.setMimeData(mime_data)
-                pixmap = self.grab()
                 drag.setPixmap(pixmap)
                 drag.setHotSpot(event.pos())
                 drag.exec(Qt.DropAction.MoveAction)
@@ -125,10 +143,10 @@ class DraggableCard(QFrame):
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-keycard"):
             event.acceptProposedAction()
-            self.setStyleSheet(self.styleSheet().replace(
-                self.property("original_border") or "",
-                f"border: 2px solid {self.property('accent_color') or '#2563EB'};"
-            ) if self.property("original_border") else None)
+            original_style = self.property("original_style") or self.styleSheet() or ""
+            accent = self.property("accent_color") or "#2563EB"
+            highlighted = f"{original_style}\nDraggableCard, QFrame#key_card, QFrame {{ border: 2px solid {accent}; }}"
+            self.setStyleSheet(highlighted)
 
     def dragLeaveEvent(self, event):
         self.setStyleSheet(self.property("original_style") or "")
@@ -145,6 +163,7 @@ class DraggableCard(QFrame):
                 if parent:
                     parent._swap_entries(source_id, target_id)
             event.acceptProposedAction()
+        self.setStyleSheet(self.property("original_style") or "")
 
 
 class _MatrixAnimWorker(QThread):
@@ -545,6 +564,7 @@ class KeyPage(QWidget):
         del_btn.clicked.connect(lambda checked=False, eid=eid: self._delete_entry(eid))
         row.addWidget(del_btn)
 
+        card._install_drag_forwarding()
         return card
 
     def _show_secret_menu(self, pos, eid):
@@ -680,6 +700,7 @@ class KeyPage(QWidget):
             bottom_row.addWidget(type_tag)
         card_layout.addLayout(bottom_row)
 
+        card._install_drag_forwarding()
         return card
 
     def _on_secret_context_menu(self, pos):
