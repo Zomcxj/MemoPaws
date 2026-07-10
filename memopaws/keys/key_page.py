@@ -109,13 +109,14 @@ class DraggableCard(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start_pos = event.pos()
+            self._drag_start_pos = event.position().toPoint()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._drag_start_pos is not None:
-            distance = (event.pos() - self._drag_start_pos).manhattanLength()
+            current_pos = event.position().toPoint()
+            distance = (current_pos - self._drag_start_pos).manhattanLength()
             if distance > 10:
                 pixmap = self.grab()
                 for child in self.findChildren(QWidget):
@@ -127,12 +128,14 @@ class DraggableCard(QFrame):
                 mime_data.setData("application/x-keycard", QByteArray(str(self.entry_id).encode()))
                 drag.setMimeData(mime_data)
                 drag.setPixmap(pixmap)
-                drag.setHotSpot(event.pos())
+                drag.setHotSpot(current_pos)
                 drag.exec(Qt.DropAction.MoveAction)
                 self._drag_hint.hide()
                 for child in self.findChildren(QWidget):
                     if child is not self._drag_hint:
                         child.show()
+                self._drag_start_pos = None
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -152,8 +155,12 @@ class DraggableCard(QFrame):
         self.setStyleSheet(self.property("original_style") or "")
 
     def dropEvent(self, event):
-        if event.mimeData().hasFormat("application/x-keycard"):
+        try:
             source_id = int(event.mimeData().data("application/x-keycard").data().decode())
+        except (UnicodeDecodeError, ValueError):
+            self.setStyleSheet(self.property("original_style") or "")
+            return
+        if event.mimeData().hasFormat("application/x-keycard"):
             target_id = self.entry_id
             if source_id != target_id:
                 # 通知父窗口交换顺序
@@ -210,6 +217,7 @@ class KeyPage(QWidget):
         self._get_icon_clr = get_icon_clr
         self._get_current_lang = get_current_lang
         self._km = KeyManager()
+        self._copy_generation = 0
         self._sig_test_one_done.connect(self._on_test_one_done)
         self._build_ui()
 
@@ -404,7 +412,9 @@ class KeyPage(QWidget):
             if pwd != confirm:
                 self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), _t("两次密码不一致", lang))
                 return
-            self._km.set_master(pwd)
+            if not self._km.set_master(pwd):
+                self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), "保存密码失败")
+                return
         else:
             if not self._km.unlock(pwd):
                 self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), _t("密码错误", lang))
@@ -426,7 +436,9 @@ class KeyPage(QWidget):
         box.setDefaultButton(cancel_btn)
         box.exec()
         if box.clickedButton() == remove_btn:
-            self._km.remove_master()
+            if not self._km.remove_master():
+                self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), "移除密码失败")
+                return
             self._update_ui()
 
     def _on_add(self):
@@ -438,14 +450,16 @@ class KeyPage(QWidget):
         if not data["name"] or not data["value"]:
             self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), _t("名称和密钥不能为空", lang))
             return
-        self._km.add_entry(
+        if not self._km.add_entry(
             name=data["name"],
             entry_type=data["type"],
             value=data["value"],
             url=data["url"],
             url_anthropic=data.get("url_anthropic", ""),
             note=data["note"],
-        )
+        ):
+            self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), "保存密钥失败")
+            return
         self._rebuild_list()
 
     def _rebuild_list(self):
@@ -578,9 +592,7 @@ class KeyPage(QWidget):
         del_act = menu.addAction(_t("删除", lang))
         action = menu.exec(card.mapToGlobal(pos))
         if action == copy_act:
-            value = self._km.get_plain_value(eid)
-            if value:
-                QApplication.clipboard().setText(value)
+            self._copy_entry(eid)
         elif action == edit_act:
             self._edit_entry(eid)
         elif action == del_act:
@@ -790,10 +802,29 @@ class KeyPage(QWidget):
         from PySide6.QtWidgets import QApplication
         value = self._km.get_plain_value(entry_id)
         if value:
-            QApplication.clipboard().setText(value)
+            clipboard = QApplication.clipboard()
+            clipboard.setText(value)
+            self._copy_generation += 1
+            generation = self._copy_generation
+            changed = [False]
+
+            def _invalidate_cleanup():
+                changed[0] = True
+
+            clipboard.dataChanged.connect(_invalidate_cleanup)
+
+            def _clear_if_unchanged(expected=value, expected_generation=generation):
+                clipboard.dataChanged.disconnect(_invalidate_cleanup)
+                if not changed[0] and self._copy_generation == expected_generation and clipboard.text() == expected:
+                    clipboard.clear()
+
+            # ponytail: 30 秒后仅清理本次复制，后续任意剪贴板写入都会使清理失效。
+            QTimer.singleShot(30000, _clear_if_unchanged)
 
     def _delete_entry(self, entry_id: int):
-        self._km.delete_entry(entry_id)
+        if not self._km.delete_entry(entry_id):
+            self._show_message(QMessageBox.Icon.Warning, _t("错误", self._get_current_lang()), "保存密钥失败")
+            return
         self._rebuild_list()
 
     def _swap_entries(self, source_id: int, target_id: int):
@@ -806,10 +837,13 @@ class KeyPage(QWidget):
                 return
             source_order = entries[source_idx].get("order", source_idx)
             target_order = entries[target_idx].get("order", target_idx)
+            previous_entries = [dict(entry) for entry in entries]
             entries[source_idx]["order"] = target_order
             entries[target_idx]["order"] = source_order
-            self._km._entries = entries
-            self._km._save()
+            if not self._km._save():
+                self._km._entries = previous_entries
+                self._show_message(QMessageBox.Icon.Warning, _t("错误", self._get_current_lang()), "保存密钥失败")
+                return
             self._rebuild_list()
 
     def _test_all_entries(self):
@@ -883,7 +917,7 @@ class KeyPage(QWidget):
         if not data["name"] or not data["value"]:
             self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), _t("名称和密钥不能为空", lang))
             return
-        self._km.update_entry(
+        if not self._km.update_entry(
             entry_id,
             name=data["name"],
             type=data["type"],
@@ -891,7 +925,9 @@ class KeyPage(QWidget):
             url=data["url"],
             url_anthropic=data.get("url_anthropic", ""),
             note=data["note"],
-        )
+        ):
+            self._show_message(QMessageBox.Icon.Warning, _t("错误", lang), "保存密钥失败")
+            return
         self._rebuild_list()
 
     def apply_theme(self):

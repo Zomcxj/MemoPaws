@@ -6,6 +6,7 @@ import tempfile
 import shutil
 
 import pytest
+from unittest.mock import MagicMock
 
 from memopaws.config.shortcut_manager import (
     _load_shortcuts,
@@ -141,3 +142,49 @@ class TestShortcutManagerRegister:
         actions = mgr.get_all_actions()
         assert actions[0][0] == "global_search"
         assert actions[0][1] == "全局搜索"
+
+
+def test_register_global_hotkey_failure_reports_to_parent(qapp, config_path, temp_dir, monkeypatch):
+    save_fn = lambda c: json.dump(c, open(config_path, "w"))
+    parent = MagicMock()
+    mgr = ShortcutManager(lambda: config_path, save_fn, parent)
+    monkeypatch.setattr("memopaws.config.shortcut_manager.user32.RegisterHotKey", lambda *args: 0)
+
+    mgr._register_global_hotkey("capture", "Alt+X", lambda: None)
+
+    parent._append_status.assert_called_once()
+    assert "Alt+X" in parent._append_status.call_args[0][0]
+
+
+def test_failed_update_keeps_existing_global_hotkey_and_configuration(qapp, config_path, temp_dir, monkeypatch):
+    saved = []
+    mgr = ShortcutManager(lambda: config_path, lambda cfg: saved.append(cfg), None)
+    handler = lambda: None
+    mgr.register("capture", "Alt+X", handler)
+    monkeypatch.setattr("memopaws.config.shortcut_manager.user32.RegisterHotKey", lambda *args: 1)
+    mgr._bind("capture", "Alt+X", handler)
+    old_id = mgr._global_hotkeys["capture"]
+    monkeypatch.setattr("memopaws.config.shortcut_manager.user32.RegisterHotKey", lambda *args: 0)
+
+    assert mgr.update_shortcut("capture", "Alt+Y") is False
+
+    assert mgr._keys["capture"] == "Alt+X"
+    assert mgr._global_hotkeys["capture"] == old_id
+    assert saved == []
+
+
+def test_invalid_update_keeps_current_key(qapp, config_path, temp_dir):
+    mgr = ShortcutManager(lambda: config_path, lambda cfg: None, None)
+    mgr.register("capture", "Alt+X", lambda: None)
+
+    assert mgr.update_shortcut("capture", "Alt+Invalid") is False
+
+    assert mgr.get_current_keys()["capture"] == "Alt+X"
+
+
+def test_successful_update_returns_true(qapp, config_path, temp_dir, monkeypatch):
+    mgr = ShortcutManager(lambda: config_path, lambda cfg: None, None)
+    mgr.register("capture", "Alt+X", lambda: None)
+    monkeypatch.setattr("memopaws.config.shortcut_manager.user32.RegisterHotKey", lambda *args: 1)
+
+    assert mgr.update_shortcut("capture", "Alt+Y") is True

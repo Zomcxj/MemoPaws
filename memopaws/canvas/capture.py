@@ -1,13 +1,16 @@
 """截图覆盖层模块"""
 
 import os
+import logging
 
 from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QTextEdit, QMenu
-from PySide6.QtCore import Qt, QPoint, QRect, Signal, QTimer
+from PySide6.QtCore import Qt, QPoint, QRect, QSize, Signal, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QGuiApplication, QPixmap, QFont, QPainterPath, QIcon
 
 from ..ui.ocr_result_widget import OCRResultWidget
 from ..core.utils import BUNDLE_DIR, load_svg_icon
+
+logger = logging.getLogger(__name__)
 
 
 class ScreenCaptureOverlay(QWidget):
@@ -29,10 +32,10 @@ class ScreenCaptureOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
 
-        screen = QGuiApplication.primaryScreen()
-        geo = screen.geometry()
+        geo, pixmap = self._capture_virtual_desktop()
+        self._capture_origin = geo.topLeft()
         self.setGeometry(geo)
-        self.full_pixmap = screen.grabWindow(0)
+        self.full_pixmap = pixmap
         self.start_point = QPoint()
         self.end_point = QPoint()
         self.is_selecting = False
@@ -57,9 +60,65 @@ class ScreenCaptureOverlay(QWidget):
         # 保存原始截图（居中前）
         self._original_cropped = None
         self._is_centered = False
+        self._close_notified = False
 
         self._init_action_bar()
         self._init_result_panel()
+
+    def _safe_close_overlay(self, exc):
+        logger.exception("截图覆盖层异常，强制关闭 overlay: %s", exc)
+        self.close()
+
+    def _capture_virtual_desktop(self):
+        screens = QGuiApplication.screens()
+        if not screens:
+            screen = QGuiApplication.primaryScreen()
+            geo = screen.geometry()
+            return geo, screen.grabWindow(0)
+
+        virtual_rect = screens[0].geometry()
+        for screen in screens[1:]:
+            virtual_rect = virtual_rect.united(screen.geometry())
+
+        # 截图按各屏幕逻辑 geometry 绘制，统一为 DPR 1 以匹配 overlay 局部坐标。
+        desktop = QPixmap(virtual_rect.size())
+        desktop.setDevicePixelRatio(1)
+        desktop.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(desktop)
+        for screen in screens:
+            geo = screen.geometry()
+            pixmap = screen.grabWindow(0)
+            if pixmap.devicePixelRatio() != 1 or pixmap.size() != geo.size():
+                pixmap = pixmap.scaled(geo.size())
+                pixmap.setDevicePixelRatio(1)
+            painter.drawPixmap(QRect(geo.topLeft() - virtual_rect.topLeft(), geo.size()), pixmap)
+        painter.end()
+        return virtual_rect, desktop
+
+    def _selection_rect_in_pixmap(self):
+        return self.get_selection_rect().intersected(self.full_pixmap.rect())
+
+    def _set_selection_rect(self, rect):
+        rect = rect.intersected(self.rect())
+        self.start_point = rect.topLeft()
+        self.end_point = rect.bottomRight()
+
+    def _move_selection(self, top_left):
+        rect = self.get_selection_rect()
+        x = max(0, min(top_left.x(), self.width() - rect.width()))
+        y = max(0, min(top_left.y(), self.height() - rect.height()))
+        self._set_selection_rect(QRect(QPoint(x, y), rect.size()))
+
+    def _notify_closed_once(self):
+        if not self._close_notified:
+            self._close_notified = True
+            self.closed.emit()
+
+    def closeEvent(self, event):
+        self._stop_flash()
+        self.stop_all_pulses()
+        self._notify_closed_once()
+        super().closeEvent(event)
 
     def _init_action_bar(self):
         self._btn_bar = QWidget(self)
@@ -413,7 +472,7 @@ class ScreenCaptureOverlay(QWidget):
             painter.drawRoundedRect(rect, 6, 6)
         else:
             # 普通模式：绘制选区内容 + 金色边框
-            painter.drawPixmap(rect, self.full_pixmap, rect)
+            painter.drawPixmap(rect, self.full_pixmap, self._selection_rect_in_pixmap())
             pen = QPen(QColor("#d6b36a"), 2, Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.drawRect(rect)
@@ -513,8 +572,10 @@ class ScreenCaptureOverlay(QWidget):
         if self._selection_resize_handle in ("bl", "bm", "br"):
             bottom = max(pos.y(), top + min_span)
 
-        self.start_point = QPoint(left, top)
-        self.end_point = QPoint(right, bottom)
+        self._set_selection_rect(QRect(
+            QPoint(max(0, left), max(0, top)),
+            QPoint(min(self.width() - 1, right), min(self.height() - 1, bottom)),
+        ))
 
     def _draw_magnifier(self):
         if self._is_dragging:
@@ -632,8 +693,8 @@ class ScreenCaptureOverlay(QWidget):
         self._original_cropped = None
         self._is_centered = False
         self.setCursor(Qt.CursorShape.SizeFDiagCursor)
-        self.start_point = pos
-        self.end_point = pos
+        self.start_point = QPoint(max(0, pos.x()), max(0, pos.y()))
+        self.end_point = self.start_point
         self.is_selecting = True
         self._btn_bar.hide()
         self._result_panel.hide()
@@ -652,10 +713,7 @@ class ScreenCaptureOverlay(QWidget):
             self._draw_magnifier()
             self.update()
         elif self._is_dragging:
-            self.start_point = pos - self._drag_offset
-            self.end_point = QPoint(
-                self.start_point.x() + self._drag_rect_width - 1,
-                self.start_point.y() + self._drag_rect_height - 1)
+            self._move_selection(pos - self._drag_offset)
             # 结果面板一旦显示，就跟着选区走
             if self._result_panel.isVisible():
                 self._position_result_to_screenshot()
@@ -663,7 +721,10 @@ class ScreenCaptureOverlay(QWidget):
                 self._position_action_bar()
             self.update()
         elif self.is_selecting:
-            self.end_point = pos
+            self.end_point = QPoint(
+                max(0, min(pos.x(), self.width() - 1)),
+                max(0, min(pos.y(), self.height() - 1)),
+            )
             self._draw_magnifier()
             self.update()
         else:
@@ -712,21 +773,21 @@ class ScreenCaptureOverlay(QWidget):
         self._btn_bar.raise_()
 
     def _on_copy(self):
-        self.copy_requested.emit(self.full_pixmap.copy(self.get_selection_rect()))
+        self.copy_requested.emit(self.full_pixmap.copy(self._selection_rect_in_pixmap()))
         self.close()
 
     def _on_send_to_recognize(self):
-        self.capture_to_recognize_requested.emit(self.full_pixmap.copy(self.get_selection_rect()))
+        self.capture_to_recognize_requested.emit(self.full_pixmap.copy(self._selection_rect_in_pixmap()))
         self.close()
 
     def _on_save(self):
-        self.saved.emit(self.full_pixmap.copy(self.get_selection_rect()))
+        self.saved.emit(self.full_pixmap.copy(self._selection_rect_in_pixmap()))
         self.close()
 
     def _on_ocr(self):
         """OCR按钮 - 只闪OCR框"""
         if self._original_cropped is None:
-            self._original_cropped = self.full_pixmap.copy(self.get_selection_rect())
+            self._original_cropped = self.full_pixmap.copy(self._selection_rect_in_pixmap())
         if not self._is_centered:
             self._center_selection()
         self._result_panel.show()
@@ -738,7 +799,7 @@ class ScreenCaptureOverlay(QWidget):
     def _on_translate(self):
         """翻译按钮 - 只闪翻译框，未识别时先闪OCR再闪翻译"""
         if self._original_cropped is None:
-            self._original_cropped = self.full_pixmap.copy(self.get_selection_rect())
+            self._original_cropped = self.full_pixmap.copy(self._selection_rect_in_pixmap())
         if not self._is_centered:
             self._center_selection()
         self._result_panel.show()
@@ -760,7 +821,7 @@ class ScreenCaptureOverlay(QWidget):
         if rect.isNull() or rect.width() < 2 or rect.height() < 2:
             return
 
-        self._original_cropped = self.full_pixmap.copy(rect)
+        self._original_cropped = self.full_pixmap.copy(self._selection_rect_in_pixmap())
         self._is_centered = True
 
         screen_w, screen_h = self.width(), self.height()
@@ -769,8 +830,7 @@ class ScreenCaptureOverlay(QWidget):
         # 截图移到屏幕中央偏左
         cx = (screen_w - w) // 2 - 160
         cy = (screen_h - h) // 2
-        self.start_point = QPoint(cx, cy)
-        self.end_point = QPoint(cx + w - 1, cy + h - 1)
+        self._move_selection(QPoint(cx, cy))
 
         # 按钮栏：截图下方右对齐
         bar_w = self._btn_bar.sizeHint().width()
@@ -821,7 +881,6 @@ class ScreenCaptureOverlay(QWidget):
                     panel_pos = self.mapFromGlobal(event.globalPosition().toPoint())
                     new_pos = panel_pos - self._result_panel_drag_offset
                     delta = new_pos - self._result_panel.pos()
-                    self._result_panel.move(new_pos)
                     self._sync_screenshot_to_result(delta)
                     return True
             elif event.type() == QEvent.Type.MouseButtonRelease:
@@ -843,16 +902,31 @@ class ScreenCaptureOverlay(QWidget):
         result_y = rect.top() + rect.height() // 2 - panel_geo.height() // 2
         if result_x + panel_geo.width() > self.width() - 10:
             result_x = rect.left() - panel_geo.width() - 16
-        self._result_panel.move(result_x, result_y)
+        self._result_panel.move(
+            max(0, min(result_x, max(0, self.width() - panel_geo.width()))),
+            max(0, min(result_y, max(0, self.height() - panel_geo.height()))),
+        )
 
     def _sync_screenshot_to_result(self, delta):
         """面板拖动时以相同增量平移截图选区。"""
         rect = self.get_selection_rect()
         if rect.isNull():
             return
-        self.start_point += delta
-        self.end_point += delta
-        self._btn_bar.move(self._btn_bar.pos() + delta)
+        panel = self._result_panel.geometry()
+        min_dx, max_dx = -rect.left(), self.width() - 1 - rect.right()
+        min_dy, max_dy = -rect.top(), self.height() - 1 - rect.bottom()
+        if self._result_panel.isVisible():
+            min_dx = max(min_dx, -panel.left())
+            max_dx = min(max_dx, self.width() - panel.width() - panel.x())
+            min_dy = max(min_dy, -panel.top())
+            max_dy = min(max_dy, self.height() - panel.height() - panel.y())
+        dx = max(min_dx, min(delta.x(), max_dx))
+        dy = max(min_dy, min(delta.y(), max_dy))
+        applied_delta = QPoint(dx, dy)
+        self._move_selection(rect.topLeft() + applied_delta)
+        if self._result_panel.isVisible():
+            self._result_panel.move(panel.topLeft() + applied_delta)
+        self._btn_bar.move(self._btn_bar.pos() + applied_delta)
         self.update()
 
     def on_result_received(self):
@@ -866,14 +940,13 @@ class ScreenCaptureOverlay(QWidget):
             if self._is_centered and self._original_cropped is not None:
                 self.copy_requested.emit(self._original_cropped)
             else:
-                self.copy_requested.emit(self.full_pixmap.copy(self.get_selection_rect()))
+                self.copy_requested.emit(self.full_pixmap.copy(self._selection_rect_in_pixmap()))
         self.close()
 
     def _on_cancel(self):
         """取消按钮：直接关闭，不返回主界面"""
         self._stop_flash()
         self.stop_all_pulses()
-        self.closed.emit()
         self.close()
 
     def _start_flash(self, color: str):
@@ -897,7 +970,6 @@ class ScreenCaptureOverlay(QWidget):
 
     def _restore_main_window(self):
         """恢复主窗口显示"""
-        self.closed.emit()
         from PySide6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
             if widget.windowTitle() == "MemoPaws" or (hasattr(widget, '_is_main_window') and widget._is_main_window):
@@ -997,6 +1069,6 @@ class ScreenCaptureOverlay(QWidget):
                 if self._is_centered and self._original_cropped is not None:
                     self.captured.emit(self._original_cropped, ocr_text, trans_text)
                 else:
-                    self.captured.emit(self.full_pixmap.copy(self.get_selection_rect()), ocr_text, trans_text)
+                    self.captured.emit(self.full_pixmap.copy(self._selection_rect_in_pixmap()), ocr_text, trans_text)
                 self._restore_main_window()
                 self.close()

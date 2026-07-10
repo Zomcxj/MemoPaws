@@ -391,9 +391,8 @@ class SettingsPage(QWidget):
             if key_name:
                 parts.append(key_name)
             combo = "+".join(parts)
-            obj.setText(combo)
-            if self._shortcut_mgr:
-                self._shortcut_mgr.update_shortcut(obj._shortcut_action, combo)
+            if not self._shortcut_mgr or self._shortcut_mgr.update_shortcut(obj._shortcut_action, combo):
+                obj.setText(combo)
             return True
         return super().eventFilter(obj, event)
 
@@ -401,9 +400,8 @@ class SettingsPage(QWidget):
         """重置某个快捷键为默认值"""
         from .shortcut_manager import DEFAULT_SHORTCUTS
         default_key = DEFAULT_SHORTCUTS.get(action, "")
-        edit.setText(default_key)
-        if self._shortcut_mgr:
-            self._shortcut_mgr.update_shortcut(action, default_key)
+        if not self._shortcut_mgr or self._shortcut_mgr.update_shortcut(action, default_key):
+            edit.setText(default_key)
 
     # ── 备忘录存储路径 ──
 

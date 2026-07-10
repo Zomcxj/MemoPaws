@@ -125,6 +125,75 @@ def test_clear_image_stops_running_workers_and_blocks_stale_result_writeback(qap
     assert page.translate_text.toPlainText() == ""
 
 
+def test_capture_ocr_ignores_result_from_replaced_worker(qapp, monkeypatch):
+    page = RecognizePage(
+        QWidget(), get_config_path=lambda: "", get_theme=lambda: DARK,
+        is_dark=lambda: True, get_icons_dir=lambda: "", get_icon_clr=lambda: "#fff",
+        ocr_manager=MagicMock(), translator=MagicMock(), on_append_status=lambda *args: None,
+        on_switch_to_page=lambda name: None,
+    )
+    workers = []
+
+    class FakeWorker:
+        def __init__(self, *args):
+            self.result_ready = MagicMock()
+            self.finished = MagicMock()
+            self.result_ready.connect.side_effect = lambda callback: setattr(self, "on_done", callback)
+            workers.append(self)
+
+        def isRunning(self): return False
+        def start(self): pass
+        def deleteLater(self): pass
+
+    overlay = MagicMock()
+    page.capture_overlay = overlay
+    monkeypatch.setattr("memopaws.ui.recognize_page._CaptureOCRWorker", FakeWorker)
+
+    page._on_capture_ocr(QPixmap(1, 1))
+    page._on_capture_ocr(QPixmap(1, 1))
+    workers[0].on_done("stale")
+    workers[1].on_done("current")
+
+    overlay.show_ocr_result.assert_called_once_with("current")
+
+
+def test_capture_translate_ignores_result_from_replaced_worker(qapp, monkeypatch):
+    page = RecognizePage(
+        QWidget(), get_config_path=lambda: "", get_theme=lambda: DARK,
+        is_dark=lambda: True, get_icons_dir=lambda: "", get_icon_clr=lambda: "#fff",
+        ocr_manager=MagicMock(), translator=MagicMock(), on_append_status=lambda *args: None,
+        on_switch_to_page=lambda name: None,
+    )
+    workers = []
+
+    class FakeWorker:
+        def __init__(self, *args):
+            self.ocr_done = MagicMock()
+            self.translate_done = MagicMock()
+            self.finished = MagicMock()
+            self.ocr_done.connect.side_effect = lambda callback: setattr(self, "on_ocr_done", callback)
+            self.translate_done.connect.side_effect = lambda callback: setattr(self, "on_translate_done", callback)
+            workers.append(self)
+
+        def isRunning(self): return False
+        def start(self): pass
+        def deleteLater(self): pass
+
+    overlay = MagicMock()
+    page.capture_overlay = overlay
+    monkeypatch.setattr("memopaws.ui.recognize_page._CaptureTranslateWorker", FakeWorker)
+
+    page._on_capture_translate(QPixmap(1, 1))
+    page._on_capture_translate(QPixmap(1, 1))
+    workers[0].on_ocr_done("stale ocr")
+    workers[0].on_translate_done("stale ocr", "stale translation")
+    workers[1].on_ocr_done("current ocr")
+    workers[1].on_translate_done("current ocr", "current translation")
+
+    assert overlay.show_ocr_result.call_args_list[-1].args == ("current ocr",)
+    overlay.show_translate_result.assert_called_once_with("current translation")
+
+
 def test_start_capture_overlay_waits_until_window_hidden(qapp, monkeypatch):
     parent = QWidget()
     page = RecognizePage(
@@ -151,7 +220,7 @@ def test_start_capture_overlay_waits_until_window_hidden(qapp, monkeypatch):
         def __init__(self):
             self.shown = False
 
-        def showFullScreen(self):
+        def show(self):
             self.shown = True
 
         def activateWindow(self):
@@ -184,6 +253,10 @@ def test_start_capture_overlay_waits_until_window_hidden(qapp, monkeypatch):
         def translate_requested(self):
             return MagicMock(connect=lambda fn: None)
 
+        @property
+        def closed(self):
+            return MagicMock(connect=lambda fn: None)
+
     scheduled = []
     fake_window = FakeWindow()
     fake_overlay = FakeOverlay()
@@ -196,6 +269,44 @@ def test_start_capture_overlay_waits_until_window_hidden(qapp, monkeypatch):
     assert fake_overlay.shown is False
     assert len(scheduled) == 1
     assert scheduled[0][0] == 50
+
+
+def test_start_capture_overlay_shows_virtual_desktop_geometry_without_fullscreen(qapp, monkeypatch):
+    parent = QWidget()
+    page = RecognizePage(
+        parent,
+        get_config_path=lambda: "", get_theme=lambda: DARK, is_dark=lambda: True,
+        get_icons_dir=lambda: "", get_icon_clr=lambda: "#fff", ocr_manager=MagicMock(),
+        translator=MagicMock(), on_append_status=lambda *args: None,
+        on_switch_to_page=lambda name: None,
+    )
+    signals = [MagicMock(connect=lambda fn: None) for _ in range(7)]
+
+    class FakeOverlay:
+        def __init__(self):
+            self.show_called = False
+            (self.captured, self.copy_requested, self.capture_to_recognize_requested,
+             self.saved, self.ocr_requested, self.translate_requested, self.closed) = signals
+
+        def show(self):
+            self.show_called = True
+
+        def showFullScreen(self):
+            raise AssertionError("覆盖层必须保留虚拟桌面 geometry")
+
+        def activateWindow(self):
+            pass
+
+        def raise_(self):
+            pass
+
+    overlay = FakeOverlay()
+    page.window = lambda: type("W", (), {"isVisible": lambda self: False})()
+    monkeypatch.setattr("memopaws.ui.recognize_page.ScreenCaptureOverlay", lambda: overlay)
+
+    page._start_capture_overlay()
+
+    assert overlay.show_called is True
 
 
 def test_capture_to_recognize_reuses_paste_ocr_simple(qapp):
@@ -301,6 +412,47 @@ def test_capture_save_uses_memopaws_timestamp_name(qapp, monkeypatch):
 
     assert seen["default"].startswith("memopaws_")
     assert seen["default"].endswith(".png")
+
+
+def test_capture_overlay_closed_cleans_capture_workers(qapp):
+    parent = QWidget()
+    page = RecognizePage(
+        parent,
+        get_config_path=lambda: "",
+        get_theme=lambda: DARK,
+        is_dark=lambda: True,
+        get_icons_dir=lambda: "",
+        get_icon_clr=lambda: "#fff",
+        ocr_manager=MagicMock(),
+        translator=MagicMock(),
+        on_append_status=lambda *args: None,
+        on_switch_to_page=lambda name: None,
+    )
+
+    class FakeWorker:
+        def __init__(self):
+            self.running = True
+            self.interrupted = False
+
+        def requestInterruption(self):
+            self.interrupted = True
+
+        def isRunning(self):
+            return self.running
+
+        def wait(self, timeout=None):
+            self.running = False
+            return True
+
+    page._ocr_worker = FakeWorker()
+    page._translate_worker = FakeWorker()
+    page._capture_workers = {page._ocr_worker, page._translate_worker}
+
+    page._on_capture_overlay_closed()
+
+    assert page.capture_overlay is None
+    assert page._ocr_worker is None
+    assert page._translate_worker is None
 
 
 def test_export_image_uses_memopaws_timestamp_name(qapp, monkeypatch):

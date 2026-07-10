@@ -33,7 +33,7 @@ from ..canvas.border_glow_widget import BorderGlowWidget
 
 class _CaptureOCRWorker(QThread):
     """截图覆盖层 OCR 线程"""
-    finished = Signal(str)
+    result_ready = Signal(str)
 
     def __init__(self, ocr_manager, image_array):
         super().__init__()
@@ -43,10 +43,13 @@ class _CaptureOCRWorker(QThread):
     def run(self):
         if self.isInterruptionRequested():
             return
-        text = self.ocr_manager.run_ocr(self.image_array)
+        try:
+            text = self.ocr_manager.run_ocr(self.image_array)
+        except Exception:
+            text = "(识别失败)"
         if self.isInterruptionRequested():
             return
-        self.finished.emit(text or "(无识别结果)")
+        self.result_ready.emit(text or "(无识别结果)")
 
 
 class _CaptureTranslateWorker(QThread):
@@ -64,7 +67,11 @@ class _CaptureTranslateWorker(QThread):
     def run(self):
         if self.isInterruptionRequested():
             return
-        text = self.ocr_manager.run_ocr(self.image_array)
+        try:
+            text = self.ocr_manager.run_ocr(self.image_array)
+        except Exception:
+            self.translate_done.emit("", "(翻译失败)")
+            return
         if self.isInterruptionRequested():
             return
         if not text:
@@ -73,7 +80,10 @@ class _CaptureTranslateWorker(QThread):
         self.ocr_done.emit(text)
         if self.isInterruptionRequested():
             return
-        result = self.translator.translate(text, target_lang=self.target)
+        try:
+            result = self.translator.translate(text, target_lang=self.target)
+        except Exception:
+            result = "(翻译失败)"
         if self.isInterruptionRequested():
             return
         self.translate_done.emit(text, result or "(翻译失败)")
@@ -533,9 +543,9 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         self.capture_overlay.ocr_requested.connect(self._on_capture_ocr)
         self.capture_overlay.translate_requested.connect(self._on_capture_translate)
         self.capture_overlay.closed.connect(self._on_capture_overlay_closed)
-        self.capture_overlay.showFullScreen()
-        self.capture_overlay.activateWindow()
         self.capture_overlay.raise_()
+        self.capture_overlay.show()
+        self.capture_overlay.activateWindow()
 
     def on_capture_finished(self, pixmap, ocr_text="", trans_text=""):
         w = self.window()
@@ -652,28 +662,32 @@ class RecognizePage(OCRTranslateMixin, QWidget):
 
     def _on_capture_ocr(self, pixmap):
         """截图覆盖层：OCR 识别，结果显示在覆盖层"""
+        self._cleanup_old_worker('_ocr_worker')
+        self._cleanup_old_worker('_translate_worker')
+        overlay = self.capture_overlay
         def on_done(text):
-            overlay = getattr(self, 'capture_overlay', None)
-            if overlay is not None:
+            if self._ocr_worker is worker and self.capture_overlay is overlay and overlay is not None:
                 try:
                     overlay.show_ocr_result(text)
                     overlay.on_result_received()
                 except RuntimeError:
                     pass
 
-        self._cleanup_old_worker('_ocr_worker')
-        self._ocr_worker = _CaptureOCRWorker(self.ocr_manager, qpixmap_to_numpy(pixmap))
-        self._capture_workers.add(self._ocr_worker)
-        self._ocr_worker.finished.connect(on_done)
-        self._ocr_worker.finished.connect(lambda: self._capture_workers.discard(self._ocr_worker))
-        self._ocr_worker.finished.connect(self._ocr_worker.deleteLater)
-        self._ocr_worker.start()
+        worker = _CaptureOCRWorker(self.ocr_manager, qpixmap_to_numpy(pixmap))
+        self._ocr_worker = worker
+        self._capture_workers.add(worker)
+        worker.result_ready.connect(on_done)
+        worker.finished.connect(lambda: self._capture_workers.discard(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
 
     def _on_capture_translate(self, pixmap):
         """截图覆盖层：先 OCR 再翻译，结果显示在覆盖层"""
+        self._cleanup_old_worker('_ocr_worker')
+        self._cleanup_old_worker('_translate_worker')
+        overlay = self.capture_overlay
         def on_ocr_done(text):
-            overlay = getattr(self, 'capture_overlay', None)
-            if overlay is not None:
+            if self._translate_worker is worker and self.capture_overlay is overlay and overlay is not None:
                 try:
                     overlay.show_ocr_result(text)
                     overlay.stop_all_pulses()
@@ -682,8 +696,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
                     pass
 
         def on_translate_done(ocr_text, translated):
-            overlay = getattr(self, 'capture_overlay', None)
-            if overlay is not None:
+            if self._translate_worker is worker and self.capture_overlay is overlay and overlay is not None:
                 try:
                     if ocr_text:
                         overlay.show_ocr_result(ocr_text)
@@ -692,18 +705,20 @@ class RecognizePage(OCRTranslateMixin, QWidget):
                 except RuntimeError:
                     pass
 
-        self._cleanup_old_worker('_translate_worker')
         target = getattr(self, 'translate_target', '英文')
-        self._translate_worker = _CaptureTranslateWorker(self.ocr_manager, self.translator, target, qpixmap_to_numpy(pixmap))
-        self._capture_workers.add(self._translate_worker)
-        self._translate_worker.ocr_done.connect(on_ocr_done)
-        self._translate_worker.translate_done.connect(on_translate_done)
-        self._translate_worker.finished.connect(lambda: self._capture_workers.discard(self._translate_worker))
-        self._translate_worker.finished.connect(self._translate_worker.deleteLater)
-        self._translate_worker.start()
+        worker = _CaptureTranslateWorker(self.ocr_manager, self.translator, target, qpixmap_to_numpy(pixmap))
+        self._translate_worker = worker
+        self._capture_workers.add(worker)
+        worker.ocr_done.connect(on_ocr_done)
+        worker.translate_done.connect(on_translate_done)
+        worker.finished.connect(lambda: self._capture_workers.discard(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
 
     def _on_capture_overlay_closed(self):
         """覆盖层关闭时清理引用"""
+        self._cleanup_old_worker('_ocr_worker')
+        self._cleanup_old_worker('_translate_worker')
         self.capture_overlay = None
 
     def _on_image_dropped(self, file_path):

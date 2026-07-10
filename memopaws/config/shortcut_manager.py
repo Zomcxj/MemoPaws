@@ -101,21 +101,14 @@ class ShortcutManager:
 
     def _bind(self, action: str, key: str, handler: callable):
         """绑定一个快捷键（同时注册全局热键）"""
-        if action in self._shortcuts:
-            self._shortcuts[action].setEnabled(False)
-            self._shortcuts[action].deleteLater()
-
-        # 注销旧的全局热键
-        if action in self._global_hotkeys:
-            self._unregister_global_hotkey(action)
-
         if not key:
-            return
-
-        # 注册全局热键
-        self._register_global_hotkey(action, key, handler)
+            return False
+        if not self._register_global_hotkey(action, key, handler):
+            return False
+        self._keys[action] = key
 
         logger.debug("快捷键注册: %s -> %s", action, key)
+        return True
 
     def _parse_hotkey(self, key_str: str):
         """解析快捷键字符串，返回 (modifiers, vk_code)"""
@@ -163,19 +156,23 @@ class ShortcutManager:
             modifiers, vk_code = self._parse_hotkey(key_str)
             if not vk_code:
                 logger.warning("无法解析快捷键: %s", key_str)
-                return
+                return False
 
             # 用 action 的 hash 作为 hotkey id
             hotkey_id = hash(action) & 0x7FFFFFFF
             if not user32.RegisterHotKey(None, hotkey_id, modifiers, vk_code):
                 logger.warning("注册全局热键失败: %s (可能被其他程序占用)", key_str)
-                return
+                if self._parent is not None and hasattr(self._parent, "_append_status"):
+                    self._parent._append_status(f"全局快捷键注册失败：{key_str}")
+                return False
 
             self._global_hotkeys[action] = hotkey_id
             self._hotkey_handlers[hotkey_id] = handler
             logger.info("全局热键注册: %s -> %s (id=%d)", action, key_str, hotkey_id)
+            return True
         except Exception as e:
             logger.error("注册全局热键异常: %s", e)
+            return False
 
     def _unregister_global_hotkey(self, action: str):
         """注销 Windows 全局热键"""
@@ -194,31 +191,34 @@ class ShortcutManager:
         """运行时更新某个快捷键"""
         handler = self._handlers.get(action)
         if handler is None:
-            return
-        self._bind(action, new_key, handler)
+            return False
+        modifiers, vk_code = self._parse_hotkey(new_key)
+        if not vk_code:
+            logger.warning("无法解析快捷键: %s", new_key)
+            return False
+        if action in self._global_hotkeys:
+            candidate_id = hash((action, new_key)) & 0x7FFFFFFF
+            if not user32.RegisterHotKey(None, candidate_id, modifiers, vk_code):
+                logger.warning("注册全局热键失败: %s (可能被其他程序占用)", new_key)
+                if self._parent is not None and hasattr(self._parent, "_append_status"):
+                    self._parent._append_status(f"全局快捷键注册失败：{new_key}")
+                return False
+            self._unregister_global_hotkey(action)
+            self._global_hotkeys[action] = candidate_id
+            self._hotkey_handlers[candidate_id] = handler
+            self._keys[action] = new_key
+        elif not self._bind(action, new_key, handler):
+            return False
         self._save_to_config()
+        return True
 
     def _save_to_config(self):
         """将当前所有快捷键写入配置文件"""
-        keys = {}
-        for action in self._handlers:
-            sc = self._shortcuts.get(action)
-            if sc and sc.isEnabled():
-                keys[action] = sc.key().toString()
-            else:
-                keys[action] = self._keys.get(action, "")
-        _save_shortcuts(self._get_config_path, self._save_config, keys)
+        _save_shortcuts(self._get_config_path, self._save_config, self._keys)
 
     def get_current_keys(self) -> dict[str, str]:
         """获取当前所有快捷键的键值"""
-        result = {}
-        for action in self._handlers:
-            sc = self._shortcuts.get(action)
-            if sc and sc.isEnabled():
-                result[action] = sc.key().toString()
-            else:
-                result[action] = self._keys.get(action, "")
-        return result
+        return {action: self._keys.get(action, "") for action in self._handlers}
 
     def get_all_actions(self) -> list[tuple[str, str, str]]:
         """返回 [(action, display_name, current_key), ...]"""
@@ -233,10 +233,6 @@ class ShortcutManager:
         saved = _load_shortcuts(self._get_config_path)
         result = []
         for action in self._handlers:
-            sc = self._shortcuts.get(action)
-            if sc and sc.isEnabled():
-                key = sc.key().toString()
-            else:
-                key = saved.get(action, self._keys.get(action, ""))
+            key = self._keys.get(action, saved.get(action, ""))
             result.append((action, names.get(action, action), key))
         return result

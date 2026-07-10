@@ -41,7 +41,7 @@ class TestCrypto:
     def test_encrypt_empty_string(self):
         key = _derive_key("test")
         result = _encrypt("", key)
-        assert result == ""
+        assert result.startswith("v2:")
         assert _decrypt(result, key) == ""
 
     def test_decrypt_wrong_key(self):
@@ -200,8 +200,138 @@ class TestKeyManager:
         from memopaws.keys.key_manager import _get_keys_file
         with open(_get_keys_file(), "r", encoding="utf-8") as f:
             data = json.load(f)
-        assert data["version"] == 2
+        assert data["version"] == 3
+        assert data["kdf"]["salt"]
+        assert data["verifier"].startswith("v2:")
         for e in data["entries"]:
             assert "value" not in e
             assert "enc_value" in e
             assert e["enc_value"].startswith("v2:")
+
+    def test_failed_unlock_of_tampered_entry_preserves_source_file(self):
+        km = KeyManager()
+        km.set_master("pwd")
+        km.add_entry("safe", "secret", "hidden_value")
+        from memopaws.keys.key_manager import _get_keys_file
+        with open(_get_keys_file(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["entries"][0]["enc_value"] = "v2:not-valid"
+        with open(_get_keys_file(), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        original = open(_get_keys_file(), "rb").read()
+
+        reloaded = KeyManager()
+
+        assert reloaded.unlock("pwd") is False
+        assert reloaded.is_unlocked() is False
+        assert open(_get_keys_file(), "rb").read() == original
+
+    def test_corrupted_json_is_not_treated_as_empty_writable_library(self):
+        from memopaws.keys.key_manager import _get_keys_file
+        with open(_get_keys_file(), "w", encoding="utf-8") as f:
+            f.write("{")
+        original = open(_get_keys_file(), "rb").read()
+        km = KeyManager()
+
+        assert km.is_unlocked() is False
+        km.add_entry("new", "secret", "value")
+        assert open(_get_keys_file(), "rb").read() == original
+
+    def test_unlocking_v2_migrates_without_losing_data(self):
+        key = _derive_key("legacy")
+        from memopaws.keys.key_manager import _get_keys_file
+        legacy = {
+            "version": 2,
+            "master_hash": __import__("hashlib").sha256(b"legacy").hexdigest(),
+            "entries": [{"id": 1, "name": "old", "type": "secret", "enc_value": _encrypt("value", key)}],
+        }
+        with open(_get_keys_file(), "w", encoding="utf-8") as f:
+            json.dump(legacy, f)
+
+        km = KeyManager()
+
+        assert km.unlock("legacy") is True
+        assert km.get_plain_value(1) == "value"
+        with open(_get_keys_file(), encoding="utf-8") as f:
+            assert json.load(f)["version"] == 3
+
+    def test_unlocking_v2_returns_false_and_restores_memory_when_migration_save_fails(self, monkeypatch):
+        key = _derive_key("legacy")
+        from memopaws.keys.key_manager import _get_keys_file
+        legacy = {
+            "version": 2,
+            "master_hash": __import__("hashlib").sha256(b"legacy").hexdigest(),
+            "entries": [{"id": 1, "name": "old", "type": "secret", "enc_value": _encrypt("value", key)}],
+        }
+        with open(_get_keys_file(), "w", encoding="utf-8") as f:
+            json.dump(legacy, f)
+        original = open(_get_keys_file(), "rb").read()
+        km = KeyManager()
+        monkeypatch.setattr(km, "_save", lambda: False)
+
+        assert km.unlock("legacy") is False
+        assert km.is_unlocked() is False
+        assert km._version == 2
+        assert km._master_hash == legacy["master_hash"]
+        assert km._verifier == ""
+        assert km._key == b""
+        assert km._entries[0]["enc_value"] == legacy["entries"][0]["enc_value"]
+        assert open(_get_keys_file(), "rb").read() == original
+
+    def test_save_returns_false_when_config_directory_cannot_be_created(self, monkeypatch):
+        km = KeyManager()
+        monkeypatch.setattr("memopaws.keys.key_manager.os.makedirs", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("denied")))
+
+        assert km._save() is False
+
+    def test_set_master_restores_memory_when_save_fails(self, monkeypatch):
+        km = KeyManager()
+        previous_state = (km._entries, km._master_hash, km._key, km._unlocked, km._version, km._kdf, km._verifier)
+        monkeypatch.setattr(km, "_save", lambda: False)
+
+        assert km.set_master("pwd") is False
+        assert (km._entries, km._master_hash, km._key, km._unlocked, km._version, km._kdf, km._verifier) == previous_state
+
+    def test_remove_master_restores_entries_and_state_when_save_fails(self, monkeypatch):
+        km = KeyManager()
+        km.set_master("pwd")
+        km.add_entry("secret", "secret", "value")
+        previous_state = (km._master_hash, km._key, km._unlocked, km._version, dict(km._kdf), km._verifier)
+        previous_entry = dict(km._entries[0])
+        monkeypatch.setattr(km, "_save", lambda: False)
+
+        assert km.remove_master() is False
+        assert (km._master_hash, km._key, km._unlocked, km._version, km._kdf, km._verifier) == previous_state
+        assert km._entries == [previous_entry]
+
+    @pytest.mark.parametrize("operation", ["add", "update", "delete"])
+    def test_entry_mutation_returns_false_and_restores_entries_when_save_fails(self, monkeypatch, operation):
+        km = KeyManager()
+        assert km.add_entry("old", "secret", "value") is True
+        entry_id = km.get_entries()[0]["id"]
+        before = [dict(entry) for entry in km.get_entries()]
+        monkeypatch.setattr(km, "_save", lambda: False)
+
+        if operation == "add":
+            result = km.add_entry("new", "secret", "new-value")
+        elif operation == "update":
+            result = km.update_entry(entry_id, name="new")
+        else:
+            result = km.delete_entry(entry_id)
+
+        assert result is False
+        assert km.get_entries() == before
+
+    def test_encrypted_empty_value_is_saved_as_ciphertext_and_unlocks_after_restart(self):
+        km = KeyManager()
+        assert km.set_master("pwd") is True
+        assert km.add_entry("empty", "secret", "") is True
+        from memopaws.keys.key_manager import _get_keys_file
+        with open(_get_keys_file(), encoding="utf-8") as f:
+            saved_entry = json.load(f)["entries"][0]
+        assert "value" not in saved_entry
+        assert saved_entry["enc_value"].startswith("v2:")
+
+        reloaded = KeyManager()
+        assert reloaded.unlock("pwd") is True
+        assert reloaded.get_plain_value(saved_entry["id"]) == ""

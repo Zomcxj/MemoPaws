@@ -1,8 +1,8 @@
 """截图覆盖层单元测试"""
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent, QPaintEvent
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QMouseEvent, QPaintEvent, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from memopaws.canvas.capture import ScreenCaptureOverlay
@@ -74,6 +74,15 @@ class TestScreenCaptureOverlay:
         assert "border-radius:6px" in overlay.size_label.styleSheet()
         assert "background: transparent" in overlay.size_label.styleSheet()
         overlay.close()
+
+    def test_capture_overlay_safe_close_hides_overlay_on_exception(self, qapp, monkeypatch):
+        overlay = ScreenCaptureOverlay()
+        closed = []
+        monkeypatch.setattr(overlay, "close", lambda: closed.append(True))
+
+        overlay._safe_close_overlay(RuntimeError("boom"))
+
+        assert closed == [True]
 
     def test_capture_overlay_positions_size_label_on_left_outside(self, qapp):
         overlay = ScreenCaptureOverlay()
@@ -666,9 +675,8 @@ class TestScreenCaptureOverlay:
         expected_x = rect.right() + 16
         if expected_x + panel.width() > overlay.width() - 10:
             expected_x = rect.left() - panel.width() - 16
-        expected_y = rect.top() + rect.height() // 2 - panel.height() // 2
         assert panel.left() == expected_x
-        assert panel.top() == expected_y
+        assert panel.top() == 0
         overlay.close()
 
     def test_result_panel_follows_selection_while_resizing(self, qapp):
@@ -705,9 +713,8 @@ class TestScreenCaptureOverlay:
         expected_x = rect.right() + 16
         if expected_x + panel.width() > overlay.width() - 10:
             expected_x = rect.left() - panel.width() - 16
-        expected_y = rect.top() + rect.height() // 2 - panel.height() // 2
         assert panel.left() == expected_x
-        assert panel.top() == expected_y
+        assert panel.top() == 0
         overlay.close()
 
     def test_result_panel_drag_moves_selection_by_the_same_delta(self, qapp):
@@ -750,8 +757,8 @@ class TestScreenCaptureOverlay:
         assert overlay.eventFilter(overlay._result_drag_handle, press_event) is True
         assert overlay.eventFilter(overlay._result_drag_handle, move_event) is True
         assert overlay.eventFilter(overlay._result_drag_handle, release_event) is True
-        assert overlay._result_panel.pos() == panel_pos + QPoint(20, -10)
-        assert overlay.get_selection_rect().topLeft() == QPoint(100, 70)
+        assert overlay._result_panel.pos() == panel_pos + QPoint(20, 0)
+        assert overlay.get_selection_rect().topLeft() == QPoint(100, 80)
         overlay.close()
 
     def test_action_bar_uses_arrow_cursor(self, qapp):
@@ -759,3 +766,57 @@ class TestScreenCaptureOverlay:
 
         assert overlay._btn_bar.cursor().shape() == Qt.CursorShape.ArrowCursor
         overlay.close()
+
+    def test_capture_overlay_maps_virtual_desktop_selection_to_pixmap_coords(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay._capture_origin = QPoint(-1920, 0)
+        overlay.setGeometry(QRect(-1920, 0, 3840, 1080))
+        overlay.full_pixmap = QPixmap(3840, 1080)
+        overlay.start_point = QPoint(100, 50)
+        overlay.end_point = QPoint(300, 200)
+
+        mapped = overlay._selection_rect_in_pixmap()
+
+        assert mapped.topLeft() == QPoint(100, 50)
+        assert mapped.bottomRight() == QPoint(300, 200)
+        overlay.close()
+
+    def test_capture_overlay_clamps_selection_drag_to_overlay_rect(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay.resize(200, 100)
+        overlay.start_point = QPoint(50, 20)
+        overlay.end_point = QPoint(150, 70)
+        overlay.selection_done = True
+        overlay._is_dragging = True
+        overlay._drag_offset = QPoint(10, 10)
+        overlay._drag_rect_width = 101
+        overlay._drag_rect_height = 51
+
+        overlay.mouseMoveEvent(QMouseEvent(
+            QMouseEvent.Type.MouseMove, QPointF(300, 200), QPointF(300, 200),
+            QPointF(300, 200), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ))
+
+        assert overlay.get_selection_rect().right() == overlay.rect().right()
+        assert overlay.get_selection_rect().bottom() == overlay.rect().bottom()
+        overlay.close()
+
+    def test_capture_overlay_notifies_closed_once_for_cancel(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        notifications = []
+        overlay.closed.connect(lambda: notifications.append(True))
+
+        overlay._on_cancel()
+
+        assert notifications == [True]
+        overlay.close()
+
+    def test_capture_overlay_notifies_closed_once_for_native_close(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        notifications = []
+        overlay.closed.connect(lambda: notifications.append(True))
+
+        overlay.close()
+
+        assert notifications == [True]

@@ -6,6 +6,8 @@ import os
 import shutil
 import time
 
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton, QWidget
 
 from memopaws.config.settings_page import SettingsPage
@@ -194,3 +196,40 @@ class TestSettingsPage:
 
         assert running.cancel_requested is True
         assert page.settings_test_label.text() == "⏹ 正在取消..."
+
+    def test_shortcut_failure_keeps_input_display(self, qapp, parent, tmp_config):
+        manager = type("Manager", (), {
+            "get_all_actions": lambda self: [],
+            "update_shortcut": lambda self, action, key: False,
+        })()
+        page = SettingsPage(parent, get_config_path=lambda: tmp_config, get_theme=lambda: DARK,
+                            is_dark=lambda: True, load_config=lambda: {}, save_config=lambda c: None,
+                            ocr_manager=None, on_toggle_theme=lambda: None, on_set_theme=lambda t: None,
+                            on_set_language=lambda l: None, get_current_lang=lambda: "zh",
+                            get_current_theme_dark=lambda: True, on_save_clipboard=lambda c: None,
+                            on_set_floating_widget_visible=lambda visible: None, show_message=lambda *a: None,
+                            shortcut_mgr=manager)
+        edit = QLineEdit("Alt+X")
+        edit._shortcut_action = "capture"
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Y, Qt.KeyboardModifier.AltModifier)
+
+        assert page.eventFilter(edit, event) is True
+        assert edit.text() == "Alt+X"
+
+    def test_shortcut_reset_failure_keeps_input_display(self, qapp, parent, tmp_config):
+        manager = type("Manager", (), {
+            "get_all_actions": lambda self: [],
+            "update_shortcut": lambda self, action, key: False,
+        })()
+        page = SettingsPage(parent, get_config_path=lambda: tmp_config, get_theme=lambda: DARK,
+                            is_dark=lambda: True, load_config=lambda: {}, save_config=lambda c: None,
+                            ocr_manager=None, on_toggle_theme=lambda: None, on_set_theme=lambda t: None,
+                            on_set_language=lambda l: None, get_current_lang=lambda: "zh",
+                            get_current_theme_dark=lambda: True, on_save_clipboard=lambda c: None,
+                            on_set_floating_widget_visible=lambda visible: None, show_message=lambda *a: None,
+                            shortcut_mgr=manager)
+        edit = QLineEdit("Alt+Y")
+
+        page._reset_shortcut("capture", edit)
+
+        assert edit.text() == "Alt+Y"
