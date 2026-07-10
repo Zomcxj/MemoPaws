@@ -10,7 +10,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QMouseEvent, QPixmap
 
 from memopaws.clipboard.clipboard_page import ClipboardPage, ZoomableImageLabel
-from memopaws.core.themes import DARK
+from memopaws.core.themes import DARK, LIGHT
 
 
 class TestClipboardPage:
@@ -305,6 +305,38 @@ class TestClipboardPage:
         ))
 
         assert previewed == [data[0]["image_path"]]
+
+    @pytest.mark.parametrize(("theme", "icon_color", "dark"), [
+        (LIGHT, "#000", False),
+        (DARK, "#fff", True),
+    ])
+    def test_image_preview_sets_title_bar_theme(self, qapp, parent, icons_dir, tmp_path, monkeypatch, theme, icon_color, dark):
+        image_path = tmp_path / "preview.png"
+        QPixmap(20, 20).save(str(image_path))
+        calls = []
+        scheduled = []
+        monkeypatch.setattr("memopaws.clipboard.clipboard_page.set_title_bar_color", lambda hwnd, dark: calls.append(dark), raising=False)
+        monkeypatch.setattr("memopaws.clipboard.clipboard_page.QTimer.singleShot", lambda delay, callback: scheduled.append((delay, callback)))
+        monkeypatch.setattr("memopaws.clipboard.clipboard_page.QDialog.exec", lambda dialog: dialog.show())
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: "",
+            get_theme=lambda: theme,
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: icon_color,
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: [],
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+
+        page._preview_clipboard_image(str(image_path))
+        qapp.processEvents()
+        assert len(scheduled) == 1
+        assert scheduled[0][0] == 50
+        scheduled[0][1]()
+
+        assert calls == [dark]
 
     def test_grid_image_card_double_click_does_not_refresh_clipboard(self, qapp, parent, icons_dir, tmp_path, monkeypatch):
         data = []

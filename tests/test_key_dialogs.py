@@ -1,6 +1,6 @@
 import pytest
 
-from memopaws.keys.key_dialogs import _t, _T
+from memopaws.keys.key_dialogs import EntryDialog, _t, _T
 
 
 class TestTFunction:
@@ -50,3 +50,21 @@ class TestTDict:
                 continue
             assert value["zh"] != value["en"] or key in ("取消", "保存", "错误", "名称", "删除", "复制", "编辑", "测试"), \
                 f"键 {key} 中英文相同: {value['zh']}"
+
+
+@pytest.mark.parametrize("is_dark", [False, True])
+def test_entry_dialog_sets_title_bar_theme(qapp, monkeypatch, is_dark):
+    calls = []
+    scheduled = []
+    monkeypatch.setattr("memopaws.keys.key_dialogs.set_title_bar_color", lambda hwnd, dark: calls.append(dark), raising=False)
+    monkeypatch.setattr("memopaws.keys.key_dialogs.QTimer.singleShot", lambda delay, callback: scheduled.append((delay, callback)))
+
+    dialog = EntryDialog(None, is_dark=is_dark)
+    dialog.show()
+    qapp.processEvents()
+    assert len(scheduled) == 1
+    assert scheduled[0][0] == 50
+    scheduled[0][1]()
+
+    assert calls == [is_dark]
+    dialog.close()

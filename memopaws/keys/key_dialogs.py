@@ -7,7 +7,9 @@ from PySide6.QtWidgets import (
     QLineEdit, QComboBox, QDialog, QDialogButtonBox,
     QApplication, QDateEdit,
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QTimer
+
+from ..core.utils import set_title_bar_color
 
 # ── 中英文文本映射 ──
 _T = {
@@ -232,6 +234,7 @@ class EntryDialog(QDialog):
         layout.addLayout(btn_row)
 
         self._on_type_changed(self.type_combo.currentText())
+        QTimer.singleShot(50, lambda: set_title_bar_color(int(self.winId()), is_dark))
 
     def _toggle_eye(self):
         if self.value_input.echoMode() == QLineEdit.EchoMode.Password:

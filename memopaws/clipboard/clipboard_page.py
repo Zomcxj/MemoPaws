@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QIcon, QFont, QGuiApplication, QPixmap, QImage
 from PySide6.QtCore import Qt, QSize, QTimer
 
-from ..core.utils import get_config_dir, ensure_config_dir, load_svg_icon
+from ..core.utils import get_config_dir, ensure_config_dir, load_svg_icon, set_title_bar_color
 from ..core.themes import DARK, LIGHT, get_status_list_stylesheet, get_clear_history_stylesheet
 from ..ui.segmented_control import AnimatedSegmentedControl
 from .clipboard_dialog import ClipboardEditDialog
@@ -995,6 +995,7 @@ class ClipboardPage(QWidget):
         scroll.setWidget(label)
         vbox.addWidget(scroll)
         dlg.resize(920, 720)
+        QTimer.singleShot(50, lambda: set_title_bar_color(int(dlg.winId()), self._get_theme().is_dark))
         dlg.exec()
 
     def latest_image_record(self):
