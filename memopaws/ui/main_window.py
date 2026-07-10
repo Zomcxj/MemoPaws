@@ -78,12 +78,14 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         
         self._current_theme_dark = saved_config.get("theme", "dark") == "dark"
         self._current_lang = saved_config.get("language", "zh")
+        self._startup_reveal_pending = True
         
         # 无边框窗口 mixin 所需属性
         self._window_radius = 14
         self._drag_pos = None
         
         self.setStyleSheet(get_main_stylesheet(DARK if self._current_theme_dark else LIGHT))
+        self.setWindowOpacity(0.0)
         
         QTimer.singleShot(100, lambda: self._safe_set_title_bar_color())
         
@@ -125,7 +127,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         # ── 无标题栏窗口 ──
         # 操作说明：用户用左下角"退出"按钮关闭；
         # 整个窗口空白区域可按住拖动；边缘 6px 可拖动调整大小。
-        self.setWindowFlags(Qt.WindowType.Window)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         # 启用透明背景，让 paintEvent 画圆角矩形（消除 4 角直角）
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
@@ -151,7 +153,6 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         
         # 默认选中"贴图识别"
         self.nav_sidebar.switch_page("贴图识别")
-        central.show()
         
         # 整体拖拽：侧边栏空白区域可拖拽窗口
         self.nav_sidebar.nav_frame.installEventFilter(self)
@@ -285,11 +286,20 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if self._startup_reveal_pending:
+            self._startup_reveal_pending = False
+            QTimer.singleShot(0, self._finish_startup_reveal)
         if self._floating_widget is None:
             self._setup_floating_widget()
         if self._pending_show_floating_widget and self._floating_widget and not self._floating_widget.isVisible():
             self._pending_show_floating_widget = False
             QTimer.singleShot(0, self._floating_widget.show)
+
+    def _finish_startup_reveal(self):
+        # ponytail: 启动首帧先保持透明，等无边框表面和标题栏颜色落地后再显示，压掉系统默认小窗闪现。
+        self._sync_window_surface()
+        self._safe_set_title_bar_color()
+        self.setWindowOpacity(1.0)
 
     def _sync_window_surface(self):
         # 最大化时不要透明外壳，避免无边框窗口客户区边缘被系统裁掉。

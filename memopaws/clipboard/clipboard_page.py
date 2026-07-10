@@ -168,7 +168,7 @@ class ClipboardPage(QWidget):
 
         self._clipboard_stack = QStackedLayout()
 
-        self.clipboard_list = QListWidget()
+        self.clipboard_list = QListWidget(clip_frame)
         self.clipboard_list.setStyleSheet(get_status_list_stylesheet(t))
         self.clipboard_list.setMinimumHeight(200)
         self.clipboard_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

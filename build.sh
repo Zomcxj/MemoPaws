@@ -182,10 +182,12 @@ if [ "$PORTABLE" = true ]; then
     log_info "模式: 便携版单文件"
     MODE_ARGS="-F"
     OUTPUT_NAME="MemoPaws_Portable"
+    OUTPUT_FILE="${PROJECT_ROOT}/dist/MemoPaws_Portable.exe"
 else
     log_info "模式: 目录打包（推荐）"
     MODE_ARGS="-D"
     OUTPUT_NAME="MemoPaws"
+    OUTPUT_FILE="${PROJECT_ROOT}/dist/MemoPaws"
 fi
 
 # ==================== 执行打包 ====================

@@ -317,7 +317,7 @@ class RecognizePage(OCRTranslateMixin, QWidget):
         history_row.addWidget(self.btn_clear_history)
         history_vbox.addLayout(history_row)
 
-        self.status_list = QListWidget()
+        self.status_list = QListWidget(history_frame)
         self.status_list.setStyleSheet(get_status_list_stylesheet(_t_hist))
         self.status_list.setMinimumHeight(120)
         self.status_list.setMaximumHeight(280)
