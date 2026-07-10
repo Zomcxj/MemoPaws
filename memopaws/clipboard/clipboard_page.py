@@ -21,6 +21,87 @@ from ..ui.segmented_control import AnimatedSegmentedControl
 from .clipboard_dialog import ClipboardEditDialog
 
 
+class ZoomableImageLabel(QLabel):
+    """图片预览标签：滚轮缩放，双击恢复适配大小。"""
+
+    FIT_SIZE = QSize(900, 700)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._image = QPixmap()
+        self.scale_factor = 1.0
+        self._drag_pos = None
+        self._drag_global_pos = None
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def set_image(self, pixmap: QPixmap):
+        self._image = pixmap
+        self.fit_to_view()
+
+    def fit_to_view(self):
+        self.scale_factor = 1.0
+        self._render()
+
+    def zoom(self, factor: float):
+        self.scale_factor = max(0.2, min(8.0, self.scale_factor * factor))
+        self._render()
+
+    def _render(self):
+        if self._image.isNull():
+            return
+        fit = self._image.scaled(
+            self.FIT_SIZE,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        size = fit.size() * self.scale_factor
+        pixmap = self._image.scaled(
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.setPixmap(pixmap)
+        self.setFixedSize(pixmap.size())
+
+    def wheelEvent(self, event):
+        self.zoom(1.2 if event.angleDelta().y() > 0 else 1 / 1.2)
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        self.fit_to_view()
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.position().toPoint()
+            self._drag_global_pos = event.globalPosition().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is None:
+            super().mouseMoveEvent(event)
+            return
+        scroll = self.parentWidget().parentWidget()
+        delta = event.globalPosition().toPoint() - self._drag_global_pos
+        scroll.horizontalScrollBar().setValue(scroll.horizontalScrollBar().value() - delta.x())
+        scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().value() - delta.y())
+        self._drag_pos = event.position().toPoint()
+        self._drag_global_pos = event.globalPosition().toPoint()
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self._drag_pos = None
+            self._drag_global_pos = None
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class ClipboardPage(QWidget):
     SEARCH_DEBOUNCE_MS = 180
     GRID_COLUMNS = 4
@@ -56,6 +137,7 @@ class ClipboardPage(QWidget):
         self._grid_container = None
         self._grid_layout = None
         self._grid_selected_indices = set()
+        self._clipboard_read_queued = False
         self._search_debounce_timer = QTimer(self)
         self._search_debounce_timer.setSingleShot(True)
         self._search_debounce_timer.setInterval(self.SEARCH_DEBOUNCE_MS)
@@ -394,6 +476,13 @@ class ClipboardPage(QWidget):
                 self._on_append_status("剪切板条目已修改")
 
     def _on_clipboard_changed(self):
+        if self._clipboard_read_queued:
+            return
+        self._clipboard_read_queued = True
+        QTimer.singleShot(0, self._read_clipboard)
+
+    def _read_clipboard(self):
+        self._clipboard_read_queued = False
         clipboard = QGuiApplication.clipboard()
         mime = clipboard.mimeData()
         pixmap = clipboard.pixmap()
@@ -606,6 +695,7 @@ class ClipboardPage(QWidget):
             thumb.setMaximumHeight(80)
             thumb.setPixmap(pixmap.scaled(160, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            thumb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(thumb)
             content_text = os.path.basename(record["image_path"])
         else:
@@ -615,6 +705,7 @@ class ClipboardPage(QWidget):
         content.setMinimumWidth(0)
         content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         content.setStyleSheet(f"font-size:12px; color:{t.text_primary}; border:none;")
+        content.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         layout.addWidget(content, 1)
         badge = None
         if record.get("locked"):
@@ -646,17 +737,14 @@ class ClipboardPage(QWidget):
                 self._toggle_grid_selection(row_idx, row_idx not in self._grid_selected_indices)
                 event.accept()
                 return
+            if event.button() == Qt.MouseButton.LeftButton and record.get("kind") == "image":
+                self._preview_clipboard_image(record.get("image_path"))
+                event.accept()
+                return
             QFrame.mousePressEvent(card, event)
 
-        def mouseDoubleClickEvent(event, row_idx=source_idx, rec=record):
-            if rec.get("kind") == "image" and rec.get("image_path") and os.path.exists(rec["image_path"]):
-                QGuiApplication.clipboard().setImage(QPixmap(rec["image_path"]).toImage())
-            else:
-                QGuiApplication.clipboard().setText(rec.get("text", ""))
-            rec["time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self._sort_clipboard()
-            self.save_clipboard()
-            self._update_clipboard_list()
+        def mouseDoubleClickEvent(event):
+            event.accept()
 
         card.mousePressEvent = mousePressEvent
         card.mouseDoubleClickEvent = mouseDoubleClickEvent
@@ -895,11 +983,17 @@ class ClipboardPage(QWidget):
         dlg = QDialog(self)
         dlg.setWindowTitle("图片预览")
         vbox = QVBoxLayout(dlg)
-        label = QLabel()
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pixmap = QPixmap(image_path)
-        label.setPixmap(pixmap.scaled(900, 700, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        vbox.addWidget(label)
+        tip = QLabel("滚轮缩放 · 双击恢复适配")
+        tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tip.setStyleSheet(f"font-size:11px; color:{self._get_theme().text_muted}; border:none;")
+        vbox.addWidget(tip)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(False)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label = ZoomableImageLabel()
+        label.set_image(QPixmap(image_path))
+        scroll.setWidget(label)
+        vbox.addWidget(scroll)
         dlg.resize(920, 720)
         dlg.exec()
 

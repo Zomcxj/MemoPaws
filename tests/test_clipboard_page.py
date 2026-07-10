@@ -5,10 +5,11 @@ import json
 import pytest
 
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QWidget, QLabel
-from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QScrollArea, QWidget, QLabel
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QMouseEvent, QPixmap
 
-from memopaws.clipboard.clipboard_page import ClipboardPage
+from memopaws.clipboard.clipboard_page import ClipboardPage, ZoomableImageLabel
 from memopaws.core.themes import DARK
 
 
@@ -37,6 +38,90 @@ class TestClipboardPage:
             get_current_lang=lambda: "zh",
         )
         assert page is not None
+
+    def test_preview_image_label_zooms_and_resets_to_fit(self, qapp):
+        label = ZoomableImageLabel()
+        label.resize(200, 100)
+        label.set_image(QPixmap(400, 200))
+
+        label.zoom(1.25)
+
+        assert label.scale_factor == 1.25
+
+        label.fit_to_view()
+
+        assert label.scale_factor == 1.0
+
+    def test_preview_image_label_drags_scroll_area_after_zooming(self, qapp):
+        scroll = QScrollArea()
+        scroll.resize(200, 100)
+        label = ZoomableImageLabel()
+        label.set_image(QPixmap(400, 200))
+        label.zoom(2)
+        scroll.setWidget(label)
+        scroll.show()
+        qapp.processEvents()
+
+        QTest.mousePress(label, Qt.MouseButton.LeftButton, pos=QPoint(150, 80))
+        QTest.mouseMove(label, QPoint(100, 40))
+        QTest.mouseRelease(label, Qt.MouseButton.LeftButton, pos=QPoint(100, 40))
+
+        assert scroll.horizontalScrollBar().value() > 0
+        assert scroll.verticalScrollBar().value() > 0
+
+    def test_preview_image_drag_uses_pointer_delta_after_scrolls(self, qapp):
+        scroll = QScrollArea()
+        scroll.resize(200, 100)
+        label = ZoomableImageLabel()
+        label.set_image(QPixmap(400, 200))
+        label.zoom(2)
+        scroll.setWidget(label)
+        scroll.show()
+        qapp.processEvents()
+
+        label.mousePressEvent(QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress, QPoint(150, 80), QPoint(150, 80),
+            QPoint(150, 80), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ))
+        label.mouseMoveEvent(QMouseEvent(
+            QMouseEvent.Type.MouseMove, QPoint(100, 40), QPoint(100, 40),
+            QPoint(100, 40), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ))
+        # 内容已随第一次拖动滚动，局部坐标回到原点；全局指针仍继续移动。
+        label.mouseMoveEvent(QMouseEvent(
+            QMouseEvent.Type.MouseMove, QPoint(150, 80), QPoint(50, 0),
+            QPoint(50, 0), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ))
+
+        assert scroll.horizontalScrollBar().value() == 100
+        assert scroll.verticalScrollBar().value() == 80
+
+    def test_clipboard_change_queues_one_deferred_read(self, qapp, parent, icons_dir, monkeypatch):
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: "",
+            get_theme=lambda: DARK,
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: "#fff",
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: [],
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+        queued = []
+        monkeypatch.setattr(
+            "memopaws.clipboard.clipboard_page.QTimer.singleShot",
+            lambda delay, callback: queued.append((delay, callback)),
+        )
+
+        page._on_clipboard_changed()
+        page._on_clipboard_changed()
+
+        assert len(queued) == 1
+        assert queued[0][0] == 0
 
     def test_search_input_filters_after_debounce(self, qapp, parent, icons_dir):
         data = [
@@ -190,6 +275,66 @@ class TestClipboardPage:
         assert thumbs
         assert thumbs[0].minimumHeight() == 80
         assert thumbs[0].pixmap().height() == 80
+
+    def test_grid_image_card_click_opens_one_preview(self, qapp, parent, icons_dir, tmp_path, monkeypatch):
+        data = []
+        config = tmp_path / "MemoPaws.json"
+        config.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr("memopaws.clipboard.clipboard_page.get_config_dir", lambda: str(tmp_path))
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: str(config),
+            get_theme=lambda: DARK,
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: "#fff",
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: data,
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+        page._add_clipboard_image_record(QPixmap(20, 20))
+        previewed = []
+        monkeypatch.setattr(page, "_preview_clipboard_image", previewed.append)
+        card = page._create_grid_card(0, data[0])
+
+        card.mousePressEvent(QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPoint(5, 5), QPoint(5, 5), QPoint(5, 5),
+            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ))
+
+        assert previewed == [data[0]["image_path"]]
+
+    def test_grid_image_card_double_click_does_not_refresh_clipboard(self, qapp, parent, icons_dir, tmp_path, monkeypatch):
+        data = []
+        config = tmp_path / "MemoPaws.json"
+        config.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr("memopaws.clipboard.clipboard_page.get_config_dir", lambda: str(tmp_path))
+        page = ClipboardPage(
+            parent,
+            get_config_path=lambda: str(config),
+            get_theme=lambda: DARK,
+            get_icons_dir=lambda: icons_dir,
+            get_icon_clr=lambda: "#fff",
+            on_append_status=lambda *a: None,
+            get_clip_data=lambda: data,
+            set_clip_data=lambda d: None,
+            get_current_lang=lambda: "zh",
+        )
+        page._add_clipboard_image_record(QPixmap(20, 20))
+        refreshed = []
+        monkeypatch.setattr(page, "_update_clipboard_list", lambda: refreshed.append(True))
+        card = page._create_grid_card(0, data[0])
+
+        card.mouseDoubleClickEvent(QMouseEvent(
+            QMouseEvent.Type.MouseButtonDblClick,
+            QPoint(5, 5), QPoint(5, 5), QPoint(5, 5),
+            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ))
+
+        assert refreshed == []
 
     def test_apply_theme_refreshes_grid_card_style(self, qapp, parent, icons_dir):
         class LightTheme:

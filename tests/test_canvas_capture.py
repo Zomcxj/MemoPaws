@@ -709,3 +709,53 @@ class TestScreenCaptureOverlay:
         assert panel.left() == expected_x
         assert panel.top() == expected_y
         overlay.close()
+
+    def test_result_panel_drag_moves_selection_by_the_same_delta(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay.start_point = QPoint(80, 80)
+        overlay.end_point = QPoint(180, 160)
+
+        overlay._sync_screenshot_to_result(QPoint(30, -20))
+
+        assert overlay.get_selection_rect().topLeft() == QPoint(110, 60)
+        assert overlay.get_selection_rect().width() == 101
+        assert overlay.get_selection_rect().height() == 81
+        overlay.close()
+
+    def test_result_panel_drag_handle_moves_panel_and_selection(self, qapp):
+        overlay = ScreenCaptureOverlay()
+        overlay.show()
+        overlay.start_point = QPoint(80, 80)
+        overlay.end_point = QPoint(180, 160)
+        overlay.selection_done = True
+        overlay.show_ocr_result("hello")
+        panel_pos = overlay._result_panel.pos()
+
+        press_event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress, QPoint(10, 10), QPoint(10, 10),
+            panel_pos + QPoint(10, 10), Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        )
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove, QPoint(30, 0), QPoint(30, 0),
+            panel_pos + QPoint(30, 0), Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        )
+        release_event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease, QPoint(30, 0), QPoint(30, 0),
+            panel_pos + QPoint(30, 0), Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        )
+
+        assert overlay.eventFilter(overlay._result_drag_handle, press_event) is True
+        assert overlay.eventFilter(overlay._result_drag_handle, move_event) is True
+        assert overlay.eventFilter(overlay._result_drag_handle, release_event) is True
+        assert overlay._result_panel.pos() == panel_pos + QPoint(20, -10)
+        assert overlay.get_selection_rect().topLeft() == QPoint(100, 70)
+        overlay.close()
+
+    def test_action_bar_uses_arrow_cursor(self, qapp):
+        overlay = ScreenCaptureOverlay()
+
+        assert overlay._btn_bar.cursor().shape() == Qt.CursorShape.ArrowCursor
+        overlay.close()

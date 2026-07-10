@@ -64,6 +64,7 @@ class ScreenCaptureOverlay(QWidget):
     def _init_action_bar(self):
         self._btn_bar = QWidget(self)
         self._btn_bar.setFixedHeight(32)
+        self._btn_bar.setCursor(Qt.CursorShape.ArrowCursor)
         self._btn_bar.hide()
 
         bar = QHBoxLayout(self._btn_bar)
@@ -84,6 +85,7 @@ class ScreenCaptureOverlay(QWidget):
         def _icon_btn(icon_name, tooltip, handler):
             btn = QPushButton()
             btn.setFixedSize(28, 28)
+            btn.setCursor(Qt.CursorShape.ArrowCursor)
             btn.setStyleSheet(btn_css)
             btn.setToolTip(tooltip)
             icon = load_svg_icon(os.path.join(icons_dir, icon_name), 16, "#FFFFFF")
@@ -183,6 +185,14 @@ class ScreenCaptureOverlay(QWidget):
             border_subtle = "#52514A"
             bg_neutral_button = "#3E3E38"
 
+        drag_handle = QLabel("拖动移动")
+        drag_handle.setFixedHeight(20)
+        drag_handle.setCursor(Qt.CursorShape.OpenHandCursor)
+        drag_handle.setStyleSheet("color: #AAA; background: transparent; border: none; font-size: 11px;")
+        drag_handle.installEventFilter(self)
+        self._result_drag_handle = drag_handle
+        panel_lay.addWidget(drag_handle)
+
         result_widget = OCRResultWidget(_OverlayTheme(), self._result_panel)
         self.ocr_text_edit = result_widget.ocr_text_edit
         self.trans_text_edit = result_widget.trans_text_edit
@@ -225,13 +235,6 @@ class ScreenCaptureOverlay(QWidget):
         self._min_w, self._min_h = 450, 533
         self._max_w, self._max_h = 900, 800
 
-        # 给面板安装事件过滤器（处理空白区域拖动）
-        self._result_panel.installEventFilter(self)
-        self._result_panel.setMouseTracking(True)
-
-        # 给所有子控件安装事件过滤器
-        for child in self._result_panel.findChildren(QWidget):
-            child.installEventFilter(self)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -785,7 +788,7 @@ class ScreenCaptureOverlay(QWidget):
         from PySide6.QtCore import QEvent
 
         # 缩放手柄
-        if obj is self._result_resize_handle:
+        if obj is getattr(self, "_result_resize_handle", None):
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._resizing = True
                 self._resize_start_pos = event.globalPosition().toPoint()
@@ -805,24 +808,27 @@ class ScreenCaptureOverlay(QWidget):
                 self._resize_start_geo = None
                 return True
 
-        # 面板空白区域拖动
-        if obj is self._result_panel:
+        # 标题拖动条：避免劫持结果文本编辑与缩放手柄的鼠标事件。
+        if obj is getattr(self, "_result_drag_handle", None):
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-                child = self._result_panel.childAt(event.pos())
-                if child is None:
-                    self._result_panel_dragging = True
-                    self._result_panel_drag_offset = event.globalPosition().toPoint() - self._result_panel.pos()
-                    return True
+                self._result_panel_dragging = True
+                panel_pos = self.mapFromGlobal(event.globalPosition().toPoint())
+                self._result_panel_drag_offset = panel_pos - self._result_panel.pos()
+                self._result_drag_handle.setCursor(Qt.CursorShape.ClosedHandCursor)
+                return True
             elif event.type() == QEvent.Type.MouseMove:
                 if self._result_panel_dragging and self._result_panel_drag_offset:
-                    new_pos = event.globalPosition().toPoint() - self._result_panel_drag_offset
+                    panel_pos = self.mapFromGlobal(event.globalPosition().toPoint())
+                    new_pos = panel_pos - self._result_panel_drag_offset
+                    delta = new_pos - self._result_panel.pos()
                     self._result_panel.move(new_pos)
-                    self._sync_screenshot_to_result()
+                    self._sync_screenshot_to_result(delta)
                     return True
             elif event.type() == QEvent.Type.MouseButtonRelease:
                 if self._result_panel_dragging:
                     self._result_panel_dragging = False
                     self._result_panel_drag_offset = None
+                    self._result_drag_handle.setCursor(Qt.CursorShape.OpenHandCursor)
                     return True
 
         return super().eventFilter(obj, event)
@@ -839,21 +845,14 @@ class ScreenCaptureOverlay(QWidget):
             result_x = rect.left() - panel_geo.width() - 16
         self._result_panel.move(result_x, result_y)
 
-    def _sync_screenshot_to_result(self):
-        """根据结果框位置同步截图框位置"""
-        panel_geo = self._result_panel.geometry()
+    def _sync_screenshot_to_result(self, delta):
+        """面板拖动时以相同增量平移截图选区。"""
         rect = self.get_selection_rect()
         if rect.isNull():
             return
-        w, h = rect.width(), rect.height()
-        # 截图框在结果框左侧，间距16px
-        new_x = panel_geo.left() - w - 16
-        new_y = panel_geo.top() + panel_geo.height() // 2 - h // 2
-        self.start_point = QPoint(new_x, new_y)
-        self.end_point = QPoint(new_x + w - 1, new_y + h - 1)
-        # 同步按钮栏
-        bar_w = self._btn_bar.sizeHint().width()
-        self._btn_bar.move(new_x + w - bar_w, new_y + h + 10)
+        self.start_point += delta
+        self.end_point += delta
+        self._btn_bar.move(self._btn_bar.pos() + delta)
         self.update()
 
     def on_result_received(self):
