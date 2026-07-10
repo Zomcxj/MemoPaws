@@ -144,3 +144,13 @@ def test_toggle_floating_widget_syncs_settings_page(qapp, monkeypatch):
     window._set_floating_widget_visible(False)
 
     window.settings_page._sync_floating_widget_visibility.assert_called_once_with(False)
+
+
+def test_toggle_floating_widget_refreshes_tray_menu(qapp):
+    window = MainWindow()
+    window._floating_widget = MagicMock()
+    window._refresh_tray_menu = MagicMock()
+
+    window._set_floating_widget_visible(False)
+
+    window._refresh_tray_menu.assert_called_once_with()

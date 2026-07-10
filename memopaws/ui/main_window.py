@@ -107,6 +107,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         if config.get("close_behavior") == "tray":
             event.ignore()
             self.hide()
+            self._refresh_tray_menu()
             if self._tray_icon:
                 self._tray_icon.showMessage(
                     APP_NAME, "应用已最小化到系统托盘",
@@ -395,6 +396,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             self._floating_widget.raise_()
         else:
             self._floating_widget.hide()
+        self._refresh_tray_menu()
     
     def _get_config_path(self):
         ensure_config_dir()
