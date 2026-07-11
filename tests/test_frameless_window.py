@@ -1,7 +1,7 @@
 """无边框窗口 Mixin 单元测试"""
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import call, patch, MagicMock
 import ctypes
 import ctypes.wintypes
 
@@ -13,6 +13,11 @@ from memopaws.ui.frameless_window import (
     WM_NCCALCSIZE,
     WM_NCHITTEST,
     HTCLIENT,
+    SWP_FRAMECHANGED,
+    SWP_NOMOVE,
+    SWP_NOSIZE,
+    SWP_NOOWNERZORDER,
+    SWP_NOZORDER,
 )
 
 
@@ -58,6 +63,25 @@ class TestFramelessWindowMixin:
 
         window = DummyWindow()
         assert window._clamp_maximized_rect((0, 0, 1920, 1080), (0, 0, 1920, 1040)) == (0, 0, 1920, 1040)
+
+    def test_setup_frameless_refreshes_non_client_frame(self):
+        class DummyWindow(FramelessWindowMixin):
+            def winId(self):
+                return 123
+
+        with patch("memopaws.ui.frameless_window.ctypes.windll", create=True) as windll:
+            windll.user32.GetWindowLongW.return_value = 0
+            DummyWindow()._setup_frameless()
+
+        user32 = windll.user32
+        assert user32.method_calls == [
+            call.GetWindowLongW(123, -16),
+            call.SetWindowLongW(123, -16, 0x00040000),
+            call.SetWindowPos(
+                123, 0, 0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | 0x0010,
+            ),
+        ]
 
     def test_native_event_uses_msg_lparam_for_nccalcsize(self, qapp):
         class DummyWindow(FramelessWindowMixin, QWidget):

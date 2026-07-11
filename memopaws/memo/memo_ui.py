@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QListWidget, QPushButton, QAbstractItemView, QSplitter,
 )
 from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPixmap
 
 from ..core.utils import load_svg_icon
 from ..core.themes import get_status_list_stylesheet, get_text_edit_stylesheet
@@ -227,10 +227,24 @@ def build_memo_ui(page):
     self.btn_memo_edit.clicked.connect(lambda: self._switch_memo_mode("edit"))
     seg_layout.addWidget(self.btn_memo_edit)
 
-    self.btn_memo_split = QPushButton("同步" if lang == "zh" else "Split")
+    self.btn_memo_split = QPushButton()
     self.btn_memo_split.setCheckable(True)
     self.btn_memo_split.setFixedWidth(80)
     self.btn_memo_split.setFixedHeight(32)
+    # 创建分屏图标：正方形中间有一居中竖线
+    from PySide6.QtGui import QPainter, QPen, QColor
+    _icon_size = 16
+    _pixmap = QPixmap(_icon_size, _icon_size)
+    _pixmap.fill(Qt.GlobalColor.transparent)
+    _painter = QPainter(_pixmap)
+    _painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    _painter.setPen(QPen(QColor("#B7B5A9"), 1.5))
+    _margin = 2
+    _painter.drawRect(_margin, _margin, _icon_size - 2 * _margin, _icon_size - 2 * _margin)
+    _painter.drawLine(_icon_size // 2, _margin, _icon_size // 2, _icon_size - _margin)
+    _painter.end()
+    self.btn_memo_split.setIcon(QIcon(_pixmap))
+    self.btn_memo_split.setIconSize(QSize(_icon_size, _icon_size))
     self.btn_memo_split.setStyleSheet(btn_ss)
     self.btn_memo_split.clicked.connect(lambda: self._switch_memo_mode("split"))
     seg_layout.addWidget(self.btn_memo_split)
@@ -249,9 +263,6 @@ def build_memo_ui(page):
 
     self.memo_content_view.textChanged.connect(self._on_memo_text_changed)
     self.memo_content_view.zoomChanged.connect(self._on_memo_zoom_changed)
-    self._memo_syncing_scroll = False
-    self.memo_content_view.verticalScrollBar().valueChanged.connect(lambda v: self._sync_split_scroll(v, from_editor=True))
-    self.memo_split_preview.verticalScrollBar().valueChanged.connect(lambda v: self._sync_split_scroll(v, from_editor=False))
     right_layout.addLayout(edit_row)
 
     memo_splitter.addWidget(right_frame)

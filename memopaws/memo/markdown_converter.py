@@ -31,8 +31,8 @@ def markdown_to_html(md: str, theme=None, font_size: int = 14) -> str:
     code_fg = t.text_muted
     border_c = t.border_subtle
     quote_c = t.text_muted
-    code_block_bg = t.bg_panel
-    quote_bg = t.bg_active
+    code_block_bg = t.bg_input if t.is_dark else "#F5F3F0"
+    quote_bg = t.bg_main if t.is_dark else "#F5F3F0"
 
     sans = "'JetBrains Mono', 'Microsoft YaHei', 'Segoe UI', monospace"
     mono = "'JetBrains Mono', 'Consolas', monospace"
@@ -103,30 +103,20 @@ def markdown_to_html(md: str, theme=None, font_size: int = 14) -> str:
 
     html_body = html_body.replace(
         "<blockquote>",
-        f'<blockquote style="border-left:4px solid {link_c};padding:8px 14px;margin:10px 0;color:{quote_c};background:{quote_bg};border-radius:0 4px 4px 0;">',
+        f'<blockquote style="border-left:4px solid {link_c};padding:8px 14px;margin:10px 0;color:{quote_c};background:transparent;border-radius:0;">',
     )
     html_body = html_body.replace("<ul>", f'<ul style="color:{text_c};margin:6px 0;padding-left:24px;">')
     html_body = html_body.replace("<ol>", f'<ol style="color:{text_c};margin:6px 0;padding-left:24px;">')
     html_body = html_body.replace("<li>", f'<li style="margin:3px 0;line-height:1.6;">')
 
     html_body = html_body.replace("<table>", f'<table style="border-collapse:collapse;width:100%;margin:12px 0;font-size:{font_size}px;">')
-    html_body = html_body.replace("<th>", f'<th style="border:1px solid {border_c};padding:7px 10px;background:{code_bg};font-weight:600;text-align:left;color:{text_c};">')
+    html_body = html_body.replace("<th>", f'<th style="border:1px solid {border_c};padding:7px 10px;background:{code_block_bg};font-weight:600;text-align:left;color:{text_c};">')
     html_body = html_body.replace("<td>", f'<td style="border:1px solid {border_c};padding:7px 10px;color:{text_c};">')
-
-    tr_idx = 0
-
-    def _stripe_tr(_match):
-        nonlocal tr_idx
-        bg = f"background:{code_bg};" if tr_idx % 2 == 0 else ""
-        tr_idx += 1
-        return f'<tr style="{bg}">'
-
-    html_body = re.sub(r'<tr>', _stripe_tr, html_body)
     html_body = html_body.replace("<hr>", f'<hr style="border:none;border-top:1px solid {border_c};margin:14px 0;">')
     html_body = re.sub(r'<img ', '<img style="max-width:100%;height:auto;border-radius:4px;margin:8px 0;" ', html_body)
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
-<body style="font-family:{sans};font-size:{font_size}px;line-height:1.6;padding:8px;color:{text_c};background:{t.bg_main};">
+<body style="font-family:{sans};font-size:{font_size}px;line-height:1.6;padding:8px;color:{text_c};">
 {html_body}
 </body></html>"""

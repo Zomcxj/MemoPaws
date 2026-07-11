@@ -280,15 +280,6 @@ class MemoPage(QWidget):
         finally:
             self._memo_saving = False
 
-    def _sync_split_scroll(self, value: int, from_editor: bool):
-        """分屏模式下同步两个视图的滚动位置"""
-        if not self._memo_split_mode or self._memo_syncing_scroll:
-            return
-        self._memo_syncing_scroll = True
-        target = self.memo_split_preview.verticalScrollBar() if from_editor else self.memo_content_view.verticalScrollBar()
-        target.setValue(value)
-        self._memo_syncing_scroll = False
-
     def _on_memo_zoom_changed(self, font_size: int):
         """Ctrl+滚轮缩放后，重新渲染预览区域"""
         self._memo_font_size = font_size
@@ -587,7 +578,6 @@ class MemoPage(QWidget):
     def apply_language(self, lang: str):
         self.memo_btn_save.setText("Save" if lang == "en" else "保存")
         self.btn_memo_edit.setText("Edit" if lang == "en" else "编辑")
-        self.btn_memo_split.setText("Split" if lang == "en" else "同步")
         self.btn_memo_preview.setText("Preview" if lang == "en" else "预览")
         self._memo_btn_add.setText("New" if lang == "en" else "新建")
         self._memo_btn_import.setText("Import" if lang == "en" else "导入")

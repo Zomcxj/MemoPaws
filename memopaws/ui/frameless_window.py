@@ -25,6 +25,12 @@ HTBOTTOMLEFT = 16
 HTBOTTOMRIGHT = 17
 GWL_STYLE = -16
 WS_THICKFRAME = 0x00040000
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
+SWP_NOOWNERZORDER = 0x0200
 
 
 class RECT(ctypes.Structure):
@@ -59,6 +65,10 @@ class FramelessWindowMixin:
         hwnd = int(self.winId())
         style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
         ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_THICKFRAME)
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, 0, 0, 0, 0, 0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
+        )
 
     def _clamp_maximized_rect(self, monitor_rect, work_rect):
         return work_rect
