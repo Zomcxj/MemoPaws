@@ -16,6 +16,7 @@ def test_floating_widget_toggle_menu(qapp, tmp_path):
         on_paste_ocr=lambda: None,
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
+        on_open_keys=lambda: None,
         on_open_settings=lambda: None,
         on_hide_floating=lambda: None,
     )
@@ -25,8 +26,7 @@ def test_floating_widget_toggle_menu(qapp, tmp_path):
     assert widget._menu_panel.isVisible()
     assert widget._menu_panel.windowFlags() & Qt.WindowType.Tool
     texts = [btn.text() for btn in widget._menu_panel.findChildren(QPushButton)]
-    assert len(texts) == 6
-    assert "退出悬浮窗" in texts
+    assert texts == ["截图OCR", "粘贴OCR", "剪切板", "备忘录", "密钥", "设置", "退出悬浮窗"]
     widget._close_menu()
     assert not widget._menu_open
 
@@ -41,6 +41,7 @@ def test_floating_widget_saves_position(qapp, tmp_path):
         on_paste_ocr=lambda: None,
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
+        on_open_keys=lambda: None,
         on_open_settings=lambda: None,
         on_hide_floating=lambda: None,
     )
@@ -62,6 +63,7 @@ def test_floating_widget_load_position_keeps_button_inside_screen(qapp, tmp_path
         on_paste_ocr=lambda: None,
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
+        on_open_keys=lambda: None,
         on_open_settings=lambda: None,
         on_hide_floating=lambda: None,
     )
@@ -81,6 +83,7 @@ def test_floating_widget_snaps_to_nearest_edge(qapp, tmp_path):
         on_paste_ocr=lambda: None,
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
+        on_open_keys=lambda: None,
         on_open_settings=lambda: None,
         on_hide_floating=lambda: None,
     )
@@ -101,6 +104,7 @@ def test_floating_widget_has_no_black_outer_frame(qapp, tmp_path):
         on_paste_ocr=lambda: None,
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
+        on_open_keys=lambda: None,
         on_open_settings=lambda: None,
         on_hide_floating=lambda: None,
     )
@@ -118,6 +122,7 @@ def test_floating_widget_drag_cursor_changes_only_while_dragging(qapp, tmp_path)
         on_paste_ocr=lambda: None,
         on_open_clipboard=lambda: None,
         on_open_memo=lambda: None,
+        on_open_keys=lambda: None,
         on_open_settings=lambda: None,
         on_hide_floating=lambda: None,
     )

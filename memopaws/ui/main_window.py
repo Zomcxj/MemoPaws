@@ -223,11 +223,16 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
             get_theme=lambda: DARK if self._current_theme_dark else LIGHT,
             on_capture_ocr=lambda: self.recognize_page.start_capture(),
             on_paste_ocr=self.recognize_page.paste_ocr_simple,
-            on_open_clipboard=lambda: self.nav_sidebar.switch_page("剪切板"),
-            on_open_memo=lambda: self.nav_sidebar.switch_page("备忘录"),
-            on_open_settings=lambda: self.nav_sidebar.switch_page("设置"),
+            on_open_clipboard=lambda: self._open_floating_page("剪切板"),
+            on_open_memo=lambda: self._open_floating_page("备忘录"),
+            on_open_keys=lambda: self._open_floating_page("密钥"),
+            on_open_settings=lambda: self._open_floating_page("设置"),
             on_hide_floating=lambda: self._set_floating_widget_visible(False),
         )
+
+    def _open_floating_page(self, page_name: str):
+        self._show_from_tray()
+        self.nav_sidebar.switch_page(page_name)
     
     # ── 窗口拖拽 ──
     def eventFilter(self, obj, event):

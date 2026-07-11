@@ -14,7 +14,7 @@ class FloatingWidget(QWidget):
     DEFAULT_RIGHT_MARGIN = DEFAULT_EDGE_MARGIN
 
     def __init__(self, *, get_config_path, get_theme, on_capture_ocr, on_paste_ocr,
-                 on_open_clipboard, on_open_memo, on_open_settings, on_hide_floating):
+                 on_open_clipboard, on_open_memo, on_open_keys, on_open_settings, on_hide_floating):
         super().__init__(None)
         self._get_config_path = get_config_path
         self._get_theme = get_theme
@@ -22,6 +22,7 @@ class FloatingWidget(QWidget):
         self._on_paste_ocr = on_paste_ocr
         self._on_open_clipboard = on_open_clipboard
         self._on_open_memo = on_open_memo
+        self._on_open_keys = on_open_keys
         self._on_open_settings = on_open_settings
         self._on_hide_floating = on_hide_floating
         self._menu_open = False
@@ -115,6 +116,7 @@ class FloatingWidget(QWidget):
             ("粘贴OCR", self._on_paste_ocr),
             ("剪切板", self._on_open_clipboard),
             ("备忘录", self._on_open_memo),
+            ("密钥", self._on_open_keys),
             ("设置", self._on_open_settings),
             ("退出悬浮窗", self._on_hide_floating),
         ]:

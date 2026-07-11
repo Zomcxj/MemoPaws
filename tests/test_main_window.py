@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import pytest
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtWidgets import QFrame
 
@@ -154,3 +155,45 @@ def test_toggle_floating_widget_refreshes_tray_menu(qapp):
     window._set_floating_widget_visible(False)
 
     window._refresh_tray_menu.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("callback_name", "page_index"),
+    [
+        ("_on_open_clipboard", 2),
+        ("_on_open_memo", 3),
+        ("_on_open_keys", 4),
+        ("_on_open_settings", 0),
+    ],
+)
+def test_floating_widget_navigation_restores_window_hidden_to_tray(
+    qapp, monkeypatch, callback_name, page_index
+):
+    window = MainWindow()
+    window.show()
+    qapp.processEvents()
+    monkeypatch.setattr(window, "load_config", lambda: {"close_behavior": "tray"})
+    window.closeEvent(MagicMock())
+    calls = []
+    original_restore = window._show_from_tray
+    original_switch_page = window.nav_sidebar.switch_page
+
+    def restore():
+        calls.append("restore")
+        original_restore()
+
+    def switch_page(page_name):
+        calls.append("switch_page")
+        original_switch_page(page_name)
+
+    restore_window = MagicMock(side_effect=restore)
+    switch_page_mock = MagicMock(side_effect=switch_page)
+    monkeypatch.setattr(window, "_show_from_tray", restore_window)
+    monkeypatch.setattr(window.nav_sidebar, "switch_page", switch_page_mock)
+
+    getattr(window._floating_widget, callback_name)()
+
+    restore_window.assert_called_once_with()
+    switch_page_mock.assert_called_once()
+    assert calls == ["restore", "switch_page"]
+    assert window.content_stack.currentIndex() == page_index
