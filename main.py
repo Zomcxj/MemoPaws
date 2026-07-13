@@ -7,6 +7,10 @@ import os
 import sys
 import logging
 
+# 禁用 GPU 合成，必须在 QApplication 创建之前设置
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu-compositing"
+os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
+
 from memopaws.core.utils import get_app_root, get_icon_path
 
 # 配置日志 - 存放在安装根目录（exe 所在目录），不是临时目录
@@ -19,6 +23,7 @@ logging.basicConfig(
 )
 print(f"日志文件: {log_path}", file=sys.stderr)
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
@@ -35,6 +40,7 @@ def main():
     # 迁移待处理的存储目录
     migrate_pending_memo()
 
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # 关闭窗口不退出，靠托盘图标保活
     

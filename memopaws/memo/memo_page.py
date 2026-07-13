@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QTextCursor
 
 from ..core.utils import ensure_config_dir
-from .markdown_converter import markdown_to_html
+from .markdown_viewer import markdown_to_html
 from .memo_search import memo_matches_query
 from .memo_storage import load_memos, resolve_memo_dir, safe_memo_path, save_memos
 from .memo_ui import build_memo_ui
@@ -82,12 +82,9 @@ class MemoPage(QWidget):
     def _prewarm_preview(self):
         """预热当前备忘录预览，避免首次点击同步/预览卡顿"""
         try:
-            theme = self._get_theme()
             content = self._memo_md_source or (self.memo_data[0].get("content", "") if self.memo_data else "# 预热")
             if content:
-                self._render_preview(content, theme, self._memo_font_size)
-            else:
-                markdown_to_html("# 预热", theme, self._memo_font_size)
+                self._render_preview(content)
         except Exception:
             pass
 
@@ -225,17 +222,24 @@ class MemoPage(QWidget):
             return
         self._memo_md_source = new_content
         self._invalidate_preview_cache()
+
+        # 设置背景色消除白屏
+        from PySide6.QtGui import QColor
+        t = self._get_theme()
+        bg_color = QColor(t.bg_main)
+
         if self._memo_split_mode:
             html = self._render_preview(self._memo_md_source)
             self.memo_content_view.blockSignals(True)
             self.memo_content_view.setPlainText(self._memo_md_source)
             self.memo_content_view.blockSignals(False)
             self.memo_content_view.setReadOnly(False)
-            self.memo_split_preview.setHtml(html)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
         elif self._memo_preview_mode:
             html = self._render_preview(self._memo_md_source)
-            self.memo_content_view.setHtml(html)
-            self.memo_content_view.setReadOnly(True)
+            self.memo_content_view.setVisible(False)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
+            self.memo_split_preview.setVisible(True)
         else:
             self.memo_content_view.blockSignals(True)
             self.memo_content_view.setPlainText(self._memo_md_source)
@@ -286,15 +290,14 @@ class MemoPage(QWidget):
         self._invalidate_preview_cache()
         if not self._memo_md_source:
             return
+        from PySide6.QtGui import QColor
+        bg_color = QColor(self._get_theme().bg_main)
         if self._memo_split_mode:
             html = self._render_preview(self._memo_md_source, font_size=font_size)
-            self.memo_split_preview.setHtml(html)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
         elif self._memo_preview_mode:
             html = self._render_preview(self._memo_md_source, font_size=font_size)
-            scrollbar = self.memo_content_view.verticalScrollBar()
-            scroll_pos = scrollbar.value()
-            self.memo_content_view.setHtml(html)
-            scrollbar.setValue(scroll_pos)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
 
     def _switch_memo_mode(self, mode: str):
         """切换编辑/同步/预览模式（保留滚动位置）"""
@@ -302,6 +305,10 @@ class MemoPage(QWidget):
         self._memo_split_mode = (mode == "split")
         t = self._get_theme()
         scroll_pos = self.memo_content_view.verticalScrollBar().value()
+
+        # 设置背景色消除白屏
+        from PySide6.QtGui import QColor
+        bg_color = QColor(t.bg_main)
 
         # 显式管理按钮选中状态（未使用 QButtonGroup，确保互斥）
         self.btn_memo_edit.setChecked(mode == "edit")
@@ -311,10 +318,9 @@ class MemoPage(QWidget):
         if mode == "preview":
             self._memo_md_source = self.memo_content_view.toPlainText()
             html = self._render_preview(self._memo_md_source, t, self._memo_font_size)
-            self.memo_content_view.setHtml(html)
-            self.memo_content_view.setReadOnly(True)
-            self.memo_content_view.setVisible(True)
-            self.memo_split_preview.setVisible(False)
+            self.memo_content_view.setVisible(False)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
+            self.memo_split_preview.setVisible(True)
         elif mode == "split":
             html = self._render_preview(self._memo_md_source, t, self._memo_font_size)
             self.memo_content_view.blockSignals(True)
@@ -322,7 +328,7 @@ class MemoPage(QWidget):
             self.memo_content_view.blockSignals(False)
             self.memo_content_view.setReadOnly(False)
             self.memo_content_view.setVisible(True)
-            self.memo_split_preview.setHtml(html)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
             self.memo_split_preview.setVisible(True)
         else:  # edit
             self.memo_content_view.blockSignals(True)
@@ -388,7 +394,9 @@ class MemoPage(QWidget):
         """debounce 定时器触发：执行延迟的预览渲染"""
         if self._memo_split_mode and self._memo_md_source is not None:
             html = self._render_preview(self._memo_md_source)
-            self.memo_split_preview.setHtml(html)
+            from PySide6.QtGui import QColor
+            bg_color = QColor(self._get_theme().bg_main)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
 
     def _import_memo(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -518,14 +526,13 @@ class MemoPage(QWidget):
         self._md_highlighter._build_rules()
         self._md_highlighter.rehighlight()
         self.memo_content_view.setStyleSheet(get_text_edit_stylesheet(t))
-        self.memo_split_preview.setStyleSheet(get_text_edit_stylesheet(t))
         if self._memo_preview_mode or self._memo_split_mode:
+            from PySide6.QtGui import QColor
+            bg_color = QColor(t.bg_main)
             self._invalidate_preview_cache()
             html = self._render_preview(self._memo_md_source, t, self._memo_font_size)
-            if self._memo_split_mode:
-                self.memo_split_preview.setHtml(html)
-            else:
-                self.memo_content_view.setHtml(html)
+            self.memo_split_preview.set_background_color(bg_color)
+            self.memo_split_preview.set_markdown_html(html, bg_color)
         # 分段控件主题（与设置页风格一致）
         self._memo_seg_ctrl.set_accent(t.accent)
         seg_container = self.btn_memo_edit.parent()

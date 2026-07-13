@@ -14,3 +14,4 @@ AGENTS.md
 node_modules/
 .memopaws/
 .snap*/
+.playwright-mcp/

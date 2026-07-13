@@ -13,6 +13,7 @@ from ..core.utils import load_svg_icon
 from ..core.themes import get_status_list_stylesheet, get_text_edit_stylesheet
 from ..ui.segmented_control import AnimatedSegmentedControl
 from .memo_widgets import MarkdownHighlighter, ZoomableTextEdit
+from .markdown_viewer import MarkdownViewer
 
 
 def build_memo_ui(page):
@@ -167,11 +168,8 @@ def build_memo_ui(page):
     self.memo_content_view.setStyleSheet(get_text_edit_stylesheet(t))
     self._memo_editor_splitter.addWidget(self.memo_content_view)
 
-    self.memo_split_preview = ZoomableTextEdit()
-    self.memo_split_preview.setReadOnly(True)
-    self.memo_split_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    self.memo_split_preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    self.memo_split_preview.setStyleSheet(get_text_edit_stylesheet(t))
+    self.memo_split_preview = MarkdownViewer()
+    self.memo_split_preview.set_background_color(self._get_theme().bg_main)
     self.memo_split_preview.setVisible(False)
     self.memo_split_preview.setProperty("mode", "preview")
     self._memo_editor_splitter.addWidget(self.memo_split_preview)
