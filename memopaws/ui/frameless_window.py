@@ -5,7 +5,7 @@ import ctypes
 import ctypes.wintypes
 from PySide6.QtWidgets import QMenu
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QColor, QPainterPath, QIcon
+from PySide6.QtGui import QPainter, QColor, QIcon
 
 from ..core.themes import DARK, LIGHT
 from ..core.utils import load_svg_icon
@@ -31,6 +31,12 @@ SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_FRAMECHANGED = 0x0020
 SWP_NOOWNERZORDER = 0x0200
+
+# DWM 圆角
+DWMWA_WINDOW_CORNER_PREFERENCE = 33
+DWMWCP_DEFAULT = 0
+DWMWCP_DONOTROUND = 1
+DWMWCP_ROUND = 2
 
 
 class RECT(ctypes.Structure):
@@ -69,6 +75,31 @@ class FramelessWindowMixin:
             hwnd, 0, 0, 0, 0, 0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
         )
+        self._apply_dwm_corners()
+
+    def _apply_dwm_corners(self):
+        """用 DWM 原生圆角替代 WA_TranslucentBackground，保留 DWM 缩放动画"""
+        try:
+            from ctypes import byref, c_int
+            hwnd = int(self.winId())
+            pref = DWMWCP_DONOTROUND if self.isMaximized() else DWMWCP_ROUND
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                byref(c_int(pref)), ctypes.sizeof(c_int)
+            )
+        except Exception:
+            pass
+
+    def _remove_layered_style(self):
+        """清除 WS_EX_LAYERED，让窗口恢复非分层状态以保留 DWM 动画"""
+        try:
+            GWL_EXSTYLE = -20
+            WS_EX_LAYERED = 0x00080000
+            hwnd = int(self.winId())
+            ex = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED)
+        except Exception:
+            pass
 
     def _clamp_maximized_rect(self, monitor_rect, work_rect):
         return work_rect
@@ -135,20 +166,11 @@ class FramelessWindowMixin:
         return HTCLIENT
 
     def paintEvent(self, event):
-        """画带圆角的窗口背景"""
-        from PySide6.QtCore import QRectF
+        """画窗口背景（圆角由 DWM 处理）"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         _t = DARK if self._current_theme_dark else LIGHT
-        bg = QColor(_t.bg_main)
-        if not self._use_rounded_window():
-            painter.fillRect(self.rect(), bg)
-            painter.end()
-            return
-        path = QPainterPath()
-        rect = QRectF(0, 0, self.width(), self.height())
-        path.addRoundedRect(rect, self._window_radius, self._window_radius)
-        painter.fillPath(path, bg)
+        painter.fillRect(self.rect(), QColor(_t.bg_main))
         painter.end()
 
     def contextMenuEvent(self, event):
@@ -263,8 +285,9 @@ class FramelessWindowMixin:
             self.showMaximized()
 
     def changeEvent(self, event):
-        """窗口状态变化时更新图标"""
+        """窗口状态变化时更新 DWM 圆角和图标"""
         super().changeEvent(event)
+        self._apply_dwm_corners()
         self._update_maximize_icon()
 
     def _update_maximize_icon(self):

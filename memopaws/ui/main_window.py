@@ -81,7 +81,6 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         self._startup_reveal_pending = True
         
         # 无边框窗口 mixin 所需属性
-        self._window_radius = 14
         self._drag_pos = None
         
         self.setStyleSheet(get_main_stylesheet(DARK if self._current_theme_dark else LIGHT))
@@ -129,8 +128,7 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         # 操作说明：用户用左下角"退出"按钮关闭；
         # 整个窗口空白区域可按住拖动；边缘 6px 可拖动调整大小。
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-        # 启用透明背景，让 paintEvent 画圆角矩形（消除 4 角直角）
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # 圆角由 DWM 原生处理（_apply_dwm_corners），保留缩放动画
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -306,10 +304,11 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         self._sync_window_surface()
         self._safe_set_title_bar_color()
         self.setWindowOpacity(1.0)
+        # 清除 setWindowOpacity(0.0) 带来的 WS_EX_LAYERED，恢复 DWM 动画
+        self._remove_layered_style()
 
     def _sync_window_surface(self):
-        # 最大化时不要透明外壳，避免无边框窗口客户区边缘被系统裁掉。
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, not self.isMaximized())
+        self._apply_dwm_corners()
         self.update()
 
     def show_themed_message(self, icon, title, text):
