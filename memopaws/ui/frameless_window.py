@@ -3,8 +3,8 @@
 import os
 import ctypes
 import ctypes.wintypes
-from PySide6.QtWidgets import QMenu
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QAbstractButton, QMenu
+from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPainter, QColor, QIcon
 
 from ..core.themes import DARK, LIGHT
@@ -15,6 +15,7 @@ WM_NCCALCSIZE = 0x0083
 WM_NCHITTEST = 0x0084
 MONITOR_DEFAULTTONEAREST = 2
 HTCLIENT = 1
+HTCAPTION = 2
 HTLEFT = 10
 HTRIGHT = 11
 HTTOP = 12
@@ -24,7 +25,12 @@ HTBOTTOM = 15
 HTBOTTOMLEFT = 16
 HTBOTTOMRIGHT = 17
 GWL_STYLE = -16
+WS_CAPTION = 0x00C00000
 WS_THICKFRAME = 0x00040000
+WS_MAXIMIZEBOX = 0x00010000
+WS_MINIMIZEBOX = 0x00020000
+WS_SYSMENU = 0x00080000
+WS_OVERLAPPEDWINDOW = WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
@@ -67,10 +73,10 @@ class FramelessWindowMixin:
         return not self.isMaximized()
 
     def _setup_frameless(self):
-        """在 __init__ 中调用，添加 WS_THICKFRAME 让系统处理缩放"""
+        """在 __init__ 中调用，保留原生窗口框架让系统处理窗口控制。"""
         hwnd = int(self.winId())
         style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
-        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_THICKFRAME)
+        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW)
         ctypes.windll.user32.SetWindowPos(
             hwnd, 0, 0, 0, 0, 0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
@@ -128,10 +134,37 @@ class FramelessWindowMixin:
                     self._apply_maximized_work_area(msg.lParam)
                 return True, 0
             elif msg.message == WM_NCHITTEST:
-                result = self._hit_test(msg.lParam)
-                if result is not None:
-                    return True, result
+                screen_pos = QPoint(
+                    ctypes.c_short(msg.lParam & 0xFFFF).value,
+                    ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value,
+                )
+                window_pos = self.mapFromGlobal(screen_pos)
+                custom_result = self._window_hit_test(window_pos, msg.lParam)
+                if custom_result != HTCAPTION:
+                    return True, custom_result
+                dwm_handled, dwm_result = self._dwm_hit_test(msg)
+                return True, dwm_result if dwm_handled else HTCAPTION
         return super().nativeEvent(event_type, message)
+
+    def _dwm_hit_test(self, msg):
+        """委托 DWM 处理系统标题栏命中。"""
+        try:
+            result = ctypes.c_ssize_t()
+            dwm_def_window_proc = ctypes.windll.dwmapi.DwmDefWindowProc
+            dwm_def_window_proc.argtypes = [
+                ctypes.wintypes.HWND,
+                ctypes.wintypes.UINT,
+                ctypes.wintypes.WPARAM,
+                ctypes.wintypes.LPARAM,
+                ctypes.POINTER(ctypes.c_ssize_t),
+            ]
+            dwm_def_window_proc.restype = ctypes.wintypes.BOOL
+            handled = dwm_def_window_proc(
+                int(self.winId()), msg.message, msg.wParam, msg.lParam, ctypes.byref(result)
+            )
+            return bool(handled), result.value
+        except Exception:
+            return False, 0
 
     def _hit_test(self, lParam):
         """检测鼠标位置，返回 HT 值让系统处理缩放/光标"""
@@ -163,6 +196,21 @@ class FramelessWindowMixin:
         if y >= bottom - margin:
             return HTBOTTOM
         # 客户区，显式返回 HTCLIENT
+        return HTCLIENT
+
+    def _window_hit_test(self, window_pos, l_param):
+        """区分标题栏拖动区与客户区，缩放边缘优先。"""
+        result = self._hit_test(l_param)
+        if result != HTCLIENT:
+            return result
+
+        widget = self.childAt(window_pos)
+        while widget is not None and widget is not self:
+            if isinstance(widget, QAbstractButton):
+                return HTCLIENT
+            if widget.objectName() == "titleBar":
+                return HTCAPTION
+            widget = widget.parentWidget()
         return HTCLIENT
 
     def paintEvent(self, event):

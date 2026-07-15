@@ -118,10 +118,10 @@ def test_first_show_reveal_runs_only_once(qapp, monkeypatch):
     assert calls == ["finish"]
 
 
-def test_main_window_starts_frameless_before_first_show(qapp):
+def test_main_window_keeps_native_window_frame_flags_before_first_show(qapp):
     window = MainWindow()
 
-    assert window.windowFlags() & Qt.WindowType.FramelessWindowHint
+    assert not window.windowFlags() & Qt.WindowType.FramelessWindowHint
 
 
 def test_central_widget_stays_hidden_before_main_window_show(qapp):

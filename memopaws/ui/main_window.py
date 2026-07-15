@@ -124,10 +124,8 @@ class MainWindow(TrayMixin, FramelessWindowMixin, QMainWindow):
         _t = DARK if self._current_theme_dark else LIGHT
         self._icon_clr = _t.text_secondary
         """初始化界面：左侧导航栏 + 右侧页面（无标题栏）"""
-        # ── 无标题栏窗口 ──
-        # 操作说明：用户用左下角"退出"按钮关闭；
-        # 整个窗口空白区域可按住拖动；边缘 6px 可拖动调整大小。
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        # 标题栏由 WM_NCCALCSIZE 折叠进客户区，保留原生窗口样式。
+        self.setWindowFlags(Qt.WindowType.Window)
         # 圆角由 DWM 原生处理（_apply_dwm_corners），保留缩放动画
 
         central = QWidget()

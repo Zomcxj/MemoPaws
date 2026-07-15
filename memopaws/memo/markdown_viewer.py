@@ -357,6 +357,8 @@ class MarkdownViewer(QWebEngineView):
         self._current_html = ""
         self._load_finished = False
         self._first_load = True
+        self._pending_html = None
+        self._pending_bg_color = None
         self._current_theme = None
 
         page = self.page()
@@ -394,26 +396,43 @@ class MarkdownViewer(QWebEngineView):
             self._first_load = False
             self._load_finished = False
             self.setHtml(html, QUrl("about:blank"))
-        else:
-            # 后续更新：用 runJavaScript 替换 style + body，避免 setHtml 全页重载闪烁
-            import re as _re
-            import json as _json
-            style_match = _re.search(r'<style>(.*?)</style>', html, _re.DOTALL)
-            body_match = _re.search(r'<body>(.*?)</body>', html, _re.DOTALL)
-            if style_match and body_match:
-                css = style_match.group(1)
-                body = body_match.group(1)
-                js = f"""(function() {{
-                    var s = document.querySelector('style');
-                    if (s) s.textContent = {_json.dumps(css)};
-                    document.body.innerHTML = {_json.dumps(body)};
-                }})()"""
-                self.page().runJavaScript(js)
+            return
+
+        if not self._load_finished:
+            self._pending_html = html
+            self._pending_bg_color = bg_color
+            return
+
+        self._update_document(html)
+
+    def _update_document(self, html: str):
+        """用 DOM 替换更新已加载页面，避免整页重载闪烁。"""
+        import re as _re
+        import json as _json
+        style_match = _re.search(r'<style>(.*?)</style>', html, _re.DOTALL)
+        body_match = _re.search(r'<body>(.*?)</body>', html, _re.DOTALL)
+        if style_match and body_match:
+            css = style_match.group(1)
+            body = body_match.group(1)
+            js = f"""(function() {{
+                var s = document.querySelector('style');
+                if (s) s.textContent = {_json.dumps(css)};
+                document.body.innerHTML = {_json.dumps(body)};
+            }})()"""
+            self.page().runJavaScript(js)
 
     def _on_load_finished(self, ok):
         """页面加载完成回调"""
         self._load_finished = ok
         if ok:
+            pending_html = getattr(self, "_pending_html", None)
+            if pending_html is not None:
+                pending_bg_color = self._pending_bg_color
+                self._pending_html = None
+                self._pending_bg_color = None
+                if pending_bg_color:
+                    self.set_background_color(pending_bg_color)
+                self._update_document(pending_html)
             self.content_loaded.emit()
 
     def wheelEvent(self, event):

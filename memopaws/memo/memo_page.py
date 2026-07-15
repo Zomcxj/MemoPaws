@@ -84,7 +84,11 @@ class MemoPage(QWidget):
         try:
             content = self._memo_md_source or (self.memo_data[0].get("content", "") if self.memo_data else "# 预热")
             if content:
-                self._render_preview(content)
+                from PySide6.QtGui import QColor
+                html = self._render_preview(content)
+                self.memo_split_preview.set_markdown_html(
+                    html, QColor(self._get_theme().bg_main)
+                )
         except Exception:
             pass
 

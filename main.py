@@ -9,7 +9,6 @@ import logging
 
 # 禁用 GPU 合成，必须在 QApplication 创建之前设置
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu-compositing"
-os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 
 from memopaws.core.utils import get_app_root, get_icon_path
 
