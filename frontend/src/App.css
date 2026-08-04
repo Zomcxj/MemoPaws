@@ -1,0 +1,9 @@
+@import "./styles/global.css";
+
+.page {
+  padding: 1rem;
+}
+
+.page h2 {
+  margin-bottom: 0.5rem;
+}

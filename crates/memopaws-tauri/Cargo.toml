@@ -1,0 +1,38 @@
+[package]
+name = "memopaws-tauri"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.tauri]
+bundle = { active = false }
+
+[package.metadata.tauri.winres]
+file-version = "0.1.0.0"
+product-version = "0.1.0.0"
+
+[lib]
+name = "memopaws_tauri"
+path = "src/lib.rs"
+
+[[bin]]
+name = "memopaws"
+path = "src/main.rs"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "custom-protocol"] }
+tauri-plugin-shell = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+memopaws-core = { path = "../memopaws-core" }
+memopaws-config = { path = "../memopaws-config" }
+memopaws-memo = { path = "../memopaws-memo" }
+memopaws-keys = { path = "../memopaws-keys" }
+memopaws-ocr = { path = "../memopaws-ocr" }
+memopaws-clipboard = { path = "../memopaws-clipboard" }
+memopaws-canvas = { path = "../memopaws-canvas" }
+zeroize = "1"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

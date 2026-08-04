@@ -1,0 +1,56 @@
+.title-bar {
+  height: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+}
+
+.title-bar-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.title-bar-brand img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.title-bar-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.title-bar-controls button {
+  width: 32px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.title-bar-controls button:hover {
+  background: var(--bg-active);
+}
+
+.title-bar-controls button.title-bar-close:hover {
+  background: var(--error);
+}
+
+.title-bar-controls img {
+  width: 16px;
+  height: 16px;
+}

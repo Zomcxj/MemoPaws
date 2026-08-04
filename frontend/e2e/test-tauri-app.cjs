@@ -1,0 +1,120 @@
+// Playwright E2E test: Tauri app native runtime over CDP.
+
+const { chromium } = require('playwright');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+const SCREENSHOTS_DIR = path.join(__dirname, 'screenshots', 'tauri');
+const CDP_URL = process.env.TAURI_CDP_URL || 'http://localhost:9222';
+const DESTINATIONS = {
+  '识别': '.recognize-page',
+  '备忘录': '.memo-page',
+  '密钥': '.keys-page',
+  '剪切板': '.clipboard-page',
+  '设置': '.settings-page',
+};
+const PAGES = [
+  { name: 'recognize', nav: '识别' },
+  { name: 'memo', nav: '备忘录' },
+  { name: 'keys', nav: '密钥' },
+  { name: 'clipboard', nav: '剪切板' },
+  { name: 'settings', nav: '设置' },
+];
+
+function findTauriExe() {
+  const possiblePaths = [
+    path.join(__dirname, '..', '..', 'target', 'release', 'memopaws.exe'),
+    path.join(__dirname, '..', '..', 'target', 'debug', 'memopaws.exe'),
+    path.join(__dirname, '..', '..', 'crates', 'memopaws-tauri', 'target', 'release', 'memopaws.exe'),
+    path.join(__dirname, '..', '..', 'crates', 'memopaws-tauri', 'target', 'debug', 'memopaws.exe'),
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error('Native Tauri runtime unavailable: executable not found. Run cargo build -p memopaws-tauri --release');
+}
+
+async function runTests() {
+  fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+
+  const tauriExe = findTauriExe();
+  console.log('Tauri executable:', tauriExe);
+  const tauriProcess = spawn(tauriExe, [], { stdio: 'pipe', detached: false });
+  let browser;
+
+  try {
+    console.log(`Launching Tauri app; waiting for native CDP at ${CDP_URL}...`);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    try {
+      browser = await chromium.connectOverCDP(CDP_URL);
+    } catch (err) {
+      throw new Error(`Native Tauri/CDP runtime unavailable on ${CDP_URL}; no UI actions were run: ${err.message}`);
+    }
+
+    const context = browser.contexts()[0] || await browser.newContext({ viewport: { width: 1460, height: 960 } });
+    const page = context.pages()[0] || await context.newPage();
+    await page.waitForTimeout(2000);
+
+    async function assertCanonicalPage(expectedNav) {
+      const selectors = Object.values(DESTINATIONS);
+      const counts = await Promise.all(selectors.map(selector => page.locator(selector).count()));
+      const total = counts.reduce((sum, count) => sum + count, 0);
+      const expectedIndex = selectors.indexOf(DESTINATIONS[expectedNav]);
+      if (total !== 1 || counts[expectedIndex] !== 1) {
+        throw new Error(`Expected exactly one canonical page selector total for ${expectedNav}, found total=${total}, counts=${JSON.stringify(counts)}`);
+      }
+    }
+
+    await assertCanonicalPage('识别');
+    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, '01-default.png'), fullPage: false });
+
+    for (let i = 0; i < PAGES.length; i++) {
+      const { name, nav } = PAGES[i];
+      const button = page.locator('.sidebar-item').filter({ hasText: nav });
+      if (await button.count() !== 1) throw new Error(`Expected exactly one navigation button for ${nav}`);
+      await button.click();
+      await page.waitForTimeout(500);
+      await assertCanonicalPage(nav);
+      await page.screenshot({ path: path.join(SCREENSHOTS_DIR, `${String(i + 2).padStart(2, '0')}-${name}.png`), fullPage: false });
+    }
+
+    const settingsButton = page.locator('.sidebar-item').filter({ hasText: '设置' });
+    if (await settingsButton.count() !== 1) throw new Error('Expected exactly one Settings navigation button');
+    await settingsButton.click();
+    await page.waitForTimeout(500);
+    await assertCanonicalPage('设置');
+
+    const themeGroup = page.locator('.settings-segmented[role="group"]');
+    if (await themeGroup.count() !== 1 || await themeGroup.locator('button').count() !== 2) {
+      throw new Error('Expected exactly one Settings theme control with two buttons');
+    }
+    const light = themeGroup.locator('button').filter({ hasText: '亮色' });
+    const dark = themeGroup.locator('button').filter({ hasText: '暗色' });
+    if (await light.count() !== 1 || await dark.count() !== 1) throw new Error('Settings theme buttons 亮色 and 暗色 are required');
+    if (await page.locator('.sidebar-footer .sidebar-item').count() !== 0) throw new Error('Expected no Sidebar theme button');
+
+    await light.click();
+    await page.waitForTimeout(500);
+    if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'light' || await light.getAttribute('aria-pressed') !== 'true' || await dark.getAttribute('aria-pressed') !== 'false') {
+      throw new Error('Light theme dataset/aria assertions failed');
+    }
+    await dark.click();
+    await page.waitForTimeout(500);
+    if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'dark' || await dark.getAttribute('aria-pressed') !== 'true' || await light.getAttribute('aria-pressed') !== 'false') {
+      throw new Error('Dark theme dataset/aria assertions failed');
+    }
+    console.log('\nTauri app tests completed!');
+  } finally {
+    try {
+      if (browser) await browser.close();
+    } finally {
+      if (!tauriProcess.killed) tauriProcess.kill();
+    }
+  }
+}
+
+runTests().catch(err => {
+  console.error('Test failed:', err);
+  process.exit(1);
+});

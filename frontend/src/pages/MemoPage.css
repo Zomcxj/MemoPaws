@@ -1,0 +1,400 @@
+.memo-page {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: 8px;
+  overflow: hidden;
+  padding: 8px 12px 12px;
+  background: var(--bg-primary);
+  box-sizing: border-box;
+  border: none;
+}
+
+.memo-rail,
+.memo-workspace {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-panel);
+}
+
+.memo-rail {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 6px;
+}
+
+.memo-rail-header {
+  padding: 0;
+}
+
+.memo-rail-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.memo-rail-buttons button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-neutral-button);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 12px;
+}
+
+.memo-rail-buttons .danger {
+  color: var(--text-secondary);
+}
+
+.memo-file-input {
+  display: none;
+}
+
+.memo-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.memo-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.memo-count {
+  order: 3;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.memo-list {
+  order: 2;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.memo-list-item {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-align: left;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.memo-list-item:hover {
+  background: var(--bg-active);
+}
+
+.memo-list-item.active {
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+
+.memo-list-item strong,
+.memo-list-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-list-item strong {
+  font-size: 13px;
+}
+
+.memo-list-item span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.memo-list-item small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.memo-state {
+  padding: 36px 18px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.memo-search-error {
+  color: var(--error);
+}
+
+.memo-workspace {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding: 12px;
+  gap: 8px;
+}
+
+.memo-mode {
+  display: flex;
+  width: 242px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-neutral-button);
+}
+
+.memo-mode button,
+.memo-error button {
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.memo-mode button.active {
+  color: #fff;
+  background: var(--accent);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.memo-mode button:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.memo-editor-head {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+}
+
+.memo-title {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  outline: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 700;
+  padding: 6px 4px;
+}
+
+.memo-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.memo-tags-row > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.memo-tags {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  outline: 0;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.memo-editor-head > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+.memo-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 4px;
+  background: transparent;
+}
+
+.memo-editor,
+.memo-preview {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  width: auto;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  outline: 0;
+  resize: none;
+  overflow: auto;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: 13px/1.65 "JetBrains Mono", "Microsoft YaHei", Consolas, monospace;
+}
+
+.memo-preview-state {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
+.memo-preview {
+  font-family: inherit;
+  background: var(--bg-primary);
+  overflow: auto;
+}
+
+.memo-preview .memo-markdown {
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.memo-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0;
+  border-top: none;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.memo-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.memo-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.memo-save img {
+  width: 14px;
+  height: 14px;
+}
+
+.memo-preview > .memo-markdown {
+  min-height: 100%;
+  padding: 0;
+  background: transparent;
+}
+
+.memo-error {
+  position: absolute;
+  z-index: 2;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--error);
+}
+
+.memo-error button {
+  color: inherit;
+}
+
+.memo-blank {
+  margin: auto;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.memo-blank span {
+  display: none;
+}
+
+.memo-blank h2 {
+  margin-bottom: 7px;
+  color: var(--text-primary);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .memo-page {
+    height: auto;
+    min-height: 100%;
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+  .memo-rail {
+    max-height: 38vh;
+  }
+  .memo-workspace {
+    min-height: 62vh;
+  }
+  .memo-content-split {
+    flex-direction: column;
+  }
+  .memo-content-split .memo-editor,
+  .memo-content-split .memo-preview {
+    min-height: 260px;
+  }
+}

@@ -1,0 +1,280 @@
+.settings-page {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+  padding: 8px 12px 32px;
+  color: var(--text-primary);
+  box-sizing: border-box;
+  align-content: start;
+}
+
+.settings-page button {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 9px 13px;
+  background: var(--bg-neutral-button);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.settings-page button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.settings-save {
+  border-color: var(--accent) !important;
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+
+.settings-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--bg-panel);
+}
+
+.settings-message.is-error {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.settings-group {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-panel);
+}
+
+.settings-group h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-field {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  align-items: center;
+  gap: 0 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.settings-field.is-inline {
+  grid-template-columns: 90px auto minmax(0, 1fr);
+}
+
+.settings-row span,
+.settings-field > span,
+.settings-shortcut > span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.settings-field > span {
+  width: 90px;
+  flex: 0 0 90px;
+}
+
+.settings-field small,
+.settings-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.settings-field.is-inline small {
+  margin: 0;
+}
+
+.settings-field input,
+.settings-directory input,
+.settings-shortcut input {
+  min-width: 0;
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  outline: none;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.settings-field input[type="number"] {
+  width: 60px;
+  height: 28px;
+  padding: 4px 8px;
+  justify-self: start;
+}
+
+.settings-field input:focus,
+.settings-directory input:focus,
+.settings-shortcut input:focus {
+  border-color: var(--accent);
+}
+
+.settings-segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: 162px;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-neutral-button);
+}
+
+.settings-segmented button {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.settings-segmented button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-actions button {
+  border: none;
+  border-radius: 8px;
+  padding: 4px 12px;
+  min-width: 80px;
+  height: 32px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-actions button:hover {
+  background: var(--accent-hover);
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.settings-api-status {
+  font-size: 12px;
+  color: var(--error);
+}
+
+.settings-api-status.is-success {
+  color: #2ecc71;
+}
+
+.settings-api-status.is-pending {
+  color: var(--accent);
+}
+
+.settings-directory {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.settings-directory input {
+  flex: 1 1 auto;
+  height: 28px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.settings-directory button {
+  flex: 0 0 88px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.settings-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-shortcut > span {
+  flex: 0 0 120px;
+  width: 120px;
+}
+
+.settings-shortcut input {
+  flex: 0 0 160px;
+  width: 160px;
+  height: 28px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+.settings-shortcut button {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+
+.settings-shortcut input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+@media (max-width: 620px) {
+  .settings-page { padding-inline: 8px; }
+  .settings-field,
+  .settings-field.is-inline {
+    grid-template-columns: 1fr;
+  }
+  .settings-field > span {
+    width: auto;
+  }
+  .settings-segmented { width: 162px; }
+  .settings-shortcut { flex-wrap: wrap; }
+  .settings-shortcut > span { flex-basis: 100%; width: auto; }
+  .settings-shortcut input { flex: 1 1 auto; width: auto; }
+}

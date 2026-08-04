@@ -1,0 +1,110 @@
+:root,
+[data-theme="light"] {
+  --bg-primary: #FAF8F6;
+  --bg-secondary: #FFFFFF;
+  --bg-panel: #FFFFFF;
+  --bg-input: #F5F3F0;
+  --bg-neutral-button: #F0EDE8;
+  --bg-active: #E8E5E0;
+  --surface: #E8E5E0;
+  --text-primary: #1C1B1A;
+  --text-secondary: #6B6560;
+  --text-muted: #9A9590;
+  --accent: #D97757;
+  --accent-hover: #C56646;
+  --border-subtle: #E0DCD8;
+  --border: #C9C5BD;
+  --error: #BA1A1A;
+  --scroll-handle: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] {
+  --bg-primary: #262624;
+  --bg-secondary: #2C2C2B;
+  --bg-panel: #2C2C2B;
+  --bg-input: #1B1B19;
+  --bg-neutral-button: #2C2C2B;
+  --bg-active: #3E3E38;
+  --surface: #3E3E38;
+  --text-primary: #F1F1EF;
+  --text-secondary: #C3C0B6;
+  --text-muted: #B7B5A9;
+  --accent: #D97757;
+  --accent-hover: #E08D6F;
+  --border-subtle: #3E3E38;
+  --border: #52514A;
+  --error: #EF4444;
+  --scroll-handle: #52514A;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  font-family: "JetBrains Mono", "Microsoft YaHei", "Segoe UI", monospace;
+  font-size: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.app-layout {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  gap: 0;
+  background: var(--bg-primary);
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  padding: 0;
+}
+
+.app-content > * {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-handle);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

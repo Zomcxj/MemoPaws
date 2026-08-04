@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "crates/memopaws-core",
+    "crates/memopaws-config",
+    "crates/memopaws-ocr",
+    "crates/memopaws-clipboard",
+    "crates/memopaws-memo",
+    "crates/memopaws-keys",
+    "crates/memopaws-canvas",
+    "crates/memopaws-tauri",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["MemoPaws"]
+edition = "2021"
+homepage = "https://github.com/MemoPaws/MemoPaws-Rust"
