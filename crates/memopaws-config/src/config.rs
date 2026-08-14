@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use memopaws_core::{paths, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,6 +19,19 @@ impl Default for CloseBehavior {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextReplacement {
+    pub abbr: String,
+    pub replacement: String,
+}
+
+fn deserialize_text_replacements<'de, D>(deserializer: D) -> std::result::Result<Vec<TextReplacement>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<Vec<TextReplacement>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub theme: Option<String>,
     pub language: Option<String>,
@@ -29,7 +42,8 @@ pub struct AppConfig {
     pub clipboard_max_items: Option<usize>,
     pub history_max_items: Option<usize>,
     pub shortcuts: Option<HashMap<String, String>>,
-    pub text_replacements: Option<Vec<serde_json::Value>>,
+    #[serde(default, deserialize_with = "deserialize_text_replacements")]
+    pub text_replacements: Vec<TextReplacement>,
     pub show_floating_widget: Option<bool>,
 }
 
@@ -57,7 +71,7 @@ impl Default for AppConfig {
                 .into_iter()
                 .collect(),
             ),
-            text_replacements: None,
+            text_replacements: Vec::new(),
             show_floating_widget: Some(true),
         }
     }
@@ -102,5 +116,22 @@ impl AppConfig {
         let raw = serde_json::to_string_pretty(self)?;
         fs::write(&path, raw)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppConfig;
+
+    #[test]
+    fn text_replacements_accept_missing_and_empty_legacy_values() {
+        let missing: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(missing.text_replacements.is_empty());
+
+        let empty: AppConfig = serde_json::from_str(r#"{"text_replacements": []}"#).unwrap();
+        assert!(empty.text_replacements.is_empty());
+
+        let null: AppConfig = serde_json::from_str(r#"{"text_replacements": null}"#).unwrap();
+        assert!(null.text_replacements.is_empty());
     }
 }

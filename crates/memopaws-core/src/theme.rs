@@ -74,3 +74,40 @@ pub const LIGHT_TOKENS: ThemeTokens = ThemeTokens {
     error: "#BA1A1A",
     is_dark: false,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dark_and_light_tokens_are_consistent() {
+        let dark = Theme::Dark.tokens();
+        assert!(dark.is_dark);
+        assert_eq!(dark.bg_primary, DARK_TOKENS.bg_primary);
+        assert_ne!(dark.bg_primary, LIGHT_TOKENS.bg_primary);
+
+        let light = Theme::Light.tokens();
+        assert!(!light.is_dark);
+        assert_eq!(light.bg_primary, LIGHT_TOKENS.bg_primary);
+        assert_ne!(light.bg_primary, dark.bg_primary);
+    }
+
+    #[test]
+    fn is_dark_matches_the_theme() {
+        assert!(Theme::Dark.is_dark());
+        assert!(!Theme::Light.is_dark());
+    }
+
+    #[test]
+    fn theme_serde_round_trips_with_lowercase_names() {
+        let value = serde_json::to_value(Theme::Dark).unwrap();
+        assert_eq!(value, "dark");
+        assert_eq!(serde_json::from_value::<Theme>(value).unwrap(), Theme::Dark);
+        assert_eq!(serde_json::from_str::<Theme>("\"light\"").unwrap(), Theme::Light);
+    }
+
+    #[test]
+    fn invalid_theme_serde_is_rejected() {
+        assert!(serde_json::from_str::<Theme>("\"blue\"").is_err());
+    }
+}

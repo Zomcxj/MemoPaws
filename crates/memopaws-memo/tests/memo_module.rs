@@ -261,6 +261,8 @@ fn renderer_highlights_known_fenced_code_and_escapes_unknown_code() {
     assert!(highlighted.contains("<span style=\""));
     assert!(highlighted.contains("fn"));
     assert!(highlighted.contains("color:"));
+    assert!(highlighted.contains("--memo-code:#2b2b2b"));
+    assert!(!highlighted.contains("<pre class=\"memo-code\" style=\"background-color:"));
 
     let fallback = render_markdown("```not-a-language\n<script>alert(1)</script>\n```", RenderTheme::Light);
     assert!(!fallback.to_ascii_lowercase().contains("<script"));
@@ -284,13 +286,43 @@ fn renderer_filters_unsafe_link_and_image_protocols() {
 }
 
 #[test]
-fn renderer_uses_iced_like_type_scale_and_spacing_tokens() {
-    let html = render_markdown("# Title\n\npara", RenderTheme::Dark);
-    assert!(html.contains("--memo-text:16px"));
-    assert!(html.contains("--memo-h1:32px"));
-    assert!(html.contains("--memo-space:14px"));
+fn renderer_uses_vscode_dark_plus_palette_typography_and_core_markup_styles() {
+    let markdown = "# Title\n\nParagraph with `inline`.\n\n- item\n\n> quote\n\n```rust\nfn main() {}\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n---\n\n- [x] done\n\n![image](https://example.com/image.png)";
+    let html = render_markdown(markdown, RenderTheme::Dark);
+
+    for value in [
+        "--memo-bg:#1e1e1e",
+        "--memo-fg:#d4d4d4",
+        "--memo-link:#3794ff",
+        "--memo-code:#2b2b2b",
+        "--memo-inline-code:#ce9178",
+        "--memo-text:14px",
+        "line-height: 1.6",
+        "font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+        "font-family: Consolas, Monaco, \"Courier New\", monospace",
+        ".memo-markdown h1",
+        ".memo-markdown p",
+        ".memo-markdown ul",
+        ".memo-markdown blockquote",
+        ".memo-markdown pre.memo-code",
+        ".memo-markdown code",
+        ".memo-markdown table",
+        ".memo-markdown hr",
+        ".memo-markdown .task-list-item",
+        ".memo-markdown img",
+    ] {
+        assert!(html.contains(value), "missing {value}");
+    }
     assert!(html.contains("memo-markdown dark"));
     assert!(html.contains("<h1"));
+    assert!(html.contains("<p>Paragraph with <code>inline</code>"));
+    assert!(html.contains("<ul>"));
+    assert!(html.contains("<blockquote"));
+    assert!(html.contains("memo-code"));
+    assert!(html.contains("<table>"));
+    assert!(html.contains("<hr"));
+    assert!(html.contains("task-list-item"));
+    assert!(html.contains("<img src=\"https://example.com/image.png\""));
 }
 
 #[test]
@@ -312,4 +344,15 @@ fn renderer_code_block_wrapped_as_memo_code() {
     let html = render_markdown("```rust\nfn main() {}\n```", RenderTheme::Dark);
     assert!(html.contains("memo-code"));
     assert!(html.contains("fn") || html.contains("main"));
+}
+
+#[test]
+fn renderer_adds_safe_copy_controls_to_fenced_code_only() {
+    let html = render_markdown("Inline `code`.\n\n```rust\nfn main() {}\n```", RenderTheme::Dark);
+
+    assert!(html.contains("class=\"memo-code-block\""));
+    assert!(html.contains("class=\"memo-code-copy\""));
+    assert!(html.contains("data-memo-code-copy"));
+    assert!(html.contains("<code>code</code>"));
+    assert!(!html.contains("onclick="));
 }

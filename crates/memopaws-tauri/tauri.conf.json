@@ -16,7 +16,22 @@
         "width": 1460,
         "height": 960,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "visible": false,
+        "backgroundColor": "#262624"
+      },
+      {
+        "label": "floating",
+        "title": "MemoPaws Floating Widget",
+        "width": 258,
+        "height": 300,
+        "resizable": false,
+        "fullscreen": false,
+        "visible": false,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true
       }
     ],
     "security": {

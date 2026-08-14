@@ -1,4 +1,5 @@
-use memopaws_ocr::{image_util::{grayscale_png, otsu_binary_png, prepare_image, MAX_INPUT_BYTES}, OcrError};
+use image::GenericImageView;
+use memopaws_ocr::{image_util::{crop_png, grayscale_png, mosaic_png, mosaic_region_png, otsu_binary_png, prepare_image, MAX_INPUT_BYTES}, OcrError};
 
 #[test]
 fn image_is_detected_resized_and_encoded_as_png_data_uri() {
@@ -27,6 +28,46 @@ fn grayscale_and_otsu_are_canvas_preprocessors() {
     assert_eq!(gray.dimensions(), (4, 1));
     let binary = image::load_from_memory(&otsu_binary_png(&bytes).unwrap()).unwrap().to_luma8();
     assert!(binary.pixels().all(|pixel| matches!(pixel.0[0], 0 | 255)));
+}
+
+#[test]
+fn crop_png_crops_the_requested_region() {
+    let source = image::RgbImage::from_fn(4, 3, |x, y| image::Rgb([(x * 10) as u8, (y * 10) as u8, 0]));
+    let bytes = encode(source);
+
+    let cropped = image::load_from_memory(&crop_png(&bytes, 1, 1, 2, 2).unwrap()).unwrap().to_rgb8();
+    assert_eq!(cropped.dimensions(), (2, 2));
+    assert_eq!(cropped.get_pixel(0, 0).0, [10, 10, 0]);
+    assert_eq!(cropped.get_pixel(1, 1).0, [20, 20, 0]);
+}
+
+#[test]
+fn crop_png_clips_regions_that_overflow_the_image() {
+    let source = image::RgbImage::from_pixel(8, 8, image::Rgb([5, 5, 5]));
+    let bytes = encode(source);
+    let cropped = image::load_from_memory(&crop_png(&bytes, 6, 6, 100, 100).unwrap()).unwrap();
+    assert_eq!(cropped.dimensions(), (2, 2));
+}
+
+#[test]
+fn crop_png_rejects_zero_size_and_fully_outside_regions() {
+    let source = image::RgbImage::from_pixel(8, 8, image::Rgb([5, 5, 5]));
+    let bytes = encode(source);
+
+    assert!(matches!(crop_png(&bytes, 0, 0, 0, 4), Err(OcrError::Custom(_))));
+    assert!(matches!(crop_png(&bytes, 0, 0, 4, 0), Err(OcrError::Custom(_))));
+    assert!(matches!(crop_png(&bytes, 100, 100, 4, 4), Err(OcrError::Custom(_))));
+    assert!(matches!(crop_png(&bytes, 8, 0, 4, 4), Err(OcrError::Custom(_))));
+}
+
+#[test]
+fn region_mosaic_matches_whole_image_mosaic_when_covering_everything() {
+    let source = image::RgbImage::from_fn(8, 8, |x, y| image::Rgb([(x * 7) as u8, (y * 11) as u8, 200]));
+    let bytes = encode(source);
+
+    let whole = mosaic_png(&bytes, 4).unwrap();
+    let region = mosaic_region_png(&bytes, 4, 0, 0, 8, 8).unwrap();
+    assert_eq!(whole, region);
 }
 
 fn encode(image: image::RgbImage) -> Vec<u8> {

@@ -137,32 +137,7 @@
   border-color: var(--accent);
 }
 
-.settings-segmented {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  width: 162px;
-  height: 34px;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--bg-neutral-button);
-}
-
-.settings-segmented button {
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  padding: 0 8px;
-  background: transparent;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.settings-segmented button.active {
-  background: var(--accent);
-  color: #fff;
-}
+/* Segmented controls use shared SegmentedControl component (sliding indicator). */
 
 .settings-actions {
   display: flex;
@@ -264,6 +239,80 @@
   border-color: var(--error);
 }
 
+.settings-replacement-form {
+  display: grid;
+  grid-template-columns: minmax(120px, .35fr) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.settings-replacement-form input,
+.settings-replacement-form textarea {
+  min-width: 0;
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-replacement-form textarea {
+  resize: vertical;
+  min-height: 42px;
+}
+
+.settings-replacement-form input:focus,
+.settings-replacement-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-replacement-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.settings-replacement-actions button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.settings-replacement-list {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-replacement-row {
+  display: grid;
+  grid-template-columns: minmax(80px, .3fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+
+.settings-replacement-row code,
+.settings-replacement-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.settings-replacement-row code {
+  color: var(--accent);
+}
+
 @media (max-width: 620px) {
   .settings-page { padding-inline: 8px; }
   .settings-field,
@@ -277,4 +326,6 @@
   .settings-shortcut { flex-wrap: wrap; }
   .settings-shortcut > span { flex-basis: 100%; width: auto; }
   .settings-shortcut input { flex: 1 1 auto; width: auto; }
+  .settings-replacement-form,
+  .settings-replacement-row { grid-template-columns: 1fr; }
 }

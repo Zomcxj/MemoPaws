@@ -80,6 +80,10 @@ pub enum OcrError {
     HttpStatus { status: u16, message: String },
     #[error("API returned a malformed response")]
     MalformedResponse,
+    #[error("translation input exceeds {max_bytes} bytes")]
+    TranslationInputTooLarge { max_bytes: usize },
+    #[error("{0}")]
+    Custom(String),
 }
 
 pub struct Client { config: ApiConfig, http: reqwest::Client }
@@ -106,6 +110,9 @@ impl Client {
     }
 
     pub async fn translate(&self, text: &str, target: Language, source: Option<Language>) -> Result<TranslateResult, OcrError> {
+        if text.len() > 100_000 {
+            return Err(OcrError::TranslationInputTooLarge { max_bytes: 100_000 });
+        }
         if source == Some(target) || text.trim().is_empty() { return Ok(TranslateResult { text: text.into(), requested: false }); }
         let direction = source.map(|language| format!("from {} ", language.name())).unwrap_or_default();
         let payload = json!({

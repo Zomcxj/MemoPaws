@@ -3,6 +3,10 @@ build/
 dist/
 target/
 
+# Local runtime data (never commit)
+.memopaws-rust/
+**/.memopaws-rust/
+
 # Dependencies
 node_modules/
 frontend/node_modules/

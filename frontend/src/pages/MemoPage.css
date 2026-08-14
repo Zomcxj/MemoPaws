@@ -162,39 +162,19 @@
   gap: 8px;
 }
 
+.memo-mode.seg-control,
 .memo-mode {
-  display: flex;
   width: 242px;
-  height: 34px;
-  padding: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--bg-neutral-button);
 }
 
-.memo-mode button,
 .memo-error button {
-  flex: 1;
   border: 0;
-  border-radius: 0;
-  padding: 0;
+  border-radius: 8px;
+  padding: 4px 10px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 13px;
-}
-
-.memo-mode button.active {
-  color: #fff;
-  background: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
-}
-
-.memo-mode button:disabled {
-  cursor: wait;
-  opacity: .55;
 }
 
 .memo-editor-head {

@@ -91,6 +91,22 @@ async fn errors_are_safe_for_http_malformed_and_timeout_responses() {
     assert!(matches!(client.translate("a", Language::Chinese, None).await, Err(OcrError::Timeout)));
 }
 
+#[tokio::test]
+async fn rejects_invalid_image_bytes_before_network_access() {
+    let client = Client::new(config(&MockServer::start().await, "test-secret"));
+    assert!(matches!(client.ocr(b"not-an-image").await, Err(OcrError::UnsupportedImage)));
+}
+
+#[tokio::test]
+async fn rejects_oversized_translation_input_before_network_access() {
+    let client = Client::new(config(&MockServer::start().await, "test-secret"));
+    let text = "x".repeat(100_001);
+    assert!(matches!(
+        client.translate(&text, Language::Chinese, Some(Language::English)).await,
+        Err(OcrError::TranslationInputTooLarge { max_bytes: 100_000 })
+    ));
+}
+
 fn tiny_png() -> Vec<u8> {
     let image = image::RgbImage::from_pixel(1, 1, image::Rgb([255, 255, 255]));
     let mut bytes = std::io::Cursor::new(Vec::new());

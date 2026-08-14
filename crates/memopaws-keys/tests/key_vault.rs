@@ -142,6 +142,163 @@ fn public_serialization_and_debug_output_are_redacted() {
 }
 
 #[test]
+fn validation_rejects_empty_names_values_and_unknown_types() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+
+    assert!(vault.add(input("", "secret", "value")).is_err());
+    assert!(vault.add(input("   ", "secret", "value")).is_err());
+    assert!(vault.add(input("name", "secret", "")).is_err());
+    assert!(vault.add(input("name", "other", "value")).is_err());
+    assert!(vault.add(input("name", "LLM", "value")).is_err());
+    assert!(vault.list().is_empty());
+    assert_eq!(vault.status().has_master, false);
+
+    let created = vault.add(input("settings_api_key", "llm", "key-value")).unwrap();
+    assert_eq!(vault.list().len(), 1);
+    assert!(vault.update(created.id, input("", "llm", "x")).is_err());
+    vault.update(created.id, input("valid", "llm", "x")).unwrap();
+}
+
+#[test]
+fn locked_vault_rejects_every_write_operation() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+    let entry = vault.add(input("only", "secret", "value")).unwrap();
+    vault.set_master("master-pw").unwrap();
+    vault.lock();
+    assert!(!vault.status().unlocked);
+
+    assert!(vault.add(input("nope", "secret", "x")).is_err());
+    assert!(vault.update(entry.id, input("nope", "secret", "x")).is_err());
+    assert!(vault.delete(entry.id).is_err());
+    assert!(vault.reorder("secret", &[entry.id]).is_err());
+    assert!(vault.set_master("another").is_err());
+    assert!(vault.remove_master().is_err());
+    assert!(vault.get_value(entry.id).is_err());
+    assert!(vault.list().is_empty());
+
+    assert!(vault.unlock("master-pw").unwrap());
+    vault.lock();
+    assert!(!vault.unlock("wrong-pw").unwrap_or(false));
+    assert!(vault.unlock("master-pw").unwrap());
+    assert!(vault.status().unlocked);
+}
+
+#[test]
+fn set_master_downgrades_and_remove_master_unlocks_with_plaintext_again() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+    let id = vault.add(input("open", "secret", "plain-value")).unwrap().id;
+
+    vault.remove_master().unwrap();
+    assert!(!vault.status().has_master && vault.status().unlocked);
+    assert_eq!(vault.get_value(id).unwrap(), "plain-value");
+    let disk = fs::read_to_string(&path).unwrap();
+    assert!(disk.contains("plain-value") && !disk.contains("enc_value"));
+
+    vault.set_master("master").unwrap();
+    assert!(vault.status().has_master && vault.status().unlocked);
+    assert_eq!(vault.get_value(id).unwrap(), "plain-value");
+    let disk = fs::read_to_string(&path).unwrap();
+    assert!(!disk.contains("plain-value"));
+    let value: serde_json::Value = serde_json::from_str(&disk).unwrap();
+    assert_eq!(value["entries"][0]["type"], "secret");
+    assert!(!disk.contains("entry_type"));
+}
+
+#[test]
+fn reorder_rejects_missing_extra_or_foreign_ids() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+    let a = vault.add(input("a", "secret", "1")).unwrap();
+    let b = vault.add(input("b", "secret", "2")).unwrap();
+    let llm = vault.add(input("llm", "llm", "3")).unwrap();
+
+    assert!(vault.reorder("secret", &[a.id]).is_err());
+    assert!(vault.reorder("secret", &[a.id, b.id, 999_999]).is_err());
+    assert!(vault.reorder("secret", &[a.id, llm.id]).is_err());
+    assert!(vault.reorder("llm", &[llm.id, a.id]).is_err());
+    assert!(vault.reorder("secret", &[]).is_err());
+
+    assert_eq!(vault.list().iter().filter(|e| e.entry_type == "llm").map(|e| e.id).collect::<Vec<_>>(), vec![llm.id]);
+    assert_eq!(vault.reorder("llm", &[llm.id]).unwrap(), ());
+}
+
+#[test]
+fn missing_entry_operations_are_rejected_but_leave_data_intact() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+    let entry = vault.add(input("existing", "secret", "value")).unwrap();
+
+    assert!(vault.get_value(424_242).is_err());
+    assert!(vault.update(424_242, input("nope", "secret", "x")).is_err());
+    assert!(vault.delete(424_242).is_err());
+    assert_eq!(vault.list().len(), 1);
+
+    assert_eq!(vault.get_value(entry.id).unwrap(), "value");
+    assert!(vault.delete(entry.id).unwrap() == ());
+    assert!(vault.list().is_empty());
+}
+
+#[test]
+fn encrypted_disk_entry_uses_type_field_and_hides_plaintext_after_reload() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+    let secret = vault.add(input("api-secret", "secret", "hunter2")).unwrap();
+    vault.set_master("password").unwrap();
+    vault.lock();
+    vault.unlock("password").unwrap();
+
+    let raw = fs::read_to_string(&path).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let entry = &value["entries"][0];
+    assert_eq!(entry["type"], "secret");
+    assert!(entry.get("entry_type").is_none());
+    assert!(entry["enc_value"].is_string());
+    assert!(!raw.contains("hunter2"));
+
+    let mut reloaded = KeyVault::load(path).unwrap();
+    assert!(reloaded.unlock("password").unwrap());
+    assert_eq!(reloaded.get_value(secret.id).unwrap(), "hunter2");
+}
+
+#[test]
+fn save_load_round_trip_without_master_keeps_plaintext_and_order() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+    let first = vault.add(input("first", "secret", "one")).unwrap();
+    let second = vault.add(input("second", "secret", "two")).unwrap();
+
+    let reloaded = KeyVault::load(path).unwrap();
+    assert!(reloaded.status().unlocked && !reloaded.status().has_master);
+    assert_eq!(reloaded.list().iter().map(|e| e.id).collect::<Vec<_>>(), vec![first.id, second.id]);
+    assert_eq!(reloaded.get_value(first.id).unwrap(), "one");
+    assert_eq!(reloaded.get_value(second.id).unwrap(), "two");
+}
+
+#[test]
+fn empty_master_password_is_rejected_and_corrupt_json_fails_load() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keys.json");
+    let mut vault = KeyVault::load(path.clone()).unwrap();
+    assert!(vault.set_master("").is_err());
+
+    let broken = dir.path().join("broken.json");
+    fs::write(&broken, "{\"version\":3,\"entries\":[}").unwrap();
+    let failed = KeyVault::load(broken.clone()).unwrap_err().into_locked_vault();
+    assert!(failed.status().load_failed && !failed.status().unlocked);
+    assert_eq!(fs::read_to_string(broken).unwrap(), "{\"version\":3,\"entries\":[}");
+}
+
+#[test]
 fn failed_save_rolls_memory_back_and_load_failure_stays_locked() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("keys.json");

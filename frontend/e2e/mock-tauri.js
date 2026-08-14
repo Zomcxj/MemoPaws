@@ -7,8 +7,11 @@
   let backendTheme = storedTheme === "light" || storedTheme === "dark" ? storedTheme : "dark";
   const themeCalls = [];
   const commandCalls = [];
+  const windowCalls = [];
   const runtimeUpdates = [];
   let apiTestMode = "success-vision";
+  let fullscreen = false;
+  let visible = true;
   const MOCK_DATA = {
     key_list: [
       { id: 1, name: "Test LLM Key", type: "llm", url: "https://api.openai.com/v1", url_anthropic: "", note: "Test key", order: 0, created: "1700000000" },
@@ -24,6 +27,10 @@
     history_list: [
       { time: "1700000000", type: "ocr", text: "Recognized text", ocr_text: "Recognized text", translate_text: null },
       { time: "1700000001", type: "translate", text: "Translated", ocr_text: "Original", translate_text: "Translated" }
+    ],
+    list_displays: [
+      { index: 0, name: "Primary", x: 0, y: 0, width: 1280, height: 720, is_primary: true },
+      { index: 1, name: "Secondary", x: 1280, y: 0, width: 1600, height: 900, is_primary: false }
     ],
     clipboard_list: [
       { id: 1, time: "1700000000", content_type: "text", text: "Clipboard text", image_path: null },
@@ -44,7 +51,7 @@
   };
 
    function mockInvoke(command, args) {
-     commandCalls.push({ command: command, args: args || null });
+     commandCalls.push({ command: command, args: args || null, visible: visible });
      return new Promise(function(resolve) {
       setTimeout(function() {
         if (command === "get_theme") {
@@ -88,6 +95,10 @@
           resolve({ id: 99, name: (args && args.entry && args.entry.name) || "New Key", type: (args && args.entry && args.entry.type) || "llm", url: (args && args.entry && args.entry.url) || "", url_anthropic: "", note: "", order: 0, created: String(Date.now()) });
         } else if (command === "unlock") {
           resolve(true);
+        } else if (command === "capture_screen") {
+          resolve({ image: [137, 80, 78, 71], preview: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'%3E%3Crect width='1280' height='720' fill='%23456789'/%3E%3C/svg%3E" });
+        } else if (command === "image_crop") {
+          resolve({ image: [137, 80, 78, 71] });
         } else if (command === "clipboard_get_image" || command === "capture_get_image") {
           resolve([137, 80, 78, 71]);
         } else {
@@ -101,12 +112,25 @@
   // Tauri 2 uses __TAURI_INTERNALS__ not __TAURI__
   window.__TAURI_INTERNALS__ = {
     invoke: mockInvoke,
-    metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } }
+    metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+    callbacks: {},
+     invoke: function(command, payload) {
+       if (command === "plugin:window|outer_position") return Promise.resolve({ x: 0, y: 0 });
+       if (command === "plugin:window|outer_size") return Promise.resolve({ width: 1280, height: 720 });
+       if (command === "plugin:window|is_fullscreen") { windowCalls.push({ command: command }); return Promise.resolve(fullscreen); }
+        if (command === "plugin:window|set_fullscreen") { windowCalls.push({ command: command, value: payload && payload.value }); fullscreen = Boolean(payload && payload.value); return Promise.resolve(); }
+        if (command === "plugin:window|hide") { windowCalls.push({ command: command }); visible = false; return Promise.resolve(); }
+        if (command === "plugin:window|show") { windowCalls.push({ command: command }); visible = true; return Promise.resolve(); }
+        if (command === "plugin:window|set_position" || command === "plugin:window|set_size") { windowCalls.push({ command: command, value: payload && payload.value }); return Promise.resolve(); }
+       return mockInvoke(command, payload);
+     }
   };
   window.__MOCK_TAURI_THEME_CALLS__ = themeCalls;
   window.__MOCK_TAURI_COMMAND_CALLS__ = commandCalls;
+  window.__MOCK_TAURI_WINDOW_CALLS__ = windowCalls;
   window.__MOCK_TAURI_RUNTIME_UPDATES__ = runtimeUpdates;
   window.__MOCK_TAURI_SET_API_MODE__ = function(mode) { apiTestMode = mode; };
+  window.__MOCK_TAURI_SET_FULLSCREEN__ = function(value) { fullscreen = Boolean(value); };
 
   // Also set __TAURI__ for older compatibility
   window.__TAURI__ = {

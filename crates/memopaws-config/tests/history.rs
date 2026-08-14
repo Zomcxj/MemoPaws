@@ -31,3 +31,49 @@ fn legacy_extra_fields_load_and_delete_and_clear_are_saved() {
     manager.clear().unwrap();
     assert!(HistoryManager::with_path(path, 100).unwrap().records().is_empty());
 }
+
+#[test]
+fn corrupted_history_file_errors_without_destroying_the_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("history.json");
+    std::fs::write(&path, "[{broken").unwrap();
+
+    assert!(HistoryManager::with_path(&path, 100).is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "[{broken");
+}
+
+#[test]
+fn add_success_truncates_long_text_and_delete_out_of_range_is_a_noop() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("history.json");
+    let mut manager = HistoryManager::with_path(&path, 100).unwrap();
+
+    let long_text = "x".repeat(6000);
+    let long_ocr = "y".repeat(6000);
+    let long_translate = "z".repeat(6000);
+    manager.add_success("ocr", &long_text, Some(&long_ocr), Some(&long_translate)).unwrap();
+    assert_eq!(manager.records()[0].text.len(), 5000);
+    assert_eq!(manager.records()[0].ocr_text.as_ref().unwrap().len(), 6000);
+    assert_eq!(manager.records()[0].translate_text.as_ref().unwrap().len(), 6000);
+
+    manager.delete_record(99).unwrap();
+    manager.delete_record(0).unwrap();
+    assert!(manager.records().is_empty());
+    assert!(HistoryManager::with_path(&path, 100).unwrap().records().is_empty());
+}
+
+#[test]
+fn missing_history_file_starts_empty_and_max_items_controls_retention() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("history.json");
+    let mut manager = HistoryManager::with_path(&path, 2).unwrap();
+    assert!(manager.records().is_empty());
+    assert_eq!(manager.max_items(), 2);
+
+    for index in 0..4 {
+        manager.add_record("test", format!("record-{index}")).unwrap();
+    }
+    assert_eq!(manager.records().len(), 2);
+    assert_eq!(manager.records()[0].text, "record-3");
+    assert_eq!(manager.into_records().len(), 2);
+}

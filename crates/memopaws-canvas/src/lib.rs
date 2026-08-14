@@ -135,14 +135,56 @@ mod tests {
     }
 
     #[test]
-    fn load_recovers_existing_records() {
+    fn persistence_round_trip_reloads_records_and_files() {
         let dir = unique_dir();
-        fs::create_dir_all(&dir).unwrap();
         let mut m = CaptureManager { captures_dir: dir.clone(), records: vec![], next_id: 1 };
-        m.add_capture(b"x").unwrap();
+        m.add_capture(b"first").unwrap();
+        m.add_capture(b"second").unwrap();
+        let first_id = m.records()[1].id;
         drop(m);
-        let loaded = CaptureManager::load().unwrap_or_else(|_| CaptureManager { captures_dir: dir.clone(), records: vec![], next_id: 1 });
-        // load() uses the real path, so this test only checks the dir-based loading
+
+        let raw = fs::read_to_string(dir.join("captures.json")).unwrap();
+        let records: Vec<CaptureRecord> = serde_json::from_str(&raw).unwrap();
+        let next_id = records.iter().map(|r| r.id).max().unwrap_or(0) + 1;
+        let reloaded = CaptureManager { captures_dir: dir.clone(), records, next_id };
+
+        assert_eq!(reloaded.records().len(), 2);
+        assert_eq!(reloaded.records()[0].id, 2);
+        assert_eq!(reloaded.records()[0].filename, "capture-2.png");
+        assert_eq!(reloaded.get_capture_bytes(first_id).unwrap(), b"first");
+
+        let mut writable = reloaded;
+        let record = writable.add_capture(b"third").unwrap();
+        assert_eq!(record.id, 3);
+        assert_eq!(record.filename, "capture-3.png");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_record_lookup_and_delete_are_safe() {
+        let dir = unique_dir();
+        let mut m = CaptureManager { captures_dir: dir.clone(), records: vec![], next_id: 1 };
+        m.add_capture(b"data").unwrap();
+
+        assert!(m.get_capture_path(999).is_err());
+        assert!(m.get_capture_bytes(999).is_err());
+        m.delete(999).unwrap();
+        assert_eq!(m.records().len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ids_and_filenames_increment_from_stored_next_id() {
+        let dir = unique_dir();
+        let mut m = CaptureManager { captures_dir: dir.clone(), records: vec![], next_id: 5 };
+        let first = m.add_capture(b"a").unwrap();
+        let second = m.add_capture(b"b").unwrap();
+        assert_eq!(first.id, 5);
+        assert_eq!(second.id, 6);
+        assert_eq!(first.filename, "capture-5.png");
+        assert_eq!(second.filename, "capture-6.png");
+        assert!(dir.join("capture-5.png").exists());
+        assert!(dir.join("capture-6.png").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

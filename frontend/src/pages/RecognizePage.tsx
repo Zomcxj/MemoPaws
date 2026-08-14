@@ -1,207 +1,325 @@
-import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
+import type { Lang } from "../i18n/lang";
+import { CaptureOverlay, type RegionCss } from "../components/CaptureOverlay";
 import "./RecognizePage.css";
 
-type Language = "zh" | "en" | "ja" | "ko" | "fr" | "de" | "es" | "ru";
-interface KeyEntry { id: number; name: string; type: string; url: string }
+type OcrLanguage = "zh" | "en" | "ja" | "ko" | "fr" | "de" | "es" | "ru";
+interface KeyEntry { id: number; type: string }
 interface HistoryRecord { time: string; type: string; text: string; ocr_text?: string; translate_text?: string }
 interface TextResult { text: string }
+interface DisplayInfo { index: number; name: string; x: number; y: number; width: number; height: number; is_primary: boolean }
+interface WindowGeometry { position: PhysicalPosition; size: PhysicalSize; fullscreen: boolean }
 
-const languages: { value: Language; label: string }[] = [
-  { value: "zh", label: "中文" }, { value: "en", label: "English" },
-  { value: "ja", label: "日本語" }, { value: "ko", label: "한국어" },
-  { value: "fr", label: "Français" }, { value: "de", label: "Deutsch" },
+const languages: { value: OcrLanguage; label: string }[] = [
+  { value: "zh", label: "中文" }, { value: "en", label: "English" }, { value: "ja", label: "日本語" },
+  { value: "ko", label: "한국어" }, { value: "fr", label: "Français" }, { value: "de", label: "Deutsch" },
   { value: "es", label: "Español" }, { value: "ru", label: "Русский" },
 ];
+const copy = {
+  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", mosaicBlock: "马赛克块大小" },
+  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", mosaicBlock: "Mosaic block size" },
+} as const;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 
-export function RecognizePage() {
+interface ContextMenuState { x: number; y: number }
+
+export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { language?: Lang; pasteOcrRequest?: number }) {
+  const t = copy[language];
   const [keyId, setKeyId] = useState<number | "">("");
-  const [model] = useState("glm-4v-flash");
-  const [source, setSource] = useState<Language | "">("zh");
-  const [target, setTarget] = useState<Language>("en");
   const [image, setImage] = useState<Uint8Array | null>(null);
   const [preview, setPreview] = useState("");
+  const [original, setOriginal] = useState<Uint8Array | null>(null);
   const [ocrText, setOcrText] = useState("");
   const [translation, setTranslation] = useState("");
+  const [source, setSource] = useState<OcrLanguage>("zh");
+  const [target, setTarget] = useState<OcrLanguage>("en");
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [rectWidth, setRectWidth] = useState(3);
-  const requestToken = useRef(0);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copiedTranslation, setCopiedTranslation] = useState(false);
+  const [overlay, setOverlay] = useState(false);
+  const [captureBackground, setCaptureBackground] = useState("");
+  const [captureBytes, setCaptureBytes] = useState<Uint8Array | null>(null);
+  const [captureResult, setCaptureResult] = useState("");
+  const [captureBusy, setCaptureBusy] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [past, setPast] = useState<Uint8Array[]>([]);
+  const [future, setFuture] = useState<Uint8Array[]>([]);
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+  const [selectedDisplay, setSelectedDisplay] = useState(0);
+  const [mosaicRegionMode, setMosaicRegionMode] = useState(false);
+  const [mosaicDrag, setMosaicDrag] = useState<{ startX: number; startY: number; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef(preview);
+  const windowGeometryRef = useRef<WindowGeometry | null>(null);
+  const captureRef = useRef<() => void>(() => {});
 
-  const refreshHistory = async () => setHistory(await invoke<HistoryRecord[]>("history_list"));
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([invoke<KeyEntry[]>("key_list"), invoke<HistoryRecord[]>("history_list")])
-      .then(([entries, records]) => {
-        if (!active) return;
-        const llm = entries.filter((entry) => entry.type === "llm");
-        setKeyId(llm[0]?.id ?? ""); setHistory(records);
-      }).catch((reason) => { if (active) setError(errorText(reason)); });
-    return () => { active = false; requestToken.current += 1; };
-  }, []);
-
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
-
-  const importImage = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (!file.type.startsWith("image/")) { setError("请选择图片文件"); return; }
-    if (file.size > MAX_IMAGE_BYTES) { setError("图片不能超过 25 MiB"); return; }
-    requestToken.current += 1;
-    setError(""); setOcrText(""); setTranslation("");
-    setImage(new Uint8Array(await file.arrayBuffer()));
-    setPreview(URL.createObjectURL(file));
+  const urlFor = (bytes: Uint8Array) => URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
+  const setBytes = (bytes: Uint8Array, keepHistory = true) => {
+    if (keepHistory && image) setPast((items) => [...items, image]);
+    setFuture([]); setImage(new Uint8Array(bytes));
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    const url = urlFor(bytes); previewRef.current = url; setPreview(url);
   };
 
-  const requireConfig = () => {
-    if (keyId === "") throw new Error("请先在密钥管理中添加并选择 LLM 密钥");
-    if (!model.trim()) throw new Error("请输入模型名称");
-    return { keyEntryId: keyId, model: model.trim() };
+  const importFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) { setError(t.file); return; }
+    if (file.size > MAX_IMAGE_BYTES) { setError(t.large); return; }
+    const bytes = new Uint8Array(await file.arrayBuffer()); setOriginal(new Uint8Array(bytes)); setBytes(bytes, false);
+    setOcrText(""); setTranslation(""); setError("");
   };
-
-  const recognize = async (token = ++requestToken.current) => {
-    if (!image) throw new Error("请先导入图片");
-    const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...requireConfig() });
-    if (token !== requestToken.current) return "";
-    setOcrText(result.text); setTranslation("");
-    return result.text;
+  const importImage = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); };
+  const dropImage = (event: DragEvent<HTMLElement>) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void importFile(file); };
+  const config = () => { if (keyId === "") throw new Error(t.needKey); return { keyEntryId: keyId }; };
+  const run = async (operation: () => Promise<void>) => { setLoading(true); setError(""); try { await operation(); } catch (reason) { setError(errorText(reason)); } finally { setLoading(false); } };
+  const recognize = () => void run(async () => { if (!image) throw new Error(t.needImage); const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() }); setOcrText(result.text); setTranslation(""); });
+  const translate = () => void run(async () => { if (!ocrText.trim()) throw new Error(t.needText); const result = await invoke<TextResult>("ai_translate", { text: ocrText, target, source, ...config() }); setTranslation(result.text); });
+  const onePunch = () => void run(async () => { if (!image) throw new Error(t.needImage); const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() }); setOcrText(result.text); const translated = await invoke<TextResult>("ai_translate", { text: result.text, target, source, ...config() }); setTranslation(translated.text); });
+  const preprocess = (mode: "gray" | "binary" | "mosaic") => void run(async () => { if (!image) throw new Error(t.needImage); const result = await invoke<{ image: number[] }>("image_preprocess", { image: Array.from(image), mode }); setBytes(new Uint8Array(result.image)); });
+  const undo = () => { const previous = past[past.length - 1]; if (!previous || !image) return; setPast((items) => items.slice(0, -1)); setFuture((items) => [...items, image]); setBytes(previous, false); };
+  const redo = () => { const next = future[future.length - 1]; if (!next || !image) return; setFuture((items) => items.slice(0, -1)); setPast((items) => [...items, image]); setBytes(next, false); };
+  const reset = () => { if (original) setBytes(original); };
+  const clear = () => { setImage(null); setOriginal(null); setPreview(""); setOcrText(""); setTranslation(""); setPast([]); setFuture([]); };
+  const copyOcrText = async () => { if (!ocrText) return; try { await navigator.clipboard.writeText(ocrText); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { setError(t.copyFailed); } };
+  const copyTranslation = async () => { if (!translation) return; try { await navigator.clipboard.writeText(translation); setCopiedTranslation(true); window.setTimeout(() => setCopiedTranslation(false), 1500); } catch { setError(t.copyFailed); } };
+  const clearOcrText = () => { setOcrText(""); setTranslation(""); setError(""); };
+  const capture = async () => {
+    if (windowGeometryRef.current) return;
+    setError("");
+    try {
+      const window = getCurrentWindow();
+      windowGeometryRef.current = {
+        position: await window.outerPosition(),
+        size: await window.outerSize(),
+        fullscreen: await window.isFullscreen(),
+      };
+      if (windowGeometryRef.current.fullscreen) await window.setFullscreen(false);
+      const display = displays.find((item) => item.index === selectedDisplay);
+      if (display) {
+        await window.setPosition(new PhysicalPosition(display.x, display.y));
+        await window.setSize(new PhysicalSize(display.width, display.height));
+      }
+      await window.hide();
+      const result = await invoke<{ image: number[]; preview: string }>("capture_screen", { displayIndex: displays.length > 1 ? selectedDisplay : undefined });
+      await window.show();
+      setCaptureBytes(new Uint8Array(result.image));
+      setCaptureBackground(result.preview);
+      setCaptureResult("");
+      setOverlay(true);
+    } catch (reason) {
+      setError(errorText(reason));
+      setOverlay(false);
+      await restoreCaptureWindow();
+    }
   };
-
-  const translate = async (text = ocrText, token = ++requestToken.current) => {
-    if (!text.trim()) throw new Error("没有可翻译的识别文本");
-    const result = await invoke<TextResult>("ai_translate", { text, target, source: source || null, ...requireConfig() });
-    if (token !== requestToken.current) return;
-    setTranslation(result.text);
+  const restoreCaptureWindow = async () => {
+    const geometry = windowGeometryRef.current;
+    if (!geometry) return;
+    const window = getCurrentWindow();
+    try {
+      if (geometry.fullscreen) await window.setFullscreen(false);
+      await window.setPosition(geometry.position);
+      await window.setSize(geometry.size);
+      await window.show();
+    } finally {
+      if (geometry.fullscreen) await window.setFullscreen(true);
+      windowGeometryRef.current = null;
+    }
   };
-
-  const run = async (operation: (token: number) => Promise<unknown>) => {
-    const token = ++requestToken.current;
-    setLoading(true); setError("");
-    try { await operation(token); if (token === requestToken.current) await refreshHistory(); }
-    catch (reason) { if (token === requestToken.current) setError(errorText(reason)); }
-    finally { if (token === requestToken.current) setLoading(false); }
+  captureRef.current = () => { void capture(); };
+  const captureRegion = async (region: RegionCss, scale: number) => {
+    if (!captureBytes) return;
+    setCaptureBusy(true);
+    try {
+      const f = scale || window.devicePixelRatio || 1;
+      const result = await invoke<{ image: number[] }>("image_crop", { image: Array.from(captureBytes), x: Math.round(region.x * f), y: Math.round(region.y * f), width: Math.max(1, Math.round(region.width * f)), height: Math.max(1, Math.round(region.height * f)) });
+      const bytes = new Uint8Array(result.image);
+      setOriginal(bytes); setBytes(bytes, false); setOcrText(""); setTranslation("");
+      setCaptureBytes(null); setCaptureBackground(""); setCaptureResult(""); setOverlay(false);
+      await restoreCaptureWindow();
+    } catch (reason) { setError(errorText(reason)); } finally { setCaptureBusy(false); }
   };
-
-  const runAll = () => void run(async (token) => {
-    const text = await recognize(token);
-    if (text && token === requestToken.current) await translate(text, token);
+  const exportImage = () => { if (!image) return; const url = urlFor(image); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `memopaws-${Date.now()}.png`; anchor.click(); URL.revokeObjectURL(url); };
+  // Crop from the already-captured screenshot, avoiding re-capturing from the screen
+  // (the overlay's dark backdrop would pollute a live re-capture).
+  const cropFromImage = async (region: RegionCss, scale: number): Promise<Uint8Array> => {
+    if (!captureBytes) throw new Error(t.needImage);
+    const f = scale || window.devicePixelRatio || 1;
+    const result = await invoke<{ image: number[] }>("image_crop", {
+      image: Array.from(captureBytes),
+      x: Math.round(region.x * f),
+      y: Math.round(region.y * f),
+      width: Math.max(1, Math.round(region.width * f)),
+      height: Math.max(1, Math.round(region.height * f)),
+    });
+    return new Uint8Array(result.image);
+  };
+  const overlayRecognize = (region: RegionCss, scale: number) => void (async () => {
+    setCaptureBusy(true); setCaptureResult("");
+    try { const bytes = await cropFromImage(region, scale); const result = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() }); setCaptureResult(result.text || "(无识别结果)"); }
+    catch (reason) { setCaptureResult(errorText(reason)); } finally { setCaptureBusy(false); }
+  })();
+  const overlayTranslate = (region: RegionCss, scale: number) => void (async () => {
+    setCaptureBusy(true); setCaptureResult("");
+    try { const bytes = await cropFromImage(region, scale); const ocr = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() }); const tr = await invoke<TextResult>("ai_translate", { text: ocr.text, target, source, ...config() }); setCaptureResult(tr.text || "(翻译失败)"); }
+    catch (reason) { setCaptureResult(errorText(reason)); } finally { setCaptureBusy(false); }
+  })();
+  const overlayCopyImage = (region: RegionCss, scale: number) => void run(async () => {
+    const bytes = await cropFromImage(region, scale);
+    const blob = new Blob([bytes.slice()], { type: "image/png" });
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  });
+  const overlaySaveImage = (region: RegionCss, scale: number) => void run(async () => {
+    const bytes = await cropFromImage(region, scale);
+    exportImageBytes(bytes);
   });
 
-  const removeHistory = (index: number) => void run(async () => { await invoke("history_delete", { index }); });
-  const clearHistory = () => {
-    if (history.length && window.confirm("清空全部识别与翻译历史？")) void run(async () => { await invoke("history_clear"); });
-  };
-  const restore = (record: HistoryRecord) => {
-    requestToken.current += 1;
-    setOcrText(record.ocr_text ?? (record.type === "ocr" ? record.text : ""));
-    setTranslation(record.translate_text ?? (record.type === "translate" ? record.text : ""));
-    setError("");
-  };
-
-  const startCapture = async () => {
-    try {
-      const result = await invoke<{ image: number[]; preview: string }>("capture_screen");
-      setImage(new Uint8Array(result.image));
-      setPreview(result.preview);
-      setOcrText(""); setTranslation(""); setError("");
-    } catch (reason) { setError(errorText(reason)); }
-  };
-
-  const preprocess = async (mode: "gray" | "binary") => {
-    if (!image) return;
-    try {
-      const result = await invoke<{ image: number[] }>("image_preprocess", { image: Array.from(image), mode });
-      const blob = new Blob([new Uint8Array(result.image)], { type: "image/png" });
-      setImage(new Uint8Array(result.image));
-      if (preview) URL.revokeObjectURL(preview);
-      setPreview(URL.createObjectURL(blob));
-    } catch (reason) { setError(errorText(reason)); }
-  };
-
-  const resetImage = () => {
-    if (preview) { URL.revokeObjectURL(preview); setPreview(""); }
-    setImage(null); setOcrText(""); setTranslation(""); setError("");
-  };
-
-  const clearImage = () => {
-    if (preview) URL.revokeObjectURL(preview);
-    setImage(null); setPreview(""); setOcrText(""); setTranslation(""); setError("");
-  };
-
-  const exportImage = () => {
-    if (!image) return;
-    const blob = new Blob([new Uint8Array(image)], { type: "image/png" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a"); anchor.href = url; anchor.download = `memopaws-${Date.now()}.png`; anchor.click();
+  const exportImageBytes = (bytes: Uint8Array) => {
+    const url = urlFor(bytes);
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `memopaws-${Date.now()}.png`; anchor.click();
     URL.revokeObjectURL(url);
   };
 
-  const recognizeLocal = async (token: number) => {
-    if (!image) throw new Error("请先导入图片");
-    const result = await invoke<TextResult>("local_ocr", { image: Array.from(image) });
-    if (token !== requestToken.current) return "";
-    setOcrText(result.text); setTranslation("");
-    return result.text;
+  // Mosaic region selection on the canvas.
+  const imageCoords = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const img = canvasRef.current?.querySelector("img");
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    return { x: (clientX - rect.left) / zoom, y: (clientY - rect.top) / zoom };
   };
 
-  const translateOnline = async (token: number) => {
-    if (!ocrText.trim()) throw new Error("没有可翻译的识别文本");
-    const result = await invoke<TextResult>("online_translate", { text: ocrText, target, source: source || null });
-    if (token !== requestToken.current) return;
-    setTranslation(result.text);
+  const onCanvasMouseDown = (event: React.MouseEvent) => {
+    if (!mosaicRegionMode || !image) return;
+    const coords = imageCoords(event.clientX, event.clientY);
+    if (!coords) return;
+    event.preventDefault();
+    setMosaicDrag({ startX: coords.x, startY: coords.y, x: coords.x, y: coords.y });
+  };
+  const onCanvasMouseMove = (event: React.MouseEvent) => {
+    if (!mosaicDrag) return;
+    const coords = imageCoords(event.clientX, event.clientY);
+    if (!coords) return;
+    setMosaicDrag((current) => current ? { ...current, x: coords.x, y: coords.y } : current);
+  };
+  const onCanvasMouseUp = () => {
+    if (!mosaicDrag) return;
+    const rect = { x: Math.min(mosaicDrag.startX, mosaicDrag.x), y: Math.min(mosaicDrag.startY, mosaicDrag.y), width: Math.abs(mosaicDrag.x - mosaicDrag.startX), height: Math.abs(mosaicDrag.y - mosaicDrag.startY) };
+    setMosaicDrag(null);
+      if (rect.width < 2 || rect.height < 2) { return; }
   };
 
-  const icon = (name: string) => `/assets/icons/${name}.svg`;
+  // Context menu.
+  const onContextMenu = (event: React.MouseEvent) => {
+    if (!image) return;
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  };
+  const closeContextMenu = () => setContextMenu(null);
+  const contextCopyImage = () => { closeContextMenu(); void run(async () => { if (!image) return; const blob = new Blob([image.slice()], { type: "image/png" }); await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]); }); };
+  const contextPasteImage = () => { closeContextMenu(); void run(async () => { try { const items = await navigator.clipboard.read(); for (const item of items) { const type = item.types.find((t) => t.startsWith("image/")); if (!type) continue; const blob = await item.getType(type); const bytes = new Uint8Array(await blob.arrayBuffer()); setOriginal(bytes); setBytes(bytes, false); setOcrText(""); setTranslation(""); setError(""); return; } } catch { setError(t.copyFailed); } }); };
+  const contextCopyText = () => { closeContextMenu(); void copyOcrText(); };
+  const contextSave = () => { closeContextMenu(); void exportImage(); };
+  const contextReset = () => { closeContextMenu(); reset(); };
 
-  return <section className="recognize-page">
-    <header className="recognize-toolbar">
-      <div className="toolbar-actions">
-        <label className="tool-button" title="导入图片"><img src={icon("import")} alt="" />导入<input type="file" accept="image/*" onChange={(event) => void importImage(event)} /></label>
-        <button className="tool-button" onClick={startCapture}><img src={icon("capture")} alt="" />截图</button>
-        <button className="tool-button" onClick={() => {}}><img src={icon("crop")} alt="" />裁剪</button>
-        <button className="tool-button" onClick={() => {}}><img src={icon("rect")} alt="" />矩形</button>
-        <span className="toolbar-divider" />
-        <label className="toolbar-field">线宽<input type="range" min={1} max={12} value={rectWidth} onChange={(e) => setRectWidth(Number(e.target.value))} /><span>{rectWidth}</span></label>
-        <span className="toolbar-divider" />
-        <button className="tool-button" onClick={() => void run((token) => preprocess("gray").then(() => token))}><img src={icon("grayscale")} alt="" />灰度</button>
-        <button className="tool-button" onClick={() => void run((token) => preprocess("binary").then(() => token))}><img src={icon("binary")} alt="" />二值化</button>
-        <button className="tool-button" onClick={resetImage}><img src={icon("reset")} alt="" />重置</button>
-        <button className="tool-button" onClick={clearImage}><img src={icon("clear")} alt="" />清空</button>
-        <button className="tool-button" onClick={exportImage}><img src={icon("save")} alt="" />保存图片</button>
-      </div>
-      <button className="recognize-primary" disabled={loading || !image} onClick={runAll}>{loading ? "处理中..." : "One Punch"}</button>
-    </header>
-    {error && <div className="recognize-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div>}
+  // History actions.
+  const deleteHistory = (index: number) => void run(async () => { await invoke("history_delete", { index }); setHistory((await invoke<HistoryRecord[]>("history_list"))); });
+  const clearAllHistory = () => { if (!window.confirm(t.clearHistory)) return; void run(async () => { await invoke("history_clear"); setHistory([]); }); };
+  const loadHistory = (record: HistoryRecord) => {
+    // HistoryRecord has no image field; restore text only and inform the user.
+    setOcrText(record.ocr_text || ""); setTranslation(record.translate_text || "");
+    setError(t.historyNoImage);
+  };
+
+  useEffect(() => { let active = true; Promise.all([invoke<KeyEntry[]>("key_list"), invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([keys, records, disp]) => { if (active) { setKeyId(keys.find((entry) => entry.type === "llm")?.id ?? ""); setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
+  useEffect(() => { const captureEvent = () => captureRef.current(); const fitEvent = () => setZoom(1); const recognizeTextEvent = (event: Event) => { const text = (event as CustomEvent<{ text?: unknown }>).detail?.text; if (typeof text === "string") { setOcrText(text); setTranslation(""); setError(""); setCopied(false); } }; const recognizeImageEvent = (event: Event) => { const bytes = (event as CustomEvent<{ image?: unknown }>).detail?.image; if (!Array.isArray(bytes) || !bytes.every((byte) => typeof byte === "number")) return; setOriginal(new Uint8Array(bytes)); setBytes(new Uint8Array(bytes), false); setOcrText(""); setTranslation(""); setError(""); }; window.addEventListener("memopaws-capture", captureEvent); window.addEventListener("canvas_fit", fitEvent); window.addEventListener("recognize-text", recognizeTextEvent); window.addEventListener("recognize-image", recognizeImageEvent); return () => { window.removeEventListener("memopaws-capture", captureEvent); window.removeEventListener("canvas_fit", fitEvent); window.removeEventListener("recognize-text", recognizeTextEvent); window.removeEventListener("recognize-image", recognizeImageEvent); }; }, []);
+  useEffect(() => { if (pasteOcrRequest) contextPasteImage(); }, [pasteOcrRequest]);
+  useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
+
+  const closeOverlay = async () => { setOverlay(false); setCaptureBytes(null); setCaptureBackground(""); setCaptureResult(""); await restoreCaptureWindow(); };
+
+  const mosaicStyle = mosaicDrag ? {
+    left: Math.min(mosaicDrag.startX, mosaicDrag.x) * zoom,
+    top: Math.min(mosaicDrag.startY, mosaicDrag.y) * zoom,
+    width: Math.abs(mosaicDrag.x - mosaicDrag.startX) * zoom,
+    height: Math.abs(mosaicDrag.y - mosaicDrag.startY) * zoom,
+  } : null;
+
+  return <section className="recognize-page" onDragOver={(event) => event.preventDefault()} onDrop={dropImage}>
+    <header className="recognize-toolbar"><div className="toolbar-actions">
+      <label className="tool-button"><img src="/assets/icons/import.svg" alt="" />{t.import}<input type="file" accept="image/*" onChange={importImage} /></label>
+      <button className="tool-button" onClick={() => void capture()}><img src="/assets/icons/capture.svg" alt="" />{t.capture}</button>
+      {displays.length > 1 && <select className="tool-button" aria-label={t.display} value={selectedDisplay} onChange={(event) => setSelectedDisplay(Number(event.target.value))}>{displays.map((d) => <option key={d.index} value={d.index}>{d.name}{d.is_primary ? " (P)" : ""}</option>)}</select>}
+      <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("gray")}>{t.gray}</button>
+      <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("binary")}>{t.binary}</button>
+      <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("mosaic")}>{t.mosaic}</button>
+      <button className="tool-button" disabled={!image || loading} onClick={() => setMosaicRegionMode((v) => !v)} aria-pressed={mosaicRegionMode}>{t.mosaicRegion}</button>
+      <button className="tool-button" disabled={!past.length} onClick={undo}>↶</button><button className="tool-button" disabled={!future.length} onClick={redo}>↷</button>
+      <button className="tool-button" disabled={!image} onClick={() => setZoom((value) => Math.min(8, value * 1.25))}>+</button><button className="tool-button" disabled={!image} onClick={() => setZoom((value) => Math.max(.1, value / 1.25))}>-</button>
+      <button className="tool-button" disabled={!original} onClick={reset}>{t.reset}</button><button className="tool-button" disabled={!image} onClick={clear}>{t.clear}</button><button className="tool-button" disabled={!image} onClick={exportImage}>{t.save}</button>
+    </div><button className="recognize-primary" disabled={!image || loading} onClick={onePunch}>{loading ? t.processing : t.punch}</button></header>
+    {error && <div className="recognize-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>{t.close}</button></div>}
     <div className="recognize-workspace">
       <div className="recognize-left">
-        <article className="recognize-panel image-panel">{preview ? <div className="image-canvas"><img src={preview} alt="待识别图片预览" /></div> : <label className="image-empty"><img src={icon("import")} alt="" /><strong>导入图片开始识别</strong><small>支持常见图片格式，最大 25 MiB</small><input type="file" accept="image/*" onChange={(event) => void importImage(event)} /></label>}</article>
-        <section className="recognize-history"><div className="history-head"><h2>操作历史</h2><button disabled={!history.length || loading} onClick={clearHistory}><img src={icon("clear")} alt="" />清空</button></div>{history.length === 0 ? <div className="history-empty">暂无成功记录</div> : <div className="history-list">{history.map((record, index) => <article key={`${record.time}-${index}`}><button className="history-main" onClick={() => restore(record)} onContextMenu={(e) => { e.preventDefault(); removeHistory(index); }}><strong>[{record.time}] {record.type === "translate" ? "翻译" : "系统"} {record.text || ""}</strong></button></article>)}</div>}<p className="history-tip">点击恢复 | 右键删除</p></section>
+        <article className="recognize-panel image-panel" onContextMenu={onContextMenu}>
+          {preview ? <>
+            <div
+              className={`image-canvas${mosaicRegionMode ? " is-mosaic-mode" : ""}`}
+              ref={canvasRef}
+              onMouseDown={onCanvasMouseDown}
+              onMouseMove={onCanvasMouseMove}
+              onMouseUp={onCanvasMouseUp}
+              onMouseLeave={onCanvasMouseUp}
+            >
+              <img src={preview} alt={t.empty} style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }} draggable={false} />
+              {mosaicStyle && <div className="mosaic-selection" style={mosaicStyle} />}
+            </div>
+          </> : <div className="image-empty"><strong>{t.empty}</strong></div>}
+        </article>
+        <section className="recognize-history">
+          <div className="history-head"><h2>{t.history}</h2>{history.length > 0 && <button type="button" onClick={clearAllHistory}>{t.historyClear}</button>}</div>
+          {history.length ? history.map((record, index) => (
+            <div className="history-row" key={`${record.time}-${index}`}>
+              <button className="history-main" onClick={() => loadHistory(record)} title={t.historyLoad}>
+                <span className="history-text">{record.text}</span>
+                <span className="history-time">{record.time}</span>
+              </button>
+              <div className="history-row-actions">
+                <button type="button" onClick={() => void deleteHistory(index)} aria-label={t.historyDelete}>{t.historyDelete}</button>
+              </div>
+            </div>
+          )) : <div className="history-empty">{t.emptyHistory}</div>}
+        </section>
       </div>
       <div className="recognize-right">
-        <article className="recognize-panel result-panel">
-          <div className="panel-heading"><h2>识别结果</h2></div>
-          <div className="ocr-buttons">
-            <button onClick={() => void run((token) => recognizeLocal(token))}>本地识别</button>
-            <button onClick={() => void run((token) => recognize(token))}>AI识别</button>
-            <select value={source} onChange={(e) => setSource(e.target.value as Language)}>{languages.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}</select>
-          </div>
-          <textarea value={ocrText} placeholder="" onChange={(event) => { requestToken.current += 1; setOcrText(event.target.value); setTranslation(""); }} />
-        </article>
-        <article className="recognize-panel result-panel">
-          <div className="panel-heading"><h2>翻译结果</h2></div>
-          <div className="ocr-buttons">
-            <button onClick={() => void run((token) => translateOnline(token))}>在线翻译</button>
-            <button onClick={() => void run((token) => translate(ocrText, token))}>AI翻译</button>
-            <select value={target} onChange={(e) => setTarget(e.target.value as Language)}>{languages.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}</select>
-          </div>
-          <textarea readOnly value={translation} />
-        </article>
+        <article className="recognize-panel result-panel"><div className="result-heading"><h2>{t.ocr}</h2><div className="result-actions"><button type="button" onClick={() => void copyOcrText()} disabled={!ocrText || loading}>{copied ? t.copied : t.copy}</button><button type="button" onClick={clearOcrText} disabled={!ocrText || loading}>{t.clearText}</button></div></div><div className="ocr-controls"><button type="button" onClick={recognize} disabled={!image || loading}>{loading ? t.processing : t.ocr}</button><select value={source} onChange={(event) => setSource(event.target.value as OcrLanguage)}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><textarea aria-label={t.ocr} value={ocrText} onChange={(event) => { setOcrText(event.target.value); setCopied(false); }} /></article>
+        <article className="recognize-panel result-panel"><div className="result-heading"><h2>{t.translate}</h2><div className="result-actions"><button type="button" onClick={() => void copyTranslation()} disabled={!translation || loading}>{copiedTranslation ? t.copied : t.copy}</button><button type="button" onClick={() => setTranslation("")} disabled={!translation || loading}>{t.clearText}</button></div></div><div className="ocr-controls"><button type="button" onClick={translate} disabled={!ocrText || loading}>{loading ? t.processing : t.translate}</button><select value={target} onChange={(event) => setTarget(event.target.value as OcrLanguage)}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><textarea aria-label={t.translate} readOnly value={translation} /></article>
       </div>
     </div>
+    {contextMenu && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">
+      <button role="menuitem" onClick={contextCopyImage}>{t.contextCopyImage}</button>
+      <button role="menuitem" onClick={contextPasteImage}>{t.contextPasteImage}</button>
+      <button role="menuitem" onClick={contextCopyText}>{t.contextCopyText}</button>
+      <button role="menuitem" onClick={contextSave}>{t.contextSave}</button>
+      <button role="menuitem" onClick={contextReset}>{t.contextReset}</button>
+    </div>}
+     {overlay && captureBackground && <CaptureOverlay
+       background={captureBackground}
+      hint={t.overlay}
+      onConfirm={(region, scale) => void captureRegion(region, scale)}
+      onCancel={() => void closeOverlay()}
+      onRecognize={keyId !== "" ? overlayRecognize : undefined}
+      onTranslate={keyId !== "" ? overlayTranslate : undefined}
+      onCopyImage={overlayCopyImage}
+       onSaveImage={overlaySaveImage}
+       result={captureResult}
+       busy={captureBusy}
+       labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX" }}
+    />}
   </section>;
 }

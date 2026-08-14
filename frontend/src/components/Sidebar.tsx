@@ -1,5 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./Sidebar.css";
+
+const COLLAPSED_STORAGE_KEY = "sidebar-collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 export type Page = "recognize" | "memo" | "keys" | "clipboard" | "settings";
 export type Lang = "zh" | "en";
@@ -24,9 +34,17 @@ const navItems = [
 ];
 
 export default function Sidebar({ currentPage, onNavigate, language = "zh" }: SidebarProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(() => !readCollapsed());
   const t = labels[language] || labels.zh;
   const collapseLabel = language === "en" ? (expanded ? "Collapse sidebar" : "Expand sidebar") : (expanded ? "折叠侧边栏" : "展开侧边栏");
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(COLLAPSED_STORAGE_KEY, String(!expanded));
+    } catch {
+      /* storage unavailable (private mode / quota) — keep in-memory state only */
+    }
+  }, [expanded]);
 
   return (
     <aside className={`sidebar ${expanded ? "expanded" : "collapsed"}`}>
@@ -34,6 +52,7 @@ export default function Sidebar({ currentPage, onNavigate, language = "zh" }: Si
         className="sidebar-toggle"
         type="button"
         aria-label={collapseLabel}
+        aria-expanded={expanded}
         title={collapseLabel}
         onClick={() => setExpanded((value) => !value)}
       >
@@ -45,9 +64,12 @@ export default function Sidebar({ currentPage, onNavigate, language = "zh" }: Si
           return (
             <button
               key={page}
+              type="button"
               className={`sidebar-item ${currentPage === page ? "active" : ""}`}
               onClick={() => onNavigate(page)}
-              title={!expanded ? label : undefined}
+              title={label}
+              aria-label={label}
+              aria-current={currentPage === page ? "page" : undefined}
             >
               <img src={`/assets/icons/${icon}`} alt="" aria-hidden="true" />
               <span className="sidebar-label">{label}</span>

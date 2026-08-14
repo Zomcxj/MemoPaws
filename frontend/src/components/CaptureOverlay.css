@@ -1,0 +1,197 @@
+.capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  cursor: crosshair;
+  user-select: none;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.capture-overlay img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.capture-overlay-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.capture-overlay-rect {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed #4da3ff;
+  background: rgba(77, 163, 255, 0.12);
+  pointer-events: auto;
+  cursor: move;
+}
+
+.capture-overlay-handle {
+  position: absolute;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: #4da3ff;
+}
+
+.capture-overlay-handle--n,
+.capture-overlay-handle--s {
+  left: 50%;
+  margin-left: -5px;
+}
+
+.capture-overlay-handle--e,
+.capture-overlay-handle--w {
+  top: 50%;
+  margin-top: -5px;
+}
+
+.capture-overlay-handle--n { top: -5px; cursor: ns-resize; }
+.capture-overlay-handle--ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.capture-overlay-handle--e { right: -5px; cursor: ew-resize; }
+.capture-overlay-handle--se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.capture-overlay-handle--s { bottom: -5px; cursor: ns-resize; }
+.capture-overlay-handle--sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.capture-overlay-handle--w { left: -5px; cursor: ew-resize; }
+.capture-overlay-handle--nw { top: -5px; left: -5px; cursor: nwse-resize; }
+
+.capture-overlay-size {
+  position: absolute;
+  z-index: 3;
+  transform: translateY(-100%);
+  margin-top: -6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Flipped below the selection when the tag would clip the viewport top. */
+.capture-overlay-size.is-below {
+  transform: none;
+  margin-top: 6px;
+}
+
+.capture-overlay-magnifier {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  gap: 0;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.75);
+  pointer-events: none;
+}
+
+.capture-overlay-magnifier canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.capture-overlay-color {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.capture-overlay-swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.capture-overlay-rgb {
+  opacity: 0.75;
+}
+
+.capture-overlay-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.capture-overlay-actions {
+  position: absolute;
+  z-index: 5;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.92);
+  cursor: default;
+}
+
+.capture-overlay-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: min(720px, calc(100vw - 24px));
+}
+
+.capture-overlay-result {
+  display: block;
+  max-width: min(560px, calc(100vw - 24px));
+  max-height: 180px;
+  margin: 0 0 6px;
+  overflow: auto;
+  color: #fff;
+  font: 12px/1.5 inherit;
+  white-space: pre-wrap;
+}
+
+.capture-overlay-bar button {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.capture-overlay-actions {
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+}
+
+.capture-overlay-bar button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.capture-overlay-bar button.is-primary {
+  border-color: transparent;
+  background: var(--accent);
+}

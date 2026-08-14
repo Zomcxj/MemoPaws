@@ -1,46 +1,205 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { Lang } from "../i18n/lang";
 import "./KeysPage.css";
 
 type KeyType = "llm" | "secret";
 interface VaultStatus { has_master: boolean; unlocked: boolean; load_failed: boolean; version: number }
-interface KeyEntry { id: number; name: string; type: KeyType; url: string; url_anthropic: string; note: string; order: number; created: string }
-interface Draft { name: string; type: KeyType; value: string; url: string; url_anthropic: string; note: string }
-const blankDraft = (type: KeyType = "secret"): Draft => ({ name: "", type, value: "", url: "", url_anthropic: "", note: "" });
-const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+interface KeyEntry {
+  id: number; name: string; type: KeyType; url: string; url_anthropic: string;
+  note: string; order: number; created: string;
+}
+interface Draft {
+  name: string; type: KeyType; value: string; url: string; url_anthropic: string; note: string;
+}
+type Latency = { ms?: number; error?: string; vision?: boolean };
+const MATRIX_CHARS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789";
+const matrixFrame = () => Array.from({ length: 8 }, () => MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)]).join("");
+const waitForRender = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 
-export function KeysPage() {
+const blankDraft = (type: KeyType = "llm"): Draft => ({
+  name: "", type, value: "", url: "", url_anthropic: "", note: "",
+});
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+const isVisionModel = (note: string) =>
+  /vision|vl|gpt-4o|claude-3|glm-4v|gemini|multimodal/i.test(note);
+
+const shortUrl = (url: string) => {
+  const cleaned = url.replace(/^https?:\/\//i, "");
+  return cleaned.length > 30 ? `${cleaned.slice(0, 30)}…` : cleaned;
+};
+
+const copy = {
+  zh: {
+    opening: "正在打开密钥库…",
+    loadFailTitle: "密钥库无法读取",
+    loadFailBody: "为防止覆盖原文件，当前保持锁定且禁止写入。",
+    lockedTitle: "密钥库已锁定",
+    lockedBody: "输入主密码后才能查看条目元数据。",
+    masterPh: "主密码",
+    confirmMasterPh: "确认主密码",
+    unlocking: "解锁中…",
+    unlock: "解锁",
+    badPassword: "主密码错误",
+    passwordMismatch: "两次密码不一致",
+    removeMasterConfirm: "确定要移除主密码吗？密钥将以明文保存。",
+    removeMaster: "移除主密码",
+    lock: "锁定",
+    setMaster: "设置主密码",
+    add: "添加密钥",
+    testSpeed: "测试速度",
+    testing: "测试中…",
+    cancel: "取消",
+    close: "关闭",
+    newKey: "添加密钥",
+    editKey: "编辑密钥",
+    name: "名称",
+    llmType: "大模型密钥",
+    secretType: "普通密钥",
+    value: "API 密钥",
+    openaiUrl: "OpenAI 地址",
+    anthropicUrl: "Anthropic 地址",
+    modelId: "模型ID",
+    note: "备注",
+    noteOptional: "备注（可选）",
+    save: "保存",
+    saving: "保存中…",
+    llmTitle: "🤖 大模型密钥",
+    secretTitle: "🔑 普通密钥",
+    empty: "暂无密钥",
+    model: "模型",
+    source: "来源",
+    latency: "延迟",
+    multimodal: "多模态",
+    textOnly: "文本",
+    delete: "删除",
+    edit: "编辑",
+    copyBtn: "复制",
+    showValue: "显示",
+    hideValue: "隐藏",
+    moveUp: "上移",
+    moveDown: "下移",
+    dragHandle: "拖动以重新排序；按上箭头或下箭头可立即调整顺序",
+    masterTitle: "设置主密码",
+    masterHint: "使用 scrypt 与 AES-256-GCM 加密。",
+    enable: "启用加密",
+    encrypting: "加密中…",
+    nameRequired: "名称和密钥不能为空",
+    typeLabel: "密钥类型",
+  },
+  en: {
+    opening: "Opening vault…",
+    loadFailTitle: "Vault unreadable",
+    loadFailBody: "Staying locked to avoid overwriting the file.",
+    lockedTitle: "Vault locked",
+    lockedBody: "Enter the master password to view entries.",
+    masterPh: "Master password",
+    confirmMasterPh: "Confirm master password",
+    unlocking: "Unlocking…",
+    unlock: "Unlock",
+    badPassword: "Wrong password",
+    passwordMismatch: "Passwords do not match",
+    removeMasterConfirm: "Remove master password? Keys will be stored in plain text.",
+    removeMaster: "Remove master",
+    lock: "Lock",
+    setMaster: "Set master password",
+    add: "Add Key",
+    testSpeed: "Test Speed",
+    testing: "Testing…",
+    cancel: "Cancel",
+    close: "Close",
+    newKey: "Add Key",
+    editKey: "Edit Key",
+    name: "Name",
+    llmType: "LLM Key",
+    secretType: "Secret Key",
+    value: "API Key",
+    openaiUrl: "OpenAI URL",
+    anthropicUrl: "Anthropic URL",
+    modelId: "Model ID",
+    note: "Note",
+    noteOptional: "Note (optional)",
+    save: "Save",
+    saving: "Saving…",
+    llmTitle: "🤖 Model keys",
+    secretTitle: "🔑 Secrets",
+    empty: "No keys",
+    model: "Model",
+    source: "Source",
+    latency: "Latency",
+    multimodal: "Multimodal",
+    textOnly: "Text",
+    delete: "Delete",
+    edit: "Edit",
+    copyBtn: "Copy",
+    showValue: "Show",
+    hideValue: "Hide",
+    moveUp: "Move up",
+    moveDown: "Move down",
+    dragHandle: "Drag to reorder; press ArrowUp or ArrowDown to move immediately",
+    masterTitle: "Set master password",
+    masterHint: "Uses scrypt and AES-256-GCM.",
+    enable: "Enable",
+    encrypting: "Encrypting…",
+    nameRequired: "Name and key cannot be empty",
+    typeLabel: "Key type",
+  },
+} as const;
+
+type Texts = (typeof copy)[Lang];
+
+export function KeysPage({ language = "zh" }: { language?: Lang }) {
+  const t = copy[language];
   const [vault, setVault] = useState<VaultStatus | null>(null);
   const [entries, setEntries] = useState<KeyEntry[]>([]);
-  const [revealed, setRevealed] = useState<Record<number, string>>({});
   const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
   const [draft, setDraft] = useState<Draft>(blankDraft());
   const [editing, setEditing] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showMaster, setShowMaster] = useState(false);
+  const [showValue, setShowValue] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [latency, setLatency] = useState<Record<number, Latency>>({});
+  const [testingGlyphs, setTestingGlyphs] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
+  const [reordering, setReordering] = useState(false);
+  const [dragging, setDragging] = useState<{ id: number; type: KeyType } | null>(null);
+  const [overId, setOverId] = useState<number | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
+  const entriesRef = useRef(entries);
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
+  const pointerDrag = useRef<{ id: number; type: KeyType; x: number; y: number; started: boolean; targetId: number | null; insertAfter: boolean } | null>(null);
 
   const wipeSensitiveState = () => {
     setDraft(blankDraft());
     setPassword("");
-    setRevealed({});
+    setPassword2("");
     setEditing(null);
     setShowForm(false);
     setShowMaster(false);
+    setShowValue(false);
   };
 
   const refresh = async () => {
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
     try {
       const status = await invoke<VaultStatus>("status");
       setVault(status);
       setEntries(status.unlocked ? await invoke<KeyEntry[]>("list") : []);
       if (!status.unlocked) wipeSensitiveState();
-    } catch (reason) { setError(errorText(reason)); }
-    finally { setLoading(false); }
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -50,7 +209,7 @@ export function KeysPage() {
       if (!active) return;
       wipeSensitiveState();
       setEntries([]);
-      setVault((current) => current ? { ...current, unlocked: false } : current);
+      setVault((current) => (current ? { ...current, unlocked: false } : current));
     });
     return () => {
       active = false;
@@ -60,81 +219,845 @@ export function KeysPage() {
   }, []);
 
   const run = async (operation: () => Promise<unknown>) => {
-    setBusy(true); setError("");
-    try { await operation(); await refresh(); }
-    catch (reason) { setError(errorText(reason)); }
-    finally { setBusy(false); }
+    setBusy(true);
+    setError("");
+    try {
+      await operation();
+      await refresh();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const authenticate = () => run(async () => {
-    if (vault?.has_master) {
-      if (!await invoke<boolean>("unlock", { password })) throw new Error("主密码错误");
-    } else await invoke("set_master", { password });
-    wipeSensitiveState();
-  });
+  const authenticate = () =>
+    run(async () => {
+      if (vault?.has_master) {
+        if (!(await invoke<boolean>("unlock", { password }))) throw new Error(t.badPassword);
+      } else {
+        if (password !== password2) throw new Error(t.passwordMismatch);
+        await invoke("set_master", { password });
+      }
+      wipeSensitiveState();
+    });
 
-  const lockVault = () => run(async () => { await invoke("lock"); wipeSensitiveState(); });
+  const lockVault = () =>
+    run(async () => {
+      await invoke("lock");
+      wipeSensitiveState();
+      setLatency({});
+    });
+
   const removeMaster = () => {
-    if (!window.confirm("移除主密码后，密钥将以明文写入本机文件。确定继续吗？")) return;
-    void run(async () => { await invoke("remove_master"); wipeSensitiveState(); });
-  };
-
-  const reveal = async (entry: KeyEntry, copy = false) => {
-    setError("");
-    try {
-      const value = await invoke<string>("get_value", { id: entry.id });
-      if (copy) {
-        await navigator.clipboard.writeText(value);
-        window.setTimeout(() => void navigator.clipboard.writeText(""), 30_000);
-      } else setRevealed((current) => ({ ...current, [entry.id]: value }));
-    } catch (reason) { setError(errorText(reason)); }
-  };
-
-  const startEdit = async (entry: KeyEntry) => {
-    setError("");
-    try {
-      const value = await invoke<string>("get_value", { id: entry.id });
-      setDraft({ name: entry.name, type: entry.type, value, url: entry.url, url_anthropic: entry.url_anthropic, note: entry.note });
-      setEditing(entry.id); setShowForm(true);
-    } catch (reason) { setError(errorText(reason)); }
-  };
-
-  const save = (event: FormEvent) => {
-    event.preventDefault();
+    if (!window.confirm(t.removeMasterConfirm)) return;
     void run(async () => {
-      await invoke(editing === null ? "add" : "update", editing === null ? { entry: draft } : { id: editing, entry: draft });
+      await invoke("remove_master");
+      wipeSensitiveState();
+    });
+  };
+
+  const openAdd = () => {
+    setEditing(null);
+    setDraft(blankDraft("llm"));
+    setShowValue(false);
+    setShowForm(true);
+  };
+
+  const openEdit = async (entry: KeyEntry) => {
+    setError("");
+    try {
+      const value = await invoke<string>("get_value", { id: entry.id });
+      setDraft({
+        name: entry.name,
+        type: entry.type,
+        value,
+        url: entry.url,
+        url_anthropic: entry.url_anthropic,
+        note: entry.note,
+      });
+      setEditing(entry.id);
+      setShowValue(false);
+      setShowForm(true);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const saveEntry = (event: FormEvent) => {
+    event.preventDefault();
+    if (!draft.name.trim() || !draft.value.trim()) {
+      setError(t.nameRequired);
+      return;
+    }
+    void run(async () => {
+      await invoke(
+        editing === null ? "add" : "update",
+        editing === null ? { entry: draft } : { id: editing, entry: draft },
+      );
+      await invoke("get_config").catch(() => {});
       wipeSensitiveState();
     });
   };
 
   const remove = (entry: KeyEntry) => {
-    if (!window.confirm(`删除“${entry.name}”？此操作无法撤销。`)) return;
-    void run(async () => { await invoke("delete", { id: entry.id }); setRevealed((current) => { const next = { ...current }; delete next[entry.id]; return next; }); });
+    void run(async () => {
+      await invoke("delete", { id: entry.id });
+      setLatency((current) => {
+        const next = { ...current };
+        delete next[entry.id];
+        return next;
+      });
+    });
   };
 
-  if (loading && !vault) return <section className="keys-page"><div className="keys-state">正在打开密钥库…</div></section>;
-  if (vault?.load_failed) return <section className="keys-page"><div className="keys-state keys-danger"><h2>密钥库无法读取</h2><p>为防止覆盖原文件，当前保持锁定且禁止写入。</p>{error && <p>{error}</p>}</div></section>;
-  if (vault && !vault.unlocked) return <section className="keys-page keys-gate"><div className="keys-lock-card"><h1>密钥库已锁定</h1><p>输入主密码后才能查看条目元数据。</p><input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void authenticate(); }} placeholder="主密码" /><button onClick={() => void authenticate()} disabled={busy || !password}>{busy ? "解锁中…" : "解锁密钥库"}</button>{error && <div className="keys-inline-error" role="alert">{error}</div>}</div></section>;
+  const copyValue = async (entry: KeyEntry) => {
+    setError("");
+    try {
+      const value = await invoke<string>("get_value", { id: entry.id });
+      await navigator.clipboard.writeText(value);
+      const snapshot = value;
+      window.setTimeout(async () => {
+        try {
+          const current = await navigator.clipboard.readText();
+          if (current === snapshot) await navigator.clipboard.writeText("");
+        } catch {
+          /* ignore */
+        }
+      }, 30_000);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
 
-  const groups: { type: KeyType; title: string; hint: string }[] = [{ type: "llm", title: "🤖 大模型密钥", hint: "API 密钥与服务端点" }, { type: "secret", title: "🔑 普通密钥", hint: "账号、令牌与其他秘密" }];
-   return <section className="keys-page">
-     <header className="keys-header">
-       <div className="keys-header-actions">
-         {vault?.has_master ? (
-           <>
-             <button onClick={removeMaster} disabled={busy}>移除主密码</button>
-             <button onClick={() => void lockVault()} disabled={busy}>锁定</button>
-           </>
-         ) : (
-           <button className="primary" onClick={() => { setPassword(""); setShowMaster(true); }}>设置主密码</button>
-         )}
-         <button className="primary" onClick={() => { setEditing(null); setDraft(blankDraft()); setShowForm(true); }}>添加密钥</button>
-         <button onClick={() => void run(async () => { for (const entry of entries.filter((e) => e.type === "llm")) { try { await invoke<string>("get_value", { id: entry.id }); } catch { /* skip */ } } })}>测试速度</button>
-       </div>
-     </header>
-    {error && <div className="keys-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div>}
-    {showForm && <form className="keys-form" onSubmit={save}><div className="keys-form-head"><h2>{editing === null ? "新建密钥" : "编辑密钥"}</h2><button type="button" onClick={wipeSensitiveState}>关闭</button></div><div className="keys-form-grid"><label>名称<input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label><label>分组<select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as KeyType })}><option value="secret">私密凭据</option><option value="llm">模型服务</option></select></label><label className="wide">密钥值<input required type="password" autoComplete="off" value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} /></label><label>服务地址<input value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} /></label><label>Anthropic 地址<input value={draft.url_anthropic} onChange={(e) => setDraft({ ...draft, url_anthropic: e.target.value })} /></label><label className="wide">备注<textarea value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} /></label></div><button className="primary" disabled={busy}>{busy ? "保存中…" : "保存密钥"}</button></form>}
-     <div className="keys-columns">{groups.map((meta) => { const group = entries.filter((entry) => entry.type === meta.type).sort((a, b) => a.order - b.order); return <section className="keys-group" key={meta.type}><div className="keys-group-title"><h2>{meta.title}</h2></div>{!loading && group.length === 0 ? <div className="keys-empty">暂无密钥</div> : <div className="keys-grid">{group.map((entry) => <article className="key-card" key={entry.id}><div className="key-card-top"><div><h3>{entry.name}</h3><p>{entry.type === "llm" ? `模型: ${entry.note || "-"}` : (entry.note || "")}</p><p>{entry.url ? `来源: ${entry.url}` : ""}</p></div><div className="key-actions"><button type="button" onClick={() => remove(entry)}>删除</button><button type="button" onClick={() => void startEdit(entry)}>编辑</button></div></div>{entry.type === "secret" ? <div className="key-secret"><code>{revealed[entry.id] ?? "••••••••••••••••"}</code><button onClick={() => void reveal(entry, true)}>复制</button></div> : null}<div className="key-actions">{entry.type === "llm" ? null : <button onClick={() => void reveal(entry)}>显示</button>}{entry.type === "secret" ? <button onClick={() => void startEdit(entry)}>编辑</button> : null}{entry.type === "secret" ? <button className="danger" onClick={() => remove(entry)}>删除</button> : null}</div></article>)}</div>}</section>; })}</div>
-    {showMaster && <div className="keys-modal" role="presentation" onMouseDown={wipeSensitiveState}><div role="dialog" aria-modal="true" aria-labelledby="master-title" className="keys-popover" onMouseDown={(event) => event.stopPropagation()}><div className="keys-form-head"><h2 id="master-title">设置主密码</h2><button onClick={wipeSensitiveState}>关闭</button></div><p>新密钥库使用 scrypt 与 AES-256-GCM。</p><input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && password) void authenticate(); }} placeholder="新主密码" autoComplete="new-password" /><button className="primary" disabled={!password || busy} onClick={() => void authenticate()}>{busy ? "加密中…" : "启用加密"}</button></div></div>}
-  </section>;
+  const testSpeed = async () => {
+    const llm = entries.filter((entry) => entry.type === "llm");
+    if (!llm.length) return;
+    setTesting(true);
+    setError("");
+    try {
+      for (const entry of llm) {
+        setTestingGlyphs({ [entry.id]: matrixFrame() });
+        const ticker = window.setInterval(() => setTestingGlyphs({ [entry.id]: matrixFrame() }), 70);
+        let result: Latency;
+        try {
+          const response = await invoke<Record<string, unknown>>("test_api_connection", {
+            keyEntryId: entry.id,
+            model: entry.note || "glm-4-flash",
+          });
+          result = response.status_code === 200
+            ? {
+                ms: typeof response.elapsed_ms === "number" ? response.elapsed_ms : undefined,
+                vision: Boolean((response.vision_result as { success?: boolean } | undefined)?.success),
+              }
+            : {
+                error:
+                  response.status_code === 401
+                    ? "401"
+                    : response.status_code === 404
+                      ? "404"
+                      : String(response.error || response.status_code || "fail"),
+              };
+        } catch (reason) {
+          result = { error: errorText(reason) };
+        } finally {
+          window.clearInterval(ticker);
+        }
+        setLatency((current) => ({ ...current, [entry.id]: result }));
+        setTestingGlyphs({});
+        await waitForRender();
+      }
+    } finally {
+      setTestingGlyphs({});
+      setTesting(false);
+    }
+  };
+
+  const commitReorder = async (type: KeyType, orderedIds: number[]) => {
+    if (reordering) return;
+    const previous = entriesRef.current;
+    setEntries((current) =>
+      current.map((entry) => {
+        const index = orderedIds.indexOf(entry.id);
+        return entry.type === type && index >= 0 ? { ...entry, order: index } : entry;
+      }),
+    );
+    setError("");
+    setReordering(true);
+    try {
+      await invoke("reorder", { entryType: type, ids: orderedIds });
+    } catch (reason) {
+      setEntries(previous);
+      setError(errorText(reason));
+    } finally {
+      setReordering(false);
+    }
+  };
+
+  const beginPointerDrag = (event: PointerEvent<HTMLElement>, entry: KeyEntry) => {
+    if (reordering) return;
+    if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
+    pointerDrag.current = { id: entry.id, type: entry.type, x: event.clientX, y: event.clientY, started: false, targetId: null, insertAfter: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const movePointerDrag = (event: PointerEvent<HTMLElement>, entry: KeyEntry) => {
+    const drag = pointerDrag.current;
+    if (!drag || drag.id !== entry.id) return;
+    if (!drag.started) {
+      const dragThreshold = entry.type === "llm" ? 8 : 18;
+      if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < dragThreshold) return;
+      drag.started = true;
+      setDragging({ id: entry.id, type: entry.type });
+    }
+    event.preventDefault();
+    setDragOffset({ x: event.clientX - drag.x, y: event.clientY - drag.y });
+    const container = document.querySelector(`[data-key-grid="${drag.type}"]`);
+    if (!container) return;
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-key-id]"));
+    if (!rows.length) return;
+    let targetId: number | null = null;
+    let insertAfter = false;
+    if (drag.type === "llm") {
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const row of rows) {
+        const id = Number(row.dataset.keyId);
+        if (id === drag.id) continue;
+        const rect = row.getBoundingClientRect();
+        const isInTargetZone =
+          event.clientX >= rect.left + rect.width / 4 &&
+          event.clientX <= rect.right - rect.width / 4 &&
+          event.clientY >= rect.top + rect.height / 4 &&
+          event.clientY <= rect.bottom - rect.height / 4;
+        if (!isInTargetZone) continue;
+        const distance = Math.hypot(event.clientX - (rect.left + rect.width / 2), event.clientY - (rect.top + rect.height / 2));
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          targetId = id;
+        }
+      }
+    } else {
+      for (const row of rows) {
+        const id = Number(row.dataset.keyId);
+        if (id === drag.id) continue;
+        const rect = row.getBoundingClientRect();
+        const isInTargetZone =
+          event.clientY >= rect.top + rect.height / 4 &&
+          event.clientY <= rect.bottom - rect.height / 4;
+        if (isInTargetZone) {
+          targetId = id;
+          insertAfter = event.clientY > rect.top + rect.height / 2;
+          break;
+        }
+      }
+    }
+    drag.targetId = targetId;
+    drag.insertAfter = insertAfter;
+    setOverId(targetId);
+  };
+
+  const commitDrag = (drag: { id: number; type: KeyType; targetId: number | null; insertAfter: boolean }) => {
+    const group = entriesRef.current.filter((entry) => entry.type === drag.type).sort((a, b) => a.order - b.order);
+    const from = group.findIndex((entry) => entry.id === drag.id);
+    const target = group.findIndex((entry) => entry.id === drag.targetId);
+    if (from >= 0 && target >= 0 && drag.targetId !== drag.id) {
+      const ordered = group.map((entry) => entry.id);
+      if (drag.type === "llm") {
+        [ordered[from], ordered[target]] = [ordered[target], ordered[from]];
+      } else {
+        const [moved] = ordered.splice(from, 1);
+        let insertion = target + (drag.insertAfter ? 1 : 0);
+        if (from < insertion) insertion -= 1;
+        ordered.splice(insertion, 0, moved);
+      }
+      void commitReorder(drag.type, ordered);
+    }
+  };
+
+  const endPointerDrag = (_event: PointerEvent<HTMLElement>, _entry: KeyEntry) => {
+    const drag = pointerDrag.current;
+    if (!drag) return;
+    if (drag.started) commitDrag(drag);
+    pointerDrag.current = null;
+    setDragging(null);
+    setOverId(null);
+    setDragOffset(null);
+  };
+
+  const handleDragKeyDown = (event: KeyboardEvent<HTMLElement>, entry: KeyEntry) => {
+    const drag = pointerDrag.current;
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      if (!drag || !drag.started || drag.id !== entry.id) {
+        if (reordering) return;
+        pointerDrag.current = { id: entry.id, type: entry.type, x: 0, y: 0, started: true, targetId: null, insertAfter: false };
+        setDragging({ id: entry.id, type: entry.type });
+        setDragOffset({ x: 0, y: 0 });
+      } else {
+        const finished = drag;
+        pointerDrag.current = null;
+        setDragging(null);
+        setOverId(null);
+        setDragOffset(null);
+        commitDrag(finished);
+      }
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!drag || !drag.started || drag.id !== entry.id) {
+        if (reordering) return;
+        pointerDrag.current = { id: entry.id, type: entry.type, x: 0, y: 0, started: true, targetId: null, insertAfter: false };
+        setDragging({ id: entry.id, type: entry.type });
+        setDragOffset({ x: 0, y: 0 });
+      }
+      const activeDrag = pointerDrag.current!;
+      const group = entriesRef.current.filter((item) => item.type === activeDrag.type).sort((a, b) => a.order - b.order);
+      const from = group.findIndex((item) => item.id === activeDrag.id);
+      const next = group[from + (event.key === "ArrowDown" ? 1 : -1)];
+      if (next) {
+        activeDrag.targetId = next.id;
+        activeDrag.insertAfter = activeDrag.type === "secret" && event.key === "ArrowDown";
+        setOverId(next.id);
+        const finished = activeDrag;
+        pointerDrag.current = null;
+        setDragging(null);
+        setOverId(null);
+        setDragOffset(null);
+        commitDrag(finished);
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      pointerDrag.current = null;
+      setDragging(null);
+      setOverId(null);
+      setDragOffset(null);
+    }
+  };
+
+  const handleDragKeyUp = (_event: KeyboardEvent<HTMLElement>, _entry: KeyEntry) => {};
+
+  if (loading && !vault) {
+    return (
+      <section className="keys-page">
+        <div className="keys-state">{t.opening}</div>
+      </section>
+    );
+  }
+  if (vault?.load_failed) {
+    return (
+      <section className="keys-page">
+        <div className="keys-state keys-danger">
+          <h2>{t.loadFailTitle}</h2>
+          <p>{t.loadFailBody}</p>
+          {error && <p>{error}</p>}
+        </div>
+      </section>
+    );
+  }
+
+  if (vault && !vault.unlocked) {
+    return (
+      <section className="keys-page keys-gate">
+        <div className="keys-lock-card">
+          <h1>{vault.has_master ? t.lockedTitle : t.setMaster}</h1>
+          <p>{vault.has_master ? t.lockedBody : t.masterHint}</p>
+          <input
+            autoFocus
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void authenticate();
+            }}
+            placeholder={t.masterPh}
+          />
+          {!vault.has_master && (
+            <input
+              type="password"
+              value={password2}
+              onChange={(event) => setPassword2(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void authenticate();
+              }}
+              placeholder={t.confirmMasterPh}
+            />
+          )}
+          <button
+            onClick={() => void authenticate()}
+            disabled={busy || !password || (!vault.has_master && !password2)}
+          >
+            {busy ? (vault.has_master ? t.unlocking : t.encrypting) : vault.has_master ? t.unlock : t.enable}
+          </button>
+          {error && (
+            <div className="keys-inline-error" role="alert">
+              {error}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  const llmEntries = entries.filter((e) => e.type === "llm").sort((a, b) => a.order - b.order);
+  const secretEntries = entries.filter((e) => e.type === "secret").sort((a, b) => a.order - b.order);
+
+  return (
+    <section className="keys-page">
+      <header className="keys-header">
+        <div className="keys-header-actions">
+          {vault?.has_master ? (
+            <>
+              <button onClick={removeMaster} disabled={busy}>
+                {t.removeMaster}
+              </button>
+              <button onClick={() => void lockVault()} disabled={busy}>
+                {t.lock}
+              </button>
+            </>
+          ) : (
+            <button
+              className="primary"
+              onClick={() => {
+                setPassword("");
+                setPassword2("");
+                setShowMaster(true);
+              }}
+            >
+              {t.setMaster}
+            </button>
+          )}
+          <button className="primary" onClick={openAdd} disabled={busy}>
+            {t.add}
+          </button>
+          <button onClick={() => void testSpeed()} disabled={busy || testing || !llmEntries.length}>
+            {testing ? t.testing : t.testSpeed}
+          </button>
+        </div>
+      </header>
+
+      {error && (
+        <div className="keys-error" role="alert">
+          <span>{error}</span>
+          <button onClick={() => setError("")}>{t.close}</button>
+        </div>
+      )}
+
+      <div className="keys-columns">
+        <section className="keys-group">
+          <div className="keys-group-title">
+            <h2>{t.llmTitle}</h2>
+          </div>
+          {!loading && llmEntries.length === 0 ? (
+            <div className="keys-empty">{t.empty}</div>
+          ) : (
+            <div className="keys-grid keys-grid-llm" data-key-grid="llm">
+              {llmEntries.map((entry) => (
+                <LlmCard
+                  key={entry.id}
+                  entry={entry}
+                  latency={latency[entry.id]}
+                  testingGlyph={testingGlyphs[entry.id]}
+                  t={t}
+                  onEdit={() => void openEdit(entry)}
+                  onDelete={() => remove(entry)}
+                  isDragging={dragging?.id === entry.id}
+                  isDropTarget={overId === entry.id && dragging?.id !== entry.id}
+                  dragOffset={dragging?.id === entry.id ? dragOffset : null}
+                  onHandleKeyDown={(event) => handleDragKeyDown(event, entry)}
+                  onHandleKeyUp={(event) => handleDragKeyUp(event, entry)}
+                  onPointerDown={(event) => beginPointerDrag(event, entry)}
+                  onPointerMove={(event) => movePointerDrag(event, entry)}
+                  onPointerUp={(event) => endPointerDrag(event, entry)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="keys-group">
+          <div className="keys-group-title">
+            <h2>{t.secretTitle}</h2>
+          </div>
+          {!loading && secretEntries.length === 0 ? (
+            <div className="keys-empty">{t.empty}</div>
+          ) : (
+            <div className="keys-grid keys-grid-secret" data-key-grid="secret">
+              {secretEntries.map((entry) => (
+                <SecretRow
+                  key={entry.id}
+                  entry={entry}
+                  t={t}
+                  onCopy={() => void copyValue(entry)}
+                  onEdit={() => void openEdit(entry)}
+                  onDelete={() => remove(entry)}
+                  isDragging={dragging?.id === entry.id}
+                  isDropTarget={overId === entry.id && dragging?.id !== entry.id}
+                  dragOffset={dragging?.id === entry.id ? dragOffset : null}
+                  onHandleKeyDown={(event) => handleDragKeyDown(event, entry)}
+                  onHandleKeyUp={(event) => handleDragKeyUp(event, entry)}
+                  onPointerDown={(event) => beginPointerDrag(event, entry)}
+                  onPointerMove={(event) => movePointerDrag(event, entry)}
+                  onPointerUp={(event) => endPointerDrag(event, entry)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {showForm && (
+        <EntryDialog
+          t={t}
+          draft={draft}
+          editing={editing !== null}
+          busy={busy}
+          showValue={showValue}
+          onShowValue={setShowValue}
+          onChange={setDraft}
+          onClose={wipeSensitiveState}
+          onSubmit={saveEntry}
+        />
+      )}
+
+      {showMaster && (
+        <div className="keys-modal" role="presentation" onMouseDown={wipeSensitiveState}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="keys-popover"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="keys-form-head">
+              <h2>{t.masterTitle}</h2>
+              <button type="button" onClick={wipeSensitiveState}>
+                {t.close}
+              </button>
+            </div>
+            <p>{t.masterHint}</p>
+            <input
+              autoFocus
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder={t.masterPh}
+              autoComplete="new-password"
+            />
+            <input
+              type="password"
+              value={password2}
+              onChange={(event) => setPassword2(event.target.value)}
+              placeholder={t.confirmMasterPh}
+              autoComplete="new-password"
+            />
+            <button
+              className="primary"
+              disabled={!password || !password2 || busy}
+              onClick={() => void authenticate()}
+            >
+              {busy ? t.encrypting : t.enable}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LlmCard({
+  entry,
+  latency,
+  testingGlyph,
+  t,
+  onEdit,
+  onDelete,
+  isDragging,
+  isDropTarget,
+  dragOffset,
+  onHandleKeyDown,
+  onHandleKeyUp,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+}: {
+  entry: KeyEntry;
+  latency?: Latency;
+  testingGlyph?: string;
+  t: Texts;
+  onEdit: () => void;
+  onDelete: () => void;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  dragOffset: { x: number; y: number } | null;
+  onHandleKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  onHandleKeyUp: (event: KeyboardEvent<HTMLElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
+  onPointerMove: (event: PointerEvent<HTMLElement>) => void;
+  onPointerUp: (event: PointerEvent<HTMLElement>) => void;
+}) {
+  const vision = latency?.vision ?? isVisionModel(entry.note);
+  const latencyText = testingGlyph || (latency?.error
+    ? latency.error
+    : latency?.ms != null
+      ? `${Math.round(latency.ms)} ms`
+       : "--");
+  const latencyClass =
+    latency?.error
+      ? "is-bad"
+      : latency?.ms != null
+        ? latency.ms < 500
+          ? "is-good"
+          : latency.ms < 1000
+            ? "is-mid"
+            : "is-bad"
+        : "";
+
+  return (
+    <article
+      className={`key-card key-card-llm${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+      data-key-id={entry.id}
+      style={isDragging && dragOffset ? { transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0) scale(1.02)`, position: "relative", zIndex: 5 } : undefined}
+    >
+      <div className="key-card-top">
+        <span
+          className="key-drag-handle"
+          role="button"
+          aria-label={t.dragHandle}
+          tabIndex={0}
+          onKeyDown={onHandleKeyDown}
+          onKeyUp={onHandleKeyUp}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
+          ⠿
+        </span>
+        <h3>{entry.name}</h3>
+        <div className="key-link-actions">
+          <button type="button" className="link" onClick={onDelete}>
+            {t.delete}
+          </button>
+          <button type="button" className="link" onClick={onEdit}>
+            {t.edit}
+          </button>
+        </div>
+      </div>
+      <p>
+        {t.model}: {entry.note || "-"}
+      </p>
+      <p>
+        {t.source}: {entry.url ? shortUrl(entry.url) : "-"}
+      </p>
+       <p className={`key-latency ${testingGlyph ? "is-testing" : latencyClass}`}>
+        {t.latency}: {latencyText}
+      </p>
+      <div className="key-badges">
+        {entry.url ? <span className="badge">OpenAI</span> : null}
+        {entry.url_anthropic ? <span className="badge">Anthropic</span> : null}
+        <span className={`badge ${vision ? "is-vision" : ""}`}>
+          {vision ? t.multimodal : t.textOnly}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function SecretRow({
+  entry,
+  t,
+  onCopy,
+  onEdit,
+  onDelete,
+  isDragging,
+  isDropTarget,
+  dragOffset,
+  onHandleKeyDown,
+  onHandleKeyUp,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+}: {
+  entry: KeyEntry;
+  t: Texts;
+  onCopy: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  dragOffset: { x: number; y: number } | null;
+  onHandleKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  onHandleKeyUp: (event: KeyboardEvent<HTMLElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
+  onPointerMove: (event: PointerEvent<HTMLElement>) => void;
+  onPointerUp: (event: PointerEvent<HTMLElement>) => void;
+}) {
+  return (
+    <article
+      className={`key-row-secret${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+      data-key-id={entry.id}
+      style={isDragging && dragOffset ? { transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0) scale(1.02)`, position: "relative", zIndex: 5 } : undefined}
+    >
+      <span
+        className="key-drag-handle"
+        role="button"
+        aria-label={t.dragHandle}
+        tabIndex={0}
+        onKeyDown={onHandleKeyDown}
+        onKeyUp={onHandleKeyUp}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        ⠿
+      </span>
+      <strong className="key-row-name">{entry.name}</strong>
+      <div className="key-row-actions">
+        <button type="button" onClick={onCopy}>
+          {t.copyBtn}
+        </button>
+        <button type="button" onClick={onEdit}>
+          {t.edit}
+        </button>
+        <button type="button" className="danger" onClick={onDelete}>
+          {t.delete}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function EntryDialog({
+  t,
+  draft,
+  editing,
+  busy,
+  showValue,
+  onShowValue,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  t: Texts;
+  draft: Draft;
+  editing: boolean;
+  busy: boolean;
+  showValue: boolean;
+  onShowValue: (value: boolean) => void;
+  onChange: (draft: Draft) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  const isLlm = draft.type === "llm";
+  return (
+    <div className="keys-modal" role="presentation" onMouseDown={onClose}>
+      <form
+        className="keys-dialog"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+      >
+        <div className="keys-form-head">
+          <h2>{editing ? t.editKey : t.newKey}</h2>
+        </div>
+
+        <label>
+          {t.name}
+          <input
+            required
+            value={draft.name}
+            onChange={(e) => onChange({ ...draft, name: e.target.value })}
+            placeholder={t.name}
+          />
+        </label>
+
+        <label>
+          {t.typeLabel}
+          <select
+            value={draft.type}
+            onChange={(e) => onChange({ ...draft, type: e.target.value as KeyType })}
+          >
+            <option value="llm">{t.llmType}</option>
+            <option value="secret">{t.secretType}</option>
+          </select>
+        </label>
+
+        {isLlm && (
+          <>
+            <label>
+              {t.openaiUrl}
+              <input
+                value={draft.url}
+                onChange={(e) => onChange({ ...draft, url: e.target.value })}
+                placeholder="https://api.openai.com/v1/chat/completions"
+              />
+            </label>
+            <label>
+              {t.anthropicUrl}
+              <input
+                value={draft.url_anthropic}
+                onChange={(e) => onChange({ ...draft, url_anthropic: e.target.value })}
+                placeholder="https://api.anthropic.com/v1/messages"
+              />
+            </label>
+            <label>
+              {t.modelId}
+              <input
+                value={draft.note}
+                onChange={(e) => onChange({ ...draft, note: e.target.value })}
+                placeholder="glm-4-flash"
+              />
+            </label>
+          </>
+        )}
+
+        {!isLlm && (
+          <label>
+            {t.noteOptional}
+            <input
+              value={draft.note}
+              onChange={(e) => onChange({ ...draft, note: e.target.value })}
+              placeholder={t.note}
+            />
+          </label>
+        )}
+
+        <label>
+          {t.value}
+          <div className="keys-value-row">
+            <input
+              required
+              type={showValue ? "text" : "password"}
+              autoComplete="off"
+              value={draft.value}
+              onChange={(e) => onChange({ ...draft, value: e.target.value })}
+            />
+            <button type="button" onClick={() => onShowValue(!showValue)}>
+              {showValue ? t.hideValue : t.showValue}
+            </button>
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard.writeText(draft.value)}
+              disabled={!draft.value}
+            >
+              {t.copyBtn}
+            </button>
+          </div>
+        </label>
+
+        <div className="keys-dialog-actions">
+          <button type="button" onClick={onClose}>
+            {t.cancel}
+          </button>
+          <button type="submit" className="primary" disabled={busy}>
+            {busy ? t.saving : t.save}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }

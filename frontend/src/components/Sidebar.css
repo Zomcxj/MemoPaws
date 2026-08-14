@@ -10,7 +10,7 @@
   border-radius: 14px;
   background: var(--bg-panel);
   box-sizing: border-box;
-  transition: width 180ms ease, flex-basis 180ms ease;
+  transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1), flex-basis 220ms cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 
@@ -94,8 +94,42 @@
 .sidebar.collapsed .sidebar-item {
   justify-content: center;
   padding: 8px 0;
+  gap: 0;
+}
+
+.sidebar-label {
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  max-width: 120px;
+  transition: opacity 140ms ease 60ms, max-width 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar.collapsed .sidebar-label {
-  display: none;
+  opacity: 0;
+  max-width: 0;
+  transition: opacity 100ms ease, max-width 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-toggle img {
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.collapsed .sidebar-toggle img {
+  transform: rotate(180deg);
+}
+
+.sidebar-toggle:focus-visible,
+.sidebar-item:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar-label,
+  .sidebar-toggle img {
+    transition: none;
+  }
 }

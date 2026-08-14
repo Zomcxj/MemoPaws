@@ -32,7 +32,14 @@ memopaws-keys = { path = "../memopaws-keys" }
 memopaws-ocr = { path = "../memopaws-ocr" }
 memopaws-clipboard = { path = "../memopaws-clipboard" }
 memopaws-canvas = { path = "../memopaws-canvas" }
+arboard = "3"
 zeroize = "1"
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
