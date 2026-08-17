@@ -96,23 +96,23 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
         size: await window.outerSize(),
         fullscreen: await window.isFullscreen(),
       };
+      await window.hide();
       if (windowGeometryRef.current.fullscreen) await window.setFullscreen(false);
       const display = displays.find((item) => item.index === selectedDisplay);
       if (display) {
         await window.setPosition(new PhysicalPosition(display.x, display.y));
       }
       await window.setFullscreen(true);
-      await window.hide();
       const result = await invoke<{ image: number[]; preview: string }>("capture_screen", { displayIndex: displays.length > 1 ? selectedDisplay : undefined });
-      await window.show();
-      await window.setFullscreen(true);
       setCaptureBytes(new Uint8Array(result.image));
       setCaptureBackground(result.preview);
       setCaptureResult("");
       setOverlay(true);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await window.show();
+      if (!(await window.isFullscreen())) await window.setFullscreen(true);
     } catch (reason) {
       setError(errorText(reason));
-      setOverlay(false);
       await restoreCaptureWindow();
     }
   };
@@ -126,6 +126,10 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
       await window.setPosition(geometry.position);
       await window.setSize(geometry.size);
       if (geometry.fullscreen) await window.setFullscreen(true);
+      setOverlay(false);
+      setCaptureBytes(null);
+      setCaptureBackground("");
+      setCaptureResult("");
     } finally {
       await window.show();
       windowGeometryRef.current = null;
@@ -140,7 +144,6 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
       const result = await invoke<{ image: number[] }>("image_crop", { image: Array.from(captureBytes), x: Math.round(region.x * f), y: Math.round(region.y * f), width: Math.max(1, Math.round(region.width * f)), height: Math.max(1, Math.round(region.height * f)) });
       const bytes = new Uint8Array(result.image);
       setOriginal(bytes); setBytes(bytes, false); setOcrText(""); setTranslation("");
-      setCaptureBytes(null); setCaptureBackground(""); setCaptureResult(""); setOverlay(false);
       await restoreCaptureWindow();
     } catch (reason) { setError(errorText(reason)); } finally { setCaptureBusy(false); }
   };
@@ -241,7 +244,7 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
   useEffect(() => { if (pasteOcrRequest) contextPasteImage(); }, [pasteOcrRequest]);
   useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
 
-  const closeOverlay = async () => { setOverlay(false); setCaptureBytes(null); setCaptureBackground(""); setCaptureResult(""); await restoreCaptureWindow(); };
+  const closeOverlay = async () => { await restoreCaptureWindow(); };
 
   const mosaicStyle = mosaicDrag ? {
     left: Math.min(mosaicDrag.startX, mosaicDrag.x) * zoom,

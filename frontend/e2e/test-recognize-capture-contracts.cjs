@@ -44,8 +44,18 @@ assert.match(
 );
 assert.match(
   recognizeSource,
-  /restoreCaptureWindow = async \(\) => \{[\s\S]*?await window\.hide\(\)/,
-  "capture restore must hide the window before restoring geometry (no flicker)",
+  /const capture = async \(\) => \{[\s\S]*?await window\.hide\(\)[\s\S]*?await window\.setFullscreen\(true\)/,
+  "capture must hide the window before going fullscreen (no resize flicker)",
+);
+assert.match(
+  recognizeSource,
+  /requestAnimationFrame\(\(\) => requestAnimationFrame\(resolve\)\)/,
+  "capture must wait for the overlay to mount before showing the window",
+);
+assert.match(
+  recognizeSource,
+  /restoreCaptureWindow = async \(\) => \{[\s\S]*?await window\.hide\(\)[\s\S]*?setOverlay\(false\)/,
+  "capture restore must unmount the overlay while hidden (no shrink flicker)",
 );
 
 const overlayCss = fs.readFileSync(path.join(__dirname, "..", "src", "components", "CaptureOverlay.css"), "utf8");
