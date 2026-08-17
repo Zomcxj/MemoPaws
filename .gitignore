@@ -16,6 +16,7 @@ Cargo.lock
 package-lock.json
 crates/memopaws-tauri/gen/
 frontend/test-results/
+frontend/e2e/screenshots/
 frontend/dist/
 *.log
 *.tmp

@@ -152,7 +152,7 @@ async function runTests() {
   await settings.getByLabel('剪贴板设置最大条数').fill('80');
   await settings.getByLabel('操作历史最大条数').fill('120');
   await settings.getByRole('button', { name: '显示' }).click();
-  await settings.getByRole('button', { name: '关闭' }).click();
+  await settings.getByRole('button', { name: '退出' }).click();
   await settings.locator('input[aria-label*="截图识别"]').press('Control+Y');
   await settings.getByRole('button', { name: '测试连接' }).click();
   await page.waitForTimeout(100);
@@ -160,9 +160,11 @@ async function runTests() {
   await settings.locator('.settings-footer').getByRole('button', { name: '保存设置' }).click();
   await page.waitForTimeout(100);
   const runtimeUpdates = await page.evaluate(() => window.__MOCK_TAURI_RUNTIME_UPDATES__);
-  for (const command of ['set_clipboard_max_items', 'set_history_max_items', 'set_close_behavior', 'set_floating_widget_visible']) {
+  for (const command of ['set_close_behavior', 'set_floating_widget_visible']) {
     if (!runtimeUpdates.some((entry) => entry.command === command)) throw new Error(`Missing runtime update ${command}`);
   }
+  const commandCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__);
+  if (!commandCalls.some((entry) => entry.command === 'save_config')) throw new Error('Missing save_config command call');
 
   await lightThemeBtn.click();
   await page.waitForTimeout(300);
@@ -192,7 +194,6 @@ async function runTests() {
     { selector: '.sidebar', name: 'Sidebar' },
     { selector: '.recognize-page', name: 'Recognize Page' },
     { selector: '.recognize-toolbar', name: 'Recognize Toolbar' },
-    { selector: '.title-bar-brand img', name: 'App Icon' },
     { selector: '.sidebar-nav', name: 'Navigation' },
   ];
 

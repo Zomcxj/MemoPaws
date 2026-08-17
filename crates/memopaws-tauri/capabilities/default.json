@@ -1,5 +1,5 @@
 {
   "identifier": "default",
   "windows": ["main", "floating"],
-  "permissions": ["core:default", "core:window:allow-set-fullscreen", "core:window:allow-set-size", "shell:allow-open", "core:window:allow-set-position"]
+  "permissions": ["core:default", "core:window:allow-set-fullscreen", "core:window:allow-set-size", "core:window:allow-set-position", "core:window:allow-hide", "core:window:allow-show", "core:window:allow-minimize", "shell:allow-open"]
 }

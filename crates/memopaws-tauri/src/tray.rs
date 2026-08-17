@@ -93,9 +93,12 @@ mod tests {
             permissions,
             [
                 "core:default",
+                "core:window:allow-hide",
+                "core:window:allow-minimize",
                 "core:window:allow-set-fullscreen",
                 "core:window:allow-set-position",
                 "core:window:allow-set-size",
+                "core:window:allow-show",
                 "shell:allow-open",
             ]
         );

@@ -411,11 +411,25 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
       setDragging({ id: entry.id, type: entry.type });
     }
     event.preventDefault();
-    setDragOffset({ x: event.clientX - drag.x, y: event.clientY - drag.y });
+    const offsetX = event.clientX - drag.x;
+    const offsetY = event.clientY - drag.y;
+    setDragOffset({ x: offsetX, y: offsetY });
     const container = document.querySelector(`[data-key-grid="${drag.type}"]`);
     if (!container) return;
     const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-key-id]"));
     if (!rows.length) return;
+    const dragged = container.querySelector<HTMLElement>(`[data-key-id="${drag.id}"]`);
+    if (!dragged) return;
+    const dragRect = dragged.getBoundingClientRect();
+    const movedRect = {
+      left: dragRect.left + offsetX,
+      top: dragRect.top + offsetY,
+      right: dragRect.right + offsetX,
+      bottom: dragRect.bottom + offsetY,
+      width: dragRect.width,
+      height: dragRect.height,
+    };
+    const dragArea = dragRect.width * dragRect.height;
     let targetId: number | null = null;
     let insertAfter = false;
     if (drag.type === "llm") {
@@ -424,13 +438,13 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
         const id = Number(row.dataset.keyId);
         if (id === drag.id) continue;
         const rect = row.getBoundingClientRect();
-        const isInTargetZone =
-          event.clientX >= rect.left + rect.width / 4 &&
-          event.clientX <= rect.right - rect.width / 4 &&
-          event.clientY >= rect.top + rect.height / 4 &&
-          event.clientY <= rect.bottom - rect.height / 4;
-        if (!isInTargetZone) continue;
-        const distance = Math.hypot(event.clientX - (rect.left + rect.width / 2), event.clientY - (rect.top + rect.height / 2));
+        const overlapArea =
+          Math.max(0, Math.min(movedRect.right, rect.right) - Math.max(movedRect.left, rect.left)) *
+          Math.max(0, Math.min(movedRect.bottom, rect.bottom) - Math.max(movedRect.top, rect.top));
+        if (overlapArea <= dragArea / 2) continue;
+        const dragCenterX = movedRect.left + movedRect.width / 2;
+        const dragCenterY = movedRect.top + movedRect.height / 2;
+        const distance = Math.hypot(dragCenterX - (rect.left + rect.width / 2), dragCenterY - (rect.top + rect.height / 2));
         if (distance < nearestDistance) {
           nearestDistance = distance;
           targetId = id;
@@ -441,14 +455,13 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
         const id = Number(row.dataset.keyId);
         if (id === drag.id) continue;
         const rect = row.getBoundingClientRect();
-        const isInTargetZone =
-          event.clientY >= rect.top + rect.height / 4 &&
-          event.clientY <= rect.bottom - rect.height / 4;
-        if (isInTargetZone) {
-          targetId = id;
-          insertAfter = event.clientY > rect.top + rect.height / 2;
-          break;
-        }
+        const overlapArea =
+          Math.max(0, Math.min(movedRect.right, rect.right) - Math.max(movedRect.left, rect.left)) *
+          Math.max(0, Math.min(movedRect.bottom, rect.bottom) - Math.max(movedRect.top, rect.top));
+        if (overlapArea <= dragArea / 2) continue;
+        targetId = id;
+        insertAfter = movedRect.top + movedRect.height / 2 > rect.top + rect.height / 2;
+        break;
       }
     }
     drag.targetId = targetId;
