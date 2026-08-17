@@ -8,7 +8,7 @@ use serde_json::json;
 use zeroize::Zeroizing;
 
 const DEFAULT_ENDPOINT: &str = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
 const OCR_PROMPT: &str = "请识别这张图片中的所有文字内容，直接输出识别结果，不要添加任何解释或额外内容。保持原文的格式和换行。";
 
 #[derive(Clone)]

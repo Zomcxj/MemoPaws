@@ -121,12 +121,13 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
     if (!geometry) return;
     const window = getCurrentWindow();
     try {
+      await window.hide();
       if (await window.isFullscreen()) await window.setFullscreen(false);
       await window.setPosition(geometry.position);
       await window.setSize(geometry.size);
-      await window.show();
-    } finally {
       if (geometry.fullscreen) await window.setFullscreen(true);
+    } finally {
+      await window.show();
       windowGeometryRef.current = null;
     }
   };

@@ -37,6 +37,17 @@ assert.match(
   "capture restore must detect the current fullscreen state",
 );
 
+assert.match(
+  keysSource,
+  /name !== "settings_api_key"/,
+  "KeysPage must hide the internal settings key entry",
+);
+assert.match(
+  recognizeSource,
+  /restoreCaptureWindow = async \(\) => \{[\s\S]*?await window\.hide\(\)/,
+  "capture restore must hide the window before restoring geometry (no flicker)",
+);
+
 const overlayCss = fs.readFileSync(path.join(__dirname, "..", "src", "components", "CaptureOverlay.css"), "utf8");
 const overlayBlock = overlayCss.match(/\.capture-overlay \{[\s\S]*?\}/);
 assert.ok(overlayBlock, "capture-overlay rule must exist");

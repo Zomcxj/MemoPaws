@@ -627,7 +627,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
     );
   }
 
-  const llmEntries = entries.filter((e) => e.type === "llm").sort((a, b) => a.order - b.order);
+  const llmEntries = entries.filter((e) => e.type === "llm" && e.name !== "settings_api_key").sort((a, b) => a.order - b.order);
   const secretEntries = entries.filter((e) => e.type === "secret").sort((a, b) => a.order - b.order);
 
   return (

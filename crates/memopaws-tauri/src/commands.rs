@@ -727,7 +727,7 @@ fn multimodal_probe_image() -> &'static [u8] {
 }
 
 // Bounded so the UI never appears frozen: reachability probe plus a shorter vision probe.
-const API_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+const API_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
 // The probe reuses the same OCR path as real image recognition, so a working
 // AI key/vision model is verified through the exact endpoint the app uses.
