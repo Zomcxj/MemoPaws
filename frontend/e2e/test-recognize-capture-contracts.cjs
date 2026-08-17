@@ -73,9 +73,12 @@ assert.match(
 );
 
 const panelCss = overlayCss.match(/\.capture-overlay-panel \{[\s\S]*?\}/);
-assert.ok(panelCss && /right: 16px/.test(panelCss[0]), "results must render in a right-side panel like the Python version");
-assert.match(overlayCss, /@keyframes capture-glow[\s\S]*?\}/, "selection must have a glow animation");
-assert.match(overlayCss, /\.capture-overlay-rect \{[\s\S]*?animation: capture-glow/, "the selection rect must run the glow animation");
+assert.ok(panelCss && !/right: 16px/.test(panelCss[0]) && /position: absolute/.test(panelCss[0]), "the panel position must be driven by the selection");
+const panelSource = overlaySource.match(/const panelStyle =[\s\S]*?return \{[\s\S]*?\};/);
+assert.ok(
+  panelSource && /preferredLeft = rectStyle\.left \+ rectStyle\.width \+ GAP/.test(panelSource[0]),
+  "the result panel must hug the right edge of the selection like the Python version",
+);
 assert.match(
   overlaySource,
   /onClearResult\?:\s*\(\) => void/,
@@ -86,5 +89,13 @@ assert.match(
   /onClearResult=\{\(\) => setCaptureResult\(""\)\}/,
   "RecognizePage must wire the result panel clear button",
 );
+
+const recognizeCss = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "RecognizePage.css"), "utf8");
+assert.match(
+  recognizeCss,
+  /\.recognize-panel\.result-panel \{[\s\S]*?animation: result-glow/,
+  "the OCR/translate panels must run the glow animation",
+);
+assert.match(recognizeCss, /@keyframes result-glow/, "the result-glow keyframes must exist");
 
 console.log("settings key promotion and capture overlay contracts passed");

@@ -375,6 +375,18 @@ export function CaptureOverlay({
     return { left, top };
   })();
 
+  const panelStyle = (() => {
+    if (!rectStyle) return undefined;
+    const PANEL_W = 320;
+    const GAP = 12;
+    const preferredLeft = rectStyle.left + rectStyle.width + GAP;
+    const left = preferredLeft + PANEL_W > window.innerWidth
+      ? Math.max(4, rectStyle.left - PANEL_W - GAP)
+      : preferredLeft;
+    const top = Math.max(4, Math.min(rectStyle.top, window.innerHeight - 200));
+    return { left, top };
+  })();
+
   const act = (handler?: (region: RegionCss, scale: number) => void) => () => {
     if (!selection || !handler) return;
     handler(selection.region, selection.scale);
@@ -403,7 +415,7 @@ export function CaptureOverlay({
       </div>
 
       {(busy || result) && (
-        <aside className="capture-overlay-panel" onMouseDown={(event) => event.stopPropagation()}>
+        <aside className="capture-overlay-panel" style={panelStyle} onMouseDown={(event) => event.stopPropagation()}>
           <div className="capture-overlay-panel-head">
             <span>{busy ? text.processing : text.panelTitle}</span>
             {!busy && result && onClearResult && (

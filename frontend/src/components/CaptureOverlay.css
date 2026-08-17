@@ -206,9 +206,6 @@
 .capture-overlay-panel {
   position: absolute;
   z-index: 6;
-  top: 50%;
-  right: 16px;
-  transform: translateY(-50%);
   width: min(320px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   display: flex;

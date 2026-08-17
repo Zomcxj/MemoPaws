@@ -195,6 +195,21 @@
   padding: 8px 10px;
 }
 
+.recognize-panel.result-panel {
+  animation: result-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes result-glow {
+  0%, 100% {
+    border-color: var(--border-subtle);
+    box-shadow: 0 0 0 rgba(77, 163, 255, 0);
+  }
+  50% {
+    border-color: rgba(77, 163, 255, 0.55);
+    box-shadow: 0 0 10px rgba(77, 163, 255, 0.3);
+  }
+}
+
 .result-heading,
 .ocr-controls {
   display: flex;
