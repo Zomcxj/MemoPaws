@@ -664,6 +664,16 @@ fn promote_key_to_settings(vault: &mut KeyVault, entry_id: u64) -> Result<(), St
 
 #[tauri::command]
 pub fn set_settings_key(entry_id: u64, state: tauri::State<'_, KeyVaultState>) -> Result<(), String> {
+    let (url, note) = {
+        let vault = lock_recover!(state);
+        let entry = vault.list().into_iter().find(|entry| entry.id == entry_id).ok_or_else(|| "key entry not found".to_string())?;
+        (entry.url.clone(), entry.note.clone())
+    };
+    // Keep the settings page in sync so its API URL and model reflect the promoted key.
+    let mut config = memopaws_config::config::AppConfig::load().map_err(|error| error.to_string())?;
+    if !url.trim().is_empty() { config.api_url = Some(url); }
+    if !note.trim().is_empty() { config.api_model = Some(note); }
+    config.save().map_err(|error| error.to_string())?;
     let mut vault = lock_recover!(state);
     promote_key_to_settings(&mut vault, entry_id)
 }

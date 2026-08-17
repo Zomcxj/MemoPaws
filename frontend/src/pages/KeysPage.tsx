@@ -76,6 +76,8 @@ const copy = {
     textOnly: "文本",
     delete: "删除",
     edit: "编辑",
+    setAsSettings: "设为密钥",
+    setAsSettingsDone: "已设为设置密钥",
     copyBtn: "复制",
     showValue: "显示",
     hideValue: "隐藏",
@@ -133,6 +135,8 @@ const copy = {
     textOnly: "Text",
     delete: "Delete",
     edit: "Edit",
+    setAsSettings: "Set as key",
+    setAsSettingsDone: "Set as settings key",
     copyBtn: "Copy",
     showValue: "Show",
     hideValue: "Hide",
@@ -167,6 +171,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
   const [latency, setLatency] = useState<Record<number, Latency>>({});
   const [testingGlyphs, setTestingGlyphs] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [reordering, setReordering] = useState(false);
   const [dragging, setDragging] = useState<{ id: number; type: KeyType } | null>(null);
   const [overId, setOverId] = useState<number | null>(null);
@@ -308,6 +313,14 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
         delete next[entry.id];
         return next;
       });
+    });
+  };
+
+  const setSettings = (entry: KeyEntry) => {
+    void run(async () => {
+      await invoke("set_settings_key", { entryId: entry.id });
+      setNotice(`${t.setAsSettingsDone}：${entry.name}`);
+      window.setTimeout(() => setNotice(""), 3000);
     });
   };
 
@@ -658,6 +671,8 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
         </div>
       )}
 
+      {notice && <div className="keys-notice" role="status">{notice}</div>}
+
       <div className="keys-columns">
         <section className="keys-group">
           <div className="keys-group-title">
@@ -676,6 +691,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
                   t={t}
                   onEdit={() => void openEdit(entry)}
                   onDelete={() => remove(entry)}
+                  onSetSettings={() => setSettings(entry)}
                   isDragging={dragging?.id === entry.id}
                   isDropTarget={overId === entry.id && dragging?.id !== entry.id}
                   dragOffset={dragging?.id === entry.id ? dragOffset : null}
@@ -786,6 +802,7 @@ function LlmCard({
   t,
   onEdit,
   onDelete,
+  onSetSettings,
   isDragging,
   isDropTarget,
   dragOffset,
@@ -801,6 +818,7 @@ function LlmCard({
   t: Texts;
   onEdit: () => void;
   onDelete: () => void;
+  onSetSettings: () => void;
   isDragging: boolean;
   isDropTarget: boolean;
   dragOffset: { x: number; y: number } | null;
@@ -850,6 +868,11 @@ function LlmCard({
         </span>
         <h3>{entry.name}</h3>
         <div className="key-link-actions">
+          {entry.name !== "settings_api_key" && (
+            <button type="button" className="link" onClick={onSetSettings}>
+              {t.setAsSettings}
+            </button>
+          )}
           <button type="button" className="link" onClick={onDelete}>
             {t.delete}
           </button>

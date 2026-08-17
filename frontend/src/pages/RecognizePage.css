@@ -153,14 +153,6 @@
   background: var(--bg-panel);
 }
 
-.recognize-notice {
-  padding: 8px 10px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  color: var(--accent);
-  background: var(--bg-panel);
-}
-
 .recognize-workspace {
   min-height: 0;
   flex: 1;

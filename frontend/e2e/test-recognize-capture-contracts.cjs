@@ -5,28 +5,36 @@ const path = require("node:path");
 const recognizeSource = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "RecognizePage.tsx"), "utf8");
 assert.match(
   recognizeSource,
-  /llmKeys\.map\(\(entry\) => <option key=\{entry\.id\} value=\{entry\.id\}>\{entry\.name\}<\/option>\)/,
-  "RecognizePage must expose an LLM key picker listing every LLM key by name",
+  /keyEntryId: null/,
+  "RecognizePage must always use the settings key (null entry id)",
+);
+
+const keysSource = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "KeysPage.tsx"), "utf8");
+assert.match(
+  keysSource,
+  /invoke\("set_settings_key", \{ entryId: entry\.id \}\)/,
+  "KeysPage must promote a selected key into the settings key",
+);
+assert.match(
+  keysSource,
+  /onSetSettings/,
+  "LlmCard must expose a set-as-settings action",
+);
+assert.match(
+  keysSource,
+  /t\.setAsSettings/,
+  "the set-as-settings action must be labelled",
+);
+
+assert.match(
+  recognizeSource,
+  /setFullscreen\(true\)/,
+  "capture must go fullscreen so the overlay covers the whole display",
 );
 assert.match(
   recognizeSource,
-  /<option value=\{0\}>\{t\.settingsKey\}<\/option>/,
-  "the key picker must lead with a settings-key option (value 0)",
-);
-assert.match(
-  recognizeSource,
-  /keyEntryId: keyId === 0 \? null : keyId/,
-  "settings mode must pass null so the backend uses the saved settings config",
-);
-assert.match(
-  recognizeSource,
-  /invoke\("set_settings_key", \{ entryId: keyId \}\)/,
-  "selecting a key must offer promoting it into the settings config",
-);
-assert.match(
-  recognizeSource,
-  /<select className="tool-button" aria-label=\{t\.key\}/,
-  "the key picker must be a toolbar select labelled by the key text",
+  /window\.isFullscreen\(\)/,
+  "capture restore must detect the current fullscreen state",
 );
 
 const overlayCss = fs.readFileSync(path.join(__dirname, "..", "src", "components", "CaptureOverlay.css"), "utf8");
@@ -36,5 +44,10 @@ assert.ok(
   !/rgba\(0, 0, 0, 0\.55\)/.test(overlayBlock[0]),
   "capture overlay must not dim the whole screen with a dark glass mask",
 );
+assert.match(
+  overlayBlock[0],
+  /background: #000/,
+  "capture overlay must be opaque so the app UI never shows through",
+);
 
-console.log("recognize key picker and capture overlay contracts passed");
+console.log("settings key promotion and capture overlay contracts passed");

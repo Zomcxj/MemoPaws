@@ -75,6 +75,15 @@
   background: var(--bg-panel);
 }
 
+.keys-notice {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: var(--bg-panel);
+}
+
 .keys-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
