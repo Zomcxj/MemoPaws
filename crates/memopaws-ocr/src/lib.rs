@@ -86,10 +86,15 @@ pub enum OcrError {
     Custom(String),
 }
 
+#[derive(Debug)]
 pub struct Client { config: ApiConfig, http: reqwest::Client }
 
 impl Client {
     pub fn new(config: ApiConfig) -> Self { Self::with_timeout(config, DEFAULT_TIMEOUT).expect("static timeout is valid") }
+
+    pub fn endpoint(&self) -> String { self.config.endpoint() }
+
+    pub fn model(&self) -> &str { &self.config.model }
 
     pub fn with_timeout(config: ApiConfig, timeout: Duration) -> Result<Self, OcrError> {
         let http = reqwest::Client::builder().no_proxy().timeout(timeout).build().map_err(|_| OcrError::Request)?;

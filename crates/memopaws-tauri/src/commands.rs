@@ -612,15 +612,60 @@ pub fn reorder(entry_type: String, ids: Vec<u64>, state: tauri::State<'_, KeyVau
 #[tauri::command]
 pub fn get_value(id: u64, state: tauri::State<'_, KeyVaultState>) -> Result<String, String> { with_vault(state, |vault| vault.get_value(id)) }
 
-fn ai_client(state: tauri::State<'_, KeyVaultState>, key_entry_id: u64, model: Option<String>) -> Result<Client, String> {
-    let (entry, key) = {
+fn ai_client(state: tauri::State<'_, KeyVaultState>, key_entry_id: Option<u64>, model: Option<String>) -> Result<Client, String> {
+    let picked = {
         let vault = lock_recover!(state);
-        let entry = vault.list().into_iter().find(|entry| entry.id == key_entry_id).ok_or_else(|| "key entry not found".to_string())?;
-        if entry.entry_type != "llm" { return Err("selected key entry is not an LLM key".into()); }
-        let key = Zeroizing::new(vault.get_value(key_entry_id).map_err(|error| error.to_string())?);
-        (entry, key)
+        let entries = vault.list();
+        let entry = match key_entry_id.filter(|id| *id != 0) {
+            Some(id) => Some(entries.into_iter().find(|entry| entry.id == id).ok_or_else(|| "key entry not found".to_string())?),
+            None => entries.into_iter().find(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm"),
+        };
+        match entry {
+            Some(entry) => {
+                if entry.entry_type != "llm" { return Err("selected key entry is not an LLM key".into()); }
+                let key = Zeroizing::new(vault.get_value(entry.id).map_err(|error| error.to_string())?);
+                Some((entry, key))
+            }
+            None => None,
+        }
     };
-    resolve_ai_config(entry, key, model).map(Client::new)
+    match picked {
+        Some((entry, key)) => resolve_ai_config(entry, key, model).map(Client::new),
+        // Settings mode without a vault entry: fall back to the live settings
+        // config so saved API settings are used immediately.
+        None => {
+            let config = memopaws_config::config::AppConfig::load().map_err(|error| error.to_string())?;
+            settings_client_from(&config, model)
+        }
+    }
+}
+
+fn settings_client_from(config: &memopaws_config::config::AppConfig, model: Option<String>) -> Result<Client, String> {
+    let key = config.api_key.clone().unwrap_or_default();
+    if key.trim().is_empty() { return Err("API key is required".into()); }
+    let model = model.filter(|model| !model.trim().is_empty())
+        .or_else(|| config.api_model.clone())
+        .unwrap_or_else(|| "glm-4-flash".to_string());
+    Ok(Client::new(ApiConfig::new(config.api_url.clone().unwrap_or_default(), model, key)))
+}
+
+fn promote_key_to_settings(vault: &mut KeyVault, entry_id: u64) -> Result<(), String> {
+    let entry = vault.list().into_iter().find(|entry| entry.id == entry_id).ok_or_else(|| "key entry not found".to_string())?;
+    if entry.entry_type != "llm" { return Err("selected key entry is not an LLM key".to_string()); }
+    let value = vault.get_value(entry.id).map_err(|error| error.to_string())?;
+    let url = entry.url.clone();
+    let note = if entry.note.trim().is_empty() { "glm-4-flash".to_string() } else { entry.note.trim().to_string() };
+    let input = || KeyEntryInput { name: "settings_api_key".into(), entry_type: "llm".into(), value: value.clone(), url: url.clone(), url_anthropic: String::new(), note: note.clone() };
+    let existing = vault.list().into_iter().find(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm");
+    if let Some(entry) = existing { vault.update(entry.id, input()).map_err(|_| "API key could not be stored securely".to_string())?; }
+    else { vault.add(input()).map_err(|_| "API key could not be stored securely".to_string())?; }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_settings_key(entry_id: u64, state: tauri::State<'_, KeyVaultState>) -> Result<(), String> {
+    let mut vault = lock_recover!(state);
+    promote_key_to_settings(&mut vault, entry_id)
 }
 
 fn resolve_ai_config(entry: KeyEntry, key: Zeroizing<String>, requested_model: Option<String>) -> Result<ApiConfig, String> {
@@ -802,14 +847,14 @@ fn history_mut<T>(state: tauri::State<'_, HistoryState>, operation: impl FnOnce(
 }
 
 #[tauri::command]
-pub async fn ai_ocr(image: Vec<u8>, key_entry_id: u64, model: Option<String>, vault: tauri::State<'_, KeyVaultState>, history: tauri::State<'_, HistoryState>) -> Result<OcrResult, String> {
+pub async fn ai_ocr(image: Vec<u8>, key_entry_id: Option<u64>, model: Option<String>, vault: tauri::State<'_, KeyVaultState>, history: tauri::State<'_, HistoryState>) -> Result<OcrResult, String> {
     let result = ai_client(vault, key_entry_id, model)?.ocr(&image).await.map_err(|error| safe_ai_command_error(&error.to_string()))?;
     history_mut(history, |manager| manager.add_success("ocr", &result.text, Some(&result.text), None))?;
     Ok(result)
 }
 
 #[tauri::command]
-pub async fn ai_translate(text: String, target: Language, source: Option<Language>, key_entry_id: u64, model: Option<String>, vault: tauri::State<'_, KeyVaultState>, history: tauri::State<'_, HistoryState>) -> Result<TranslateResult, String> {
+pub async fn ai_translate(text: String, target: Language, source: Option<Language>, key_entry_id: Option<u64>, model: Option<String>, vault: tauri::State<'_, KeyVaultState>, history: tauri::State<'_, HistoryState>) -> Result<TranslateResult, String> {
     if text.len() > 100_000 { return Err("translation input is too large".into()); }
     let result = ai_client(vault, key_entry_id, model)?.translate(&text, target, source).await.map_err(|error| safe_ai_command_error(&error.to_string()))?;
     history_mut(history, |manager| manager.add_success("translate", &result.text, Some(&text), Some(&result.text)))?;
@@ -1370,6 +1415,57 @@ mod tests {
 
         let boundary = memopaws_config::config::TextReplacement { abbr: "a".repeat(64), replacement: "x".into() };
         assert!(super::validate_text_replacements(&[boundary]).is_ok());
+    }
+
+    #[test]
+    fn settings_client_uses_the_saved_config_and_redacts_the_secret() {
+        let mut config = memopaws_config::config::AppConfig::default();
+        config.api_key = Some("super-secret-key".into());
+        config.api_url = Some("https://settings.example.test/v1".into());
+        config.api_model = Some("vision-model".into());
+
+        let client = super::settings_client_from(&config, None).unwrap();
+
+        assert_eq!(client.endpoint(), "https://settings.example.test/v1/chat/completions");
+        assert_eq!(client.model(), "vision-model");
+        assert!(!format!("{client:?}").contains("super-secret-key"));
+    }
+
+    #[test]
+    fn settings_client_requires_a_key() {
+        let config = memopaws_config::config::AppConfig::default();
+        let error = super::settings_client_from(&config, None).unwrap_err();
+        assert_eq!(error, "API key is required");
+    }
+
+    #[test]
+    fn promoting_a_key_to_settings_replaces_the_vault_entry() {
+        let path = std::env::temp_dir().join(format!(
+            "memopaws-promote-{}.json",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        let mut vault = KeyVault::load(&path).unwrap();
+        let added = vault.add(KeyEntryInput {
+            name: "zai".into(),
+            entry_type: "llm".into(),
+            value: "zai-secret".into(),
+            url: "https://open.bigmodel.cn/api/paas/v4/chat/completions".into(),
+            url_anthropic: String::new(),
+            note: "glm-4v-flash".into(),
+        }).unwrap();
+
+        super::promote_key_to_settings(&mut vault, added.id).unwrap();
+
+        let entries = vault.list();
+        assert_eq!(entries.len(), 2);
+        let settings = entries.iter().find(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm").unwrap();
+        assert_eq!(vault.get_value(settings.id).unwrap(), "zai-secret");
+        assert_eq!(settings.url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+        assert_eq!(settings.note, "glm-4v-flash");
+
+        super::promote_key_to_settings(&mut vault, added.id).unwrap();
+        assert_eq!(vault.list().len(), 2);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

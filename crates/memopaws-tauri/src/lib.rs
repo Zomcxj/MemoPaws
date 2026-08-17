@@ -13,7 +13,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use commands::{
     get_config, get_theme, memo_create, memo_delete, memo_get, memo_list, memo_render,
     memo_search, memo_update, set_theme, set_language, save_config, status, unlock, lock, set_master, remove_master,
-    list, key_list, add, update, delete, reorder, get_value, ai_ocr, ai_translate,
+    list, key_list, add, update, delete, reorder, get_value, ai_ocr, ai_translate, set_settings_key,
     history_list, history_delete, history_clear,
     clipboard_list, clipboard_delete, clipboard_clear, clipboard_get_image, clipboard_set_locked, clipboard_update_text, clipboard_delete_many, clipboard_paste_image, global_search,
     capture_list, capture_get_image, capture_delete, capture_screen,
@@ -158,6 +158,7 @@ pub fn run() {
             set_history_max_items,
             ai_ocr,
             ai_translate,
+            set_settings_key,
             history_list,
             history_delete,
             history_clear,

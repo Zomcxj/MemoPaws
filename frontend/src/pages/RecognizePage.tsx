@@ -6,7 +6,7 @@ import { CaptureOverlay, type RegionCss } from "../components/CaptureOverlay";
 import "./RecognizePage.css";
 
 type OcrLanguage = "zh" | "en" | "ja" | "ko" | "fr" | "de" | "es" | "ru";
-interface KeyEntry { id: number; type: string }
+interface KeyEntry { id: number; name: string; type: string }
 interface HistoryRecord { time: string; type: string; text: string; ocr_text?: string; translate_text?: string }
 interface TextResult { text: string }
 interface DisplayInfo { index: number; name: string; x: number; y: number; width: number; height: number; is_primary: boolean }
@@ -18,8 +18,8 @@ const languages: { value: OcrLanguage; label: string }[] = [
   { value: "es", label: "Español" }, { value: "ru", label: "Русский" },
 ];
 const copy = {
-  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", mosaicBlock: "马赛克块大小" },
-  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", mosaicBlock: "Mosaic block size" },
+  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", key: "识别密钥", settingsKey: "设置密钥", setSettingsKey: "设为设置密钥", setSettingsKeyDone: "已替换设置中的密钥", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", mosaicBlock: "马赛克块大小" },
+  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", key: "OCR Key", settingsKey: "Settings key", setSettingsKey: "Use as settings key", setSettingsKeyDone: "Settings key replaced", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", mosaicBlock: "Mosaic block size" },
 } as const;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
@@ -28,7 +28,8 @@ interface ContextMenuState { x: number; y: number }
 
 export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { language?: Lang; pasteOcrRequest?: number }) {
   const t = copy[language];
-  const [keyId, setKeyId] = useState<number | "">("");
+  const [keyId, setKeyId] = useState<number>(0);
+  const [llmKeys, setLlmKeys] = useState<KeyEntry[]>([]);
   const [image, setImage] = useState<Uint8Array | null>(null);
   const [preview, setPreview] = useState("");
   const [original, setOriginal] = useState<Uint8Array | null>(null);
@@ -38,6 +39,7 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
   const [target, setTarget] = useState<OcrLanguage>("en");
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedTranslation, setCopiedTranslation] = useState(false);
@@ -75,7 +77,7 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
   };
   const importImage = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); };
   const dropImage = (event: DragEvent<HTMLElement>) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void importFile(file); };
-  const config = () => { if (keyId === "") throw new Error(t.needKey); return { keyEntryId: keyId }; };
+  const config = () => ({ keyEntryId: keyId === 0 ? null : keyId });
   const run = async (operation: () => Promise<void>) => { setLoading(true); setError(""); try { await operation(); } catch (reason) { setError(errorText(reason)); } finally { setLoading(false); } };
   const recognize = () => void run(async () => { if (!image) throw new Error(t.needImage); const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() }); setOcrText(result.text); setTranslation(""); });
   const translate = () => void run(async () => { if (!ocrText.trim()) throw new Error(t.needText); const result = await invoke<TextResult>("ai_translate", { text: ocrText, target, source, ...config() }); setTranslation(result.text); });
@@ -236,7 +238,7 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
     setError(t.historyNoImage);
   };
 
-  useEffect(() => { let active = true; Promise.all([invoke<KeyEntry[]>("key_list"), invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([keys, records, disp]) => { if (active) { setKeyId(keys.find((entry) => entry.type === "llm")?.id ?? ""); setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
+  useEffect(() => { let active = true; Promise.all([invoke<KeyEntry[]>("key_list"), invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([keys, records, disp]) => { if (active) { setLlmKeys(keys.filter((entry) => entry.type === "llm")); setKeyId(keys.find((entry) => entry.type === "llm")?.id ?? 0); setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
   useEffect(() => { const captureEvent = () => captureRef.current(); const fitEvent = () => setZoom(1); const recognizeTextEvent = (event: Event) => { const text = (event as CustomEvent<{ text?: unknown }>).detail?.text; if (typeof text === "string") { setOcrText(text); setTranslation(""); setError(""); setCopied(false); } }; const recognizeImageEvent = (event: Event) => { const bytes = (event as CustomEvent<{ image?: unknown }>).detail?.image; if (!Array.isArray(bytes) || !bytes.every((byte) => typeof byte === "number")) return; setOriginal(new Uint8Array(bytes)); setBytes(new Uint8Array(bytes), false); setOcrText(""); setTranslation(""); setError(""); }; window.addEventListener("memopaws-capture", captureEvent); window.addEventListener("canvas_fit", fitEvent); window.addEventListener("recognize-text", recognizeTextEvent); window.addEventListener("recognize-image", recognizeImageEvent); return () => { window.removeEventListener("memopaws-capture", captureEvent); window.removeEventListener("canvas_fit", fitEvent); window.removeEventListener("recognize-text", recognizeTextEvent); window.removeEventListener("recognize-image", recognizeImageEvent); }; }, []);
   useEffect(() => { if (pasteOcrRequest) contextPasteImage(); }, [pasteOcrRequest]);
   useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
@@ -255,6 +257,8 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
       <label className="tool-button"><img src="/assets/icons/import.svg" alt="" />{t.import}<input type="file" accept="image/*" onChange={importImage} /></label>
       <button className="tool-button" onClick={() => void capture()}><img src="/assets/icons/capture.svg" alt="" />{t.capture}</button>
       {displays.length > 1 && <select className="tool-button" aria-label={t.display} value={selectedDisplay} onChange={(event) => setSelectedDisplay(Number(event.target.value))}>{displays.map((d) => <option key={d.index} value={d.index}>{d.name}{d.is_primary ? " (P)" : ""}</option>)}</select>}
+      {llmKeys.length > 1 && <select className="tool-button" aria-label={t.key} value={keyId} onChange={(event) => setKeyId(Number(event.target.value))}><option value={0}>{t.settingsKey}</option>{llmKeys.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select>}
+      {keyId > 0 && <button className="tool-button" onClick={() => { invoke("set_settings_key", { entryId: keyId }).then(() => { setKeyId(0); setNotice(t.setSettingsKeyDone); window.setTimeout(() => setNotice(""), 3000); }).catch((reason) => setError(errorText(reason))); }}>{t.setSettingsKey}</button>}
       <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("gray")}>{t.gray}</button>
       <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("binary")}>{t.binary}</button>
       <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("mosaic")}>{t.mosaic}</button>
@@ -264,6 +268,7 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
       <button className="tool-button" disabled={!original} onClick={reset}>{t.reset}</button><button className="tool-button" disabled={!image} onClick={clear}>{t.clear}</button><button className="tool-button" disabled={!image} onClick={exportImage}>{t.save}</button>
     </div><button className="recognize-primary" disabled={!image || loading} onClick={onePunch}>{loading ? t.processing : t.punch}</button></header>
     {error && <div className="recognize-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>{t.close}</button></div>}
+    {notice && <div className="recognize-notice" role="status">{notice}</div>}
     <div className="recognize-workspace">
       <div className="recognize-left">
         <article className="recognize-panel image-panel" onContextMenu={onContextMenu}>
@@ -313,8 +318,8 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
       hint={t.overlay}
       onConfirm={(region, scale) => void captureRegion(region, scale)}
       onCancel={() => void closeOverlay()}
-      onRecognize={keyId !== "" ? overlayRecognize : undefined}
-      onTranslate={keyId !== "" ? overlayTranslate : undefined}
+      onRecognize={overlayRecognize}
+      onTranslate={overlayTranslate}
       onCopyImage={overlayCopyImage}
        onSaveImage={overlaySaveImage}
        result={captureResult}
