@@ -322,6 +322,7 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
        onSaveImage={overlaySaveImage}
        result={captureResult}
        busy={captureBusy}
+       onClearResult={() => setCaptureResult("")}
        labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX" }}
     />}
   </section>;

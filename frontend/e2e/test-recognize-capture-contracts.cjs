@@ -59,6 +59,7 @@ assert.match(
 );
 
 const overlayCss = fs.readFileSync(path.join(__dirname, "..", "src", "components", "CaptureOverlay.css"), "utf8");
+const overlaySource = fs.readFileSync(path.join(__dirname, "..", "src", "components", "CaptureOverlay.tsx"), "utf8");
 const overlayBlock = overlayCss.match(/\.capture-overlay \{[\s\S]*?\}/);
 assert.ok(overlayBlock, "capture-overlay rule must exist");
 assert.ok(
@@ -69,6 +70,21 @@ assert.match(
   overlayBlock[0],
   /background: #000/,
   "capture overlay must be opaque so the app UI never shows through",
+);
+
+const panelCss = overlayCss.match(/\.capture-overlay-panel \{[\s\S]*?\}/);
+assert.ok(panelCss && /right: 16px/.test(panelCss[0]), "results must render in a right-side panel like the Python version");
+assert.match(overlayCss, /@keyframes capture-glow[\s\S]*?\}/, "selection must have a glow animation");
+assert.match(overlayCss, /\.capture-overlay-rect \{[\s\S]*?animation: capture-glow/, "the selection rect must run the glow animation");
+assert.match(
+  overlaySource,
+  /onClearResult\?:\s*\(\) => void/,
+  "the result panel must support a clear action",
+);
+assert.match(
+  recognizeSource,
+  /onClearResult=\{\(\) => setCaptureResult\(""\)\}/,
+  "RecognizePage must wire the result panel clear button",
 );
 
 console.log("settings key promotion and capture overlay contracts passed");

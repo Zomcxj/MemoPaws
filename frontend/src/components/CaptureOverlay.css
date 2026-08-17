@@ -38,6 +38,16 @@
   background: rgba(77, 163, 255, 0.12);
   pointer-events: auto;
   cursor: move;
+  animation: capture-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes capture-glow {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(77, 163, 255, 0.35), inset 0 0 6px rgba(77, 163, 255, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(77, 163, 255, 0.75), inset 0 0 10px rgba(77, 163, 255, 0.18);
+  }
 }
 
 .capture-overlay-handle {
@@ -50,6 +60,12 @@
   border: 1px solid #fff;
   border-radius: 0;
   background: #4da3ff;
+  animation: capture-handle-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes capture-handle-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(77, 163, 255, 0.5); }
+  50% { box-shadow: 0 0 10px rgba(77, 163, 255, 0.95); }
 }
 
 .capture-overlay-handle--n,
@@ -185,6 +201,61 @@
 .capture-overlay-actions {
   max-width: calc(100vw - 24px);
   box-sizing: border-box;
+}
+
+.capture-overlay-panel {
+  position: absolute;
+  z-index: 6;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  width: min(320px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(77, 163, 255, 0.5);
+  border-radius: 10px;
+  background: rgba(20, 20, 20, 0.94);
+  color: #fff;
+  box-shadow: 0 0 24px rgba(77, 163, 255, 0.35);
+  cursor: default;
+}
+
+.capture-overlay-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.capture-overlay-panel-head button {
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.capture-overlay-panel-head button:hover {
+  color: #fff;
+}
+
+.capture-overlay-panel-body {
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font: 12px/1.6 inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
+  min-height: 0;
 }
 
 .capture-overlay-bar button:hover {

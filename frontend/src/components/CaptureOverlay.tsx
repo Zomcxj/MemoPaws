@@ -15,6 +15,8 @@ export interface CaptureLabels {
   cancel: string;
   copied: string;
   colorHint: string;
+  processing: string;
+  panelTitle: string;
 }
 
 interface Props {
@@ -26,6 +28,7 @@ interface Props {
   onTranslate?: (region: RegionCss, scale: number) => void;
   onCopyImage?: (region: RegionCss, scale: number) => void;
   onSaveImage?: (region: RegionCss, scale: number) => void;
+  onClearResult?: () => void;
   result?: string;
   busy?: boolean;
   labels?: Partial<CaptureLabels>;
@@ -47,6 +50,8 @@ const DEFAULT_LABELS: CaptureLabels = {
   cancel: "Cancel",
   copied: "Copied",
   colorHint: "Press C to copy HEX",
+  processing: "Working…",
+  panelTitle: "Result",
 };
 
 const toHex = (r: number, g: number, b: number) =>
@@ -61,6 +66,7 @@ export function CaptureOverlay({
   onTranslate,
   onCopyImage,
   onSaveImage,
+  onClearResult,
   result = "",
   busy = false,
   labels,
@@ -314,6 +320,7 @@ export function CaptureOverlay({
   };
 
   const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (busy) return;
     if (event.button !== 0) return;
      if ((event.target as HTMLElement).closest(".capture-overlay-actions")) return;
     event.preventDefault();
@@ -392,8 +399,20 @@ export function CaptureOverlay({
       )}
 
       <div className="capture-overlay-live" aria-live="polite">
-        {busy ? "处理中..." : result || (copied ? text.copied : color ? `${color.hex} — ${text.colorHint}` : "")}
+        {busy ? text.processing : result || (copied ? text.copied : color ? `${color.hex} — ${text.colorHint}` : "")}
       </div>
+
+      {(busy || result) && (
+        <aside className="capture-overlay-panel" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="capture-overlay-panel-head">
+            <span>{busy ? text.processing : text.panelTitle}</span>
+            {!busy && result && onClearResult && (
+              <button type="button" aria-label={text.cancel} onClick={onClearResult}>×</button>
+            )}
+          </div>
+          <pre className="capture-overlay-panel-body">{busy ? text.processing : result}</pre>
+        </aside>
+      )}
 
       {rectStyle && Math.abs(active!.width) >= MIN_SIZE && Math.abs(active!.height) >= MIN_SIZE && (
         <>
@@ -421,7 +440,6 @@ export function CaptureOverlay({
 
       {selection && (
         <div className="capture-overlay-actions" style={barStyle} onMouseDown={(event) => event.stopPropagation()}>
-          {result && <output className="capture-overlay-result">{result}</output>}
           <div className="capture-overlay-bar">
             {onRecognize && (
               <button type="button" aria-label={text.recognize} onClick={act(onRecognize)} disabled={busy}>{text.recognize}</button>
