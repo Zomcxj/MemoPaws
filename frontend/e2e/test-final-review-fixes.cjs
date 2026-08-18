@@ -24,8 +24,8 @@ assert.match(recognize, /useEffect\(\(\) => \{ if \(pasteOcrRequest\) contextPas
 
 const floatingConfig = JSON.parse(config).app.windows.find((window) => window.label === "floating");
 assert.ok(floatingConfig, "native floating window must be configured");
-assert.ok(floatingConfig.width >= 242 + 16,
-  "native floating window must fit the 242px launcher-and-left-menu minimum plus outer padding");
+assert.ok(floatingConfig.width >= 56 && floatingConfig.width <= 258,
+  "native floating window must start as the 56px ball and expand to fit the menu");
 assert.doesNotMatch(commands, /WebviewWindowBuilder::new\(&app, "floating"/,
   "visibility toggling must use the configured native floating window, not a fallback builder");
 assert.match(lib, /if config\.show_floating_widget\.unwrap_or\(true\) \{[\s\S]*?set_floating_widget_visible\(true, app\.handle\(\)\.clone\(\)\)/,

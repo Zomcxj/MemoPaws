@@ -218,6 +218,21 @@
   cursor: default;
 }
 
+.capture-overlay-panel.is-running {
+  animation: panel-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes panel-glow {
+  0%, 100% {
+    border-color: rgba(77, 163, 255, 0.5);
+    box-shadow: 0 0 24px rgba(77, 163, 255, 0.35);
+  }
+  50% {
+    border-color: rgba(77, 163, 255, 0.95);
+    box-shadow: 0 0 34px rgba(77, 163, 255, 0.65);
+  }
+}
+
 .capture-overlay-panel-head {
   display: flex;
   align-items: center;

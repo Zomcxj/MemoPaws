@@ -44,9 +44,11 @@ assert.match(widget, /floating-action-label/,
   "menu actions must retain textual labels");
 
 // 4. Click opens an inward-facing menu centered against the launcher and never
-//    captures launcher dragging. This keeps every action within the 258px native window.
-assert.match(widget, /setOpen\(\(current\) => !current\)/,
-  "a plain click on the launcher must toggle the menu");
+//    captures launcher dragging. The 56px ball expands the window only while the menu is open.
+assert.match(widget, /setOpen\(\(current\) => \{[\s\S]*?resizeForMenu\(next, edge\)[\s\S]*?return next;/,
+  "a plain click on the launcher must toggle the menu and resize the window to fit it");
+assert.match(widget, /const resizeForMenu = async \(menuOpen: boolean, currentEdge: Edge\) => \{/,
+  "the launcher must expand the window only while the menu is open");
 assert.match(css, /\.floating-anchor\s*\{[^}]*position:\s*relative[^}]*pointer-events:\s*none[^}]*\}/s,
   "the 56px launcher surface must be a positioned, non-interactive anchor");
 assert.match(css, /\.floating-widget\s*\{[^}]*overflow:\s*visible[^}]*\}/s,
@@ -60,17 +62,29 @@ assert.match(css, /\.floating-widget\.is-left\s+\.floating-menu\s*\{[^}]*left:\s
 assert.match(widget, /<nav className="floating-menu"[^>]*>/,
   "the menu panel must render as a plain nav without pointer drag handlers");
 
-// 5. Native pointer move, edge snap, click-versus-drag threshold and persistence.
+// 5. Native window drag, click-versus-drag delay and position persistence.
 assert.match(widget, /const DRAG_THRESHOLD = 4;/, "click-versus-drag threshold must be preserved");
-assert.match(widget, /onPointerDown=\{\(event\) => void onPointerDown\(event\)\}[\s\S]*?onPointerMove=\{onPointerMove\}[\s\S]*?onPointerUp=\{onPointerUp\}[\s\S]*?onPointerCancel=\{onPointerUp\}/,
-  "only the launcher ball must own the pointer drag handlers");
+assert.match(widget, /onPointerDown=\{onPointerDown\}[\s\S]*?onPointerUp=\{onPointerUp\}[\s\S]*?onPointerCancel=\{onPointerUp\}/,
+  "only the launcher ball must own the pointer handlers");
+assert.match(widget, /startDragging\(\)/, "drag must use the native window drag");
+assert.doesNotMatch(widget, /onPointerMove=\{onPointerMove\}/,
+  "dragging must not depend on JS pointer moves");
 assert.match(widget, /"floating-edge"/, "edge must persist under the floating-edge key");
 assert.match(widget, /"floating-pos"/, "position must persist under the floating-pos key");
 assert.match(widget, /writeStored\(POS_KEY, JSON\.stringify\(\{ x, y \}\)\)/,
-  "release must persist the snapped position");
-assert.match(widget, /snapToEdge\(\)/, "release after movement must snap to the nearest edge");
+  "release must persist the launcher position");
+assert.match(widget, /persistAfterDrag\(\)/, "release must keep the launcher where it lands");
+assert.doesNotMatch(widget, /snapToEdge/, "release must not force the launcher back to an edge");
 
-// 6. Intent emission and hide command are preserved.
+// 6. The floating native window must be a 56px ball that expands to fit the menu.
+const tauriConf = JSON.parse(read("..", "crates", "memopaws-tauri", "tauri.conf.json"));
+const floatingWin = tauriConf.app.windows.find((w) => w.label === "floating");
+assert.ok(floatingWin, "the floating window must be declared");
+assert.equal(floatingWin.width, 56, "the floating window must start as a 56px ball");
+assert.equal(floatingWin.height, 56, "the floating window must start as a 56px ball");
+assert.equal(floatingWin.transparent, true, "the floating window must stay transparent");
+
+// 7. Intent emission and hide command are preserved.
 assert.match(widget, /emit\("floating-intent", intent\)/,
   "action clicks must keep emitting floating-intent events");
 assert.match(widget, /invoke\("set_floating_widget_visible", \{ visible: false \}\)/,

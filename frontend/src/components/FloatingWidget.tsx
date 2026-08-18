@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import type { Lang } from "../i18n/lang";
 import "./FloatingWidget.css";
 
@@ -9,6 +9,10 @@ type Edge = "left" | "right";
 const EDGE_KEY = "floating-edge";
 const POS_KEY = "floating-pos";
 const DRAG_THRESHOLD = 4;
+const DRAG_DELAY = 200;
+const BALL_SIZE = 56;
+const MENU_W = 258;
+const MENU_H = 300;
 
 const copy = {
   zh: {
@@ -50,11 +54,9 @@ const writeStored = (key: string, value: string) => {
 };
 
 interface DragState {
-  winX: number;
-  winY: number;
-  cursorX: number;
-  cursorY: number;
-  moved: boolean;
+  timer: number;
+  startX: number;
+  startY: number;
 }
 
 export function FloatingWidget({ language = "zh" }: { language?: Lang }) {
@@ -64,7 +66,7 @@ export function FloatingWidget({ language = "zh" }: { language?: Lang }) {
   const [busy, setBusy] = useState(false);
   const drag = useRef<DragState | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.body.classList.add("floating-body");
     return () => document.body.classList.remove("floating-body");
   }, []);
@@ -121,62 +123,75 @@ export function FloatingWidget({ language = "zh" }: { language?: Lang }) {
     { id: "settings", label: t.settings, onClick: () => request("settings"), icon: "/assets/icons/settings.svg" },
   ];
 
-  const snapToEdge = async () => {
-    // Snap against the primary display bounds, mirroring the Python edition.
-    const screen = window.screen;
-    const mx = 0;
-    const my = 0;
-    const mw = screen.availWidth;
-    const mh = screen.availHeight;
+  const resizeForMenu = async (menuOpen: boolean, currentEdge: Edge) => {
+    const w = getCurrentWindow();
+    const size = await w.outerSize();
+    const scale = await w.scaleFactor();
+    const winW = size.width / scale;
+    if (menuOpen) {
+      if (winW === MENU_W) return;
+      const nx = currentEdge === "right" ? (await w.outerPosition()).x / scale - (MENU_W - BALL_SIZE) : (await w.outerPosition()).x / scale;
+      await w.setSize(new LogicalSize(MENU_W, MENU_H));
+      await w.setPosition(new LogicalPosition(Math.round(nx), Math.round((await w.outerPosition()).y / scale)));
+    } else {
+      if (winW === BALL_SIZE) return;
+      const nx = currentEdge === "right" ? (await w.outerPosition()).x / scale + (MENU_W - BALL_SIZE) : (await w.outerPosition()).x / scale;
+      await w.setSize(new LogicalSize(BALL_SIZE, BALL_SIZE));
+      await w.setPosition(new LogicalPosition(Math.round(nx), Math.round((await w.outerPosition()).y / scale)));
+    }
+  };
+
+  const persistAfterDrag = async () => {
     const w = getCurrentWindow();
     const position = await w.outerPosition();
     const size = await w.outerSize();
     const scale = await w.scaleFactor();
     const winW = size.width / scale;
     const winH = size.height / scale;
-    const winX = position.x / scale;
-    const winY = position.y / scale;
-    const leftDist = winX - mx;
-    const rightDist = mx + mw - (winX + winW);
-    const nextEdge: Edge = leftDist <= rightDist ? "left" : "right";
-    const x = nextEdge === "left" ? mx : mx + mw - winW;
-    const y = Math.max(my, Math.min(winY, my + mh - winH));
+    const screen = window.screen;
+    let x = position.x / scale;
+    let y = position.y / scale;
+    x = Math.max(0, Math.min(x, screen.availWidth - winW));
+    y = Math.max(0, Math.min(y, screen.availHeight - winH));
+    if (x !== position.x / scale || y !== position.y / scale) {
+      await w.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+    }
+    const nextEdge: Edge = x <= (screen.availWidth - winW) / 2 ? "left" : "right";
     writeStored(POS_KEY, JSON.stringify({ x, y }));
     writeStored(EDGE_KEY, nextEdge);
     setEdge(nextEdge);
     setOpen(false);
-    void w.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
   };
 
-  const onPointerDown = async (event: React.PointerEvent<HTMLElement>) => {
+  const onPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const w = getCurrentWindow();
-    const position = await w.outerPosition();
-    const scale = await w.scaleFactor();
-    drag.current = { winX: position.x / scale, winY: position.y / scale, cursorX: event.screenX, cursorY: event.screenY, moved: false };
-    setOpen(false);
-  };
-
-  const onPointerMove = (event: React.PointerEvent<HTMLElement>) => {
-    const state = drag.current;
-    if (!state) return;
-    const dx = event.screenX - state.cursorX;
-    const dy = event.screenY - state.cursorY;
-    if (!state.moved && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
-    state.moved = true;
-    void getCurrentWindow().setPosition(new LogicalPosition(Math.round(state.winX + dx), Math.round(state.winY + dy)));
+    drag.current = {
+      timer: window.setTimeout(() => {
+        drag.current = null;
+        const w = getCurrentWindow();
+        void w.startDragging().then(() => void persistAfterDrag());
+      }, DRAG_DELAY),
+      startX: event.screenX,
+      startY: event.screenY,
+    };
   };
 
   const onPointerUp = (event: React.PointerEvent<HTMLElement>) => {
     const state = drag.current;
-    drag.current = null;
     if (!state) return;
-    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
-    if (state.moved) {
-      void snapToEdge();
+    drag.current = null;
+    window.clearTimeout(state.timer);
+    const moved =
+      Math.abs(event.screenX - state.startX) > DRAG_THRESHOLD ||
+      Math.abs(event.screenY - state.startY) > DRAG_THRESHOLD;
+    if (moved) {
+      void persistAfterDrag();
     } else {
-      setOpen((current) => !current);
+      setOpen((current) => {
+        const next = !current;
+        void resizeForMenu(next, edge);
+        return next;
+      });
     }
   };
 
@@ -209,8 +224,7 @@ export function FloatingWidget({ language = "zh" }: { language?: Lang }) {
           aria-label={t.menu}
           aria-expanded={open}
           title={t.menu}
-          onPointerDown={(event) => void onPointerDown(event)}
-          onPointerMove={onPointerMove}
+          onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           onKeyDown={(event) => {

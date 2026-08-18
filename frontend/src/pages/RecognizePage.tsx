@@ -231,6 +231,19 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
   const contextReset = () => { closeContextMenu(); reset(); };
 
   // History actions.
+  const formatTime = (raw: string) => {
+    const stamp = Number(raw);
+    if (!raw || !Number.isFinite(stamp) || stamp <= 0) return raw;
+    return new Date(stamp * 1000).toLocaleString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  };
   const deleteHistory = (index: number) => void run(async () => { await invoke("history_delete", { index }); setHistory((await invoke<HistoryRecord[]>("history_list"))); });
   const clearAllHistory = () => { if (!window.confirm(t.clearHistory)) return; void run(async () => { await invoke("history_clear"); setHistory([]); }); };
   const loadHistory = (record: HistoryRecord) => {
@@ -289,8 +302,8 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
           {history.length ? history.map((record, index) => (
             <div className="history-row" key={`${record.time}-${index}`}>
               <button className="history-main" onClick={() => loadHistory(record)} title={t.historyLoad}>
+                <span className="history-time">{formatTime(record.time)}</span>
                 <span className="history-text">{record.text}</span>
-                <span className="history-time">{record.time}</span>
               </button>
               <div className="history-row-actions">
                 <button type="button" onClick={() => void deleteHistory(index)} aria-label={t.historyDelete}>{t.historyDelete}</button>
@@ -300,8 +313,8 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
         </section>
       </div>
       <div className="recognize-right">
-        <article className="recognize-panel result-panel"><div className="result-heading"><h2>{t.ocr}</h2><div className="result-actions"><button type="button" onClick={() => void copyOcrText()} disabled={!ocrText || loading}>{copied ? t.copied : t.copy}</button><button type="button" onClick={clearOcrText} disabled={!ocrText || loading}>{t.clearText}</button></div></div><div className="ocr-controls"><button type="button" onClick={recognize} disabled={!image || loading}>{loading ? t.processing : t.ocr}</button><select value={source} onChange={(event) => setSource(event.target.value as OcrLanguage)}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><textarea aria-label={t.ocr} value={ocrText} onChange={(event) => { setOcrText(event.target.value); setCopied(false); }} /></article>
-        <article className="recognize-panel result-panel"><div className="result-heading"><h2>{t.translate}</h2><div className="result-actions"><button type="button" onClick={() => void copyTranslation()} disabled={!translation || loading}>{copiedTranslation ? t.copied : t.copy}</button><button type="button" onClick={() => setTranslation("")} disabled={!translation || loading}>{t.clearText}</button></div></div><div className="ocr-controls"><button type="button" onClick={translate} disabled={!ocrText || loading}>{loading ? t.processing : t.translate}</button><select value={target} onChange={(event) => setTarget(event.target.value as OcrLanguage)}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><textarea aria-label={t.translate} readOnly value={translation} /></article>
+        <article className={"recognize-panel result-panel" + (loading ? " is-running" : "")}><div className="result-heading"><h2>{t.ocr}</h2><div className="result-actions"><button type="button" onClick={() => void copyOcrText()} disabled={!ocrText || loading}>{copied ? t.copied : t.copy}</button><button type="button" onClick={clearOcrText} disabled={!ocrText || loading}>{t.clearText}</button></div></div><div className="ocr-controls"><button type="button" onClick={recognize} disabled={!image || loading}>{loading ? t.processing : t.ocr}</button><select value={source} onChange={(event) => setSource(event.target.value as OcrLanguage)}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><textarea aria-label={t.ocr} value={ocrText} onChange={(event) => { setOcrText(event.target.value); setCopied(false); }} /></article>
+        <article className={"recognize-panel result-panel" + (loading ? " is-running" : "")}><div className="result-heading"><h2>{t.translate}</h2><div className="result-actions"><button type="button" onClick={() => void copyTranslation()} disabled={!translation || loading}>{copiedTranslation ? t.copied : t.copy}</button><button type="button" onClick={() => setTranslation("")} disabled={!translation || loading}>{t.clearText}</button></div></div><div className="ocr-controls"><button type="button" onClick={translate} disabled={!ocrText || loading}>{loading ? t.processing : t.translate}</button><select value={target} onChange={(event) => setTarget(event.target.value as OcrLanguage)}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><textarea aria-label={t.translate} readOnly value={translation} /></article>
       </div>
     </div>
     {contextMenu && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">

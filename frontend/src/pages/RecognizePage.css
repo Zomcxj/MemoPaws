@@ -195,7 +195,7 @@
   padding: 8px 10px;
 }
 
-.recognize-panel.result-panel {
+.recognize-panel.result-panel.is-running {
   animation: result-glow 1.8s ease-in-out infinite;
 }
 

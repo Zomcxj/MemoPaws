@@ -415,7 +415,7 @@ export function CaptureOverlay({
       </div>
 
       {(busy || result) && (
-        <aside className="capture-overlay-panel" style={panelStyle} onMouseDown={(event) => event.stopPropagation()}>
+        <aside className={"capture-overlay-panel" + (busy ? " is-running" : "")} style={panelStyle} onMouseDown={(event) => event.stopPropagation()}>
           <div className="capture-overlay-panel-head">
             <span>{busy ? text.processing : text.panelTitle}</span>
             {!busy && result && onClearResult && (

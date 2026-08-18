@@ -93,9 +93,14 @@ assert.match(
 const recognizeCss = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "RecognizePage.css"), "utf8");
 assert.match(
   recognizeCss,
-  /\.recognize-panel\.result-panel \{[\s\S]*?animation: result-glow/,
-  "the OCR/translate panels must run the glow animation",
+  /\.recognize-panel\.result-panel\.is-running \{[\s\S]*?animation: result-glow/,
+  "the OCR/translate panels must run the glow animation only while recognizing or translating",
 );
 assert.match(recognizeCss, /@keyframes result-glow/, "the result-glow keyframes must exist");
+assert.match(
+  recognizeSource,
+  /\+\s*\(loading \? " is-running" : ""\)/,
+  "the is-running class must be driven by the loading state",
+);
 
 console.log("settings key promotion and capture overlay contracts passed");

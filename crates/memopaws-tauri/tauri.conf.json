@@ -20,11 +20,11 @@
         "visible": false,
         "backgroundColor": "#262624"
       },
-      {
-        "label": "floating",
-        "title": "MemoPaws Floating Widget",
-        "width": 258,
-        "height": 300,
+{
+   "label": "floating",
+   "title": "MemoPaws Floating Widget",
+   "width": 56,
+   "height": 56,
         "resizable": false,
         "fullscreen": false,
         "visible": false,
