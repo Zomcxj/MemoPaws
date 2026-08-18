@@ -39,5 +39,3 @@ Thumbs.db
 # .superpowers (restructuring docs) — 唯一规范目录；勿再写 docs/superpowers
 .superpowers/
 docs/superpowers/
-
-AGENTS.md
