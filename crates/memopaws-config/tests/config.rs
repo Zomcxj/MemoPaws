@@ -39,7 +39,6 @@ fn round_trip_preserves_all_user_fields() {
         text_replacements: vec![
             memopaws_config::config::TextReplacement { abbr: ":brb".into(), replacement: "be right back".into() },
         ],
-        show_floating_widget: Some(false),
     };
     config.save_to(&path).unwrap();
 
@@ -48,6 +47,16 @@ fn round_trip_preserves_all_user_fields() {
         serde_json::to_value(&loaded).unwrap(),
         serde_json::to_value(&config).unwrap()
     );
+}
+
+#[test]
+fn legacy_floating_config_field_is_ignored_when_loading() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("setting.json");
+    fs::write(&path, r#"{"theme":"light","show_floating_widget":false,"future_field":true}"#).unwrap();
+
+    let loaded = AppConfig::load_from(&path).unwrap();
+    assert_eq!(loaded.theme.as_deref(), Some("light"));
 }
 
 #[test]

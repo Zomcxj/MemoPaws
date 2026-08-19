@@ -138,7 +138,6 @@ MemoPaws-Rust/
 - `api_key` / `api_url` / `api_model`：AI 服务配置
 - `shortcuts`：快捷键覆盖
 - `text_replacements`：文字替换规则
-- `show_floating_widget`：浮动小部件可见性
 - `clipboard_max_items` / `history_max_items`：历史记录上限
 
 ## 许可

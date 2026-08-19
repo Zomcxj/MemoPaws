@@ -260,6 +260,7 @@
 }
 
 .memo-preview {
+  --memo-preview-scale: 1;
   font-family: inherit;
   background: var(--bg-primary);
   overflow: auto;
@@ -268,6 +269,9 @@
 .memo-preview .memo-markdown {
   min-height: 100%;
   box-sizing: border-box;
+  transform: scale(var(--memo-preview-scale));
+  transform-origin: top left;
+  width: calc(100% / var(--memo-preview-scale));
 }
 
 .memo-footer {

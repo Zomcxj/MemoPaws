@@ -13,6 +13,27 @@ pub enum RenderTheme {
     Light,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum SkipKind {
+    Link,
+    Image,
+}
+
+impl SkipKind {
+    fn of_start(event: &Event) -> Self {
+        match event {
+            Event::Start(Tag::Link { .. }) => SkipKind::Link,
+            _ => SkipKind::Image,
+        }
+    }
+    fn of_end(event: &Event) -> Self {
+        match event {
+            Event::End(TagEnd::Link) => SkipKind::Link,
+            _ => SkipKind::Image,
+        }
+    }
+}
+
 pub fn render_markdown(markdown: &str, theme: RenderTheme) -> String {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
@@ -20,8 +41,22 @@ pub fn render_markdown(markdown: &str, theme: RenderTheme) -> String {
         | Options::ENABLE_FOOTNOTES;
     let mut output = Vec::new();
     let mut events = Parser::new_ext(markdown, options);
-    let mut blocked_destination_depth = 0usize;
+    let mut skipped: Vec<SkipKind> = Vec::new();
     while let Some(event) = events.next() {
+        if let Some(&skipping) = skipped.last() {
+            match event {
+                Event::Start(Tag::Link { .. }) | Event::Start(Tag::Image { .. }) => {
+                    skipped.push(SkipKind::of_start(&event));
+                }
+                Event::End(TagEnd::Link) | Event::End(TagEnd::Image)
+                    if SkipKind::of_end(&event) == skipping =>
+                {
+                    skipped.pop();
+                }
+                _ => {}
+            }
+            continue;
+        }
         match event {
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(language))) => {
                 let mut code = String::new();
@@ -32,6 +67,7 @@ pub fn render_markdown(markdown: &str, theme: RenderTheme) -> String {
                         _ => {}
                     }
                 }
+                let language = normalize_language_token(&language);
                 output.push(Event::Html(CowStr::Boxed(
                     highlight_code(&code, &language, theme).into_boxed_str(),
                 )));
@@ -39,13 +75,10 @@ pub fn render_markdown(markdown: &str, theme: RenderTheme) -> String {
             Event::Html(raw) | Event::InlineHtml(raw) => {
                 output.push(Event::Html(CowStr::Boxed(escape_html(&raw).into_boxed_str())));
             }
-            Event::Start(Tag::Link { dest_url, .. }) | Event::Start(Tag::Image { dest_url, .. })
-                if !safe_destination(&dest_url) =>
+            Event::Start(Tag::Link { ref dest_url, .. }) | Event::Start(Tag::Image { ref dest_url, .. })
+                if !safe_destination(dest_url) =>
             {
-                blocked_destination_depth += 1;
-            }
-            Event::End(TagEnd::Link) | Event::End(TagEnd::Image) if blocked_destination_depth > 0 => {
-                blocked_destination_depth -= 1;
+                skipped.push(SkipKind::of_start(&event));
             }
             event => output.push(event),
         }
@@ -129,13 +162,11 @@ fn article_css() -> &'static str {
   margin: 0;
 }
 .memo-markdown pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
-.memo-markdown .memo-code-block { position: relative; }
+.memo-markdown .memo-code-block { position: relative; overflow: hidden; border: 1px solid var(--memo-border); border-radius: 8px; }
 .memo-markdown .memo-code-block pre { padding-top: 44px; }
+.memo-markdown .memo-code-toolbar { position: absolute; z-index: 1; inset: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; padding: 4px 8px; background: var(--memo-code); color: var(--memo-fg); }
+.memo-markdown .memo-code-language { color: var(--memo-fg); font: 600 11px/1 Consolas, Monaco, "Courier New", monospace; letter-spacing: .04em; opacity: .78; }
 .memo-markdown .memo-code-copy {
-  position: absolute;
-  z-index: 1;
-  top: 8px;
-  right: 8px;
   border: 1px solid var(--memo-border);
   border-radius: 4px;
   padding: 3px 7px;
@@ -152,16 +183,19 @@ fn article_css() -> &'static str {
   border-left: 3px solid var(--memo-border);
   color: var(--memo-fg);
 }
+.memo-markdown blockquote > :first-child { margin-top: 0; }
+.memo-markdown blockquote > :last-child { margin-bottom: 0; }
 .memo-markdown ul,
 .memo-markdown ol { margin: 0; padding-left: 1.25rem; }
 .memo-markdown li + li { margin-top: calc(var(--memo-space) * 0.45); }
 .memo-markdown .task-list-item { list-style: none; margin-left: -0.5rem; }
-.memo-markdown .task-list-item input { margin-right: 0.5rem; }
-.memo-markdown table { border-collapse: collapse; width: 100%; }
+.memo-markdown .task-list-item input { margin: 0 0.5rem 0 0; vertical-align: middle; accent-color: var(--memo-link); }
+.memo-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; width: 100%; }
 .memo-markdown th,
 .memo-markdown td {
   border: 1px solid var(--memo-border);
   padding: 0.4rem 0.6rem;
+  white-space: nowrap;
 }
 .memo-markdown th { background:var(--memo-code); font-weight:600; }
 .memo-markdown tr:nth-child(even) { background:color-mix(in srgb, var(--memo-code) 45%, transparent); }
@@ -170,10 +204,21 @@ fn article_css() -> &'static str {
   border-top: 1px solid var(--memo-border);
   margin: var(--memo-space) 0;
 }
-.memo-markdown img { max-width: 100%; }
+.memo-markdown img { display: block; max-width: 100%; height: auto; object-fit: contain; }
 .memo-markdown .footnote-definition,
 .memo-markdown .footnotes { font-size: 0.9em; color: var(--memo-fg); opacity: 0.9; }
+.memo-markdown .footnote-definition a,
+.memo-markdown .footnote-backref { color: var(--memo-link); font-size: .9em; }
 "#
+}
+
+fn normalize_language_token(language: &str) -> String {
+    language
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 fn highlight_code(code: &str, language: &str, render_theme: RenderTheme) -> String {
@@ -181,12 +226,20 @@ fn highlight_code(code: &str, language: &str, render_theme: RenderTheme) -> Stri
     static THEMES: OnceLock<ThemeSet> = OnceLock::new();
     let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
     let themes = THEMES.get_or_init(ThemeSet::load_defaults);
-    let token = language.split(|c: char| c == ',' || c.is_whitespace()).next().unwrap_or("");
+    let token = language;
+    let label = if token.is_empty() {
+        "TEXT".to_string()
+    } else {
+        token.to_ascii_uppercase()
+    };
     let Some(syntax) = syntaxes.find_syntax_by_token(token) else {
-        return code_block_html(format!(
-            r#"<pre class="memo-code"><code>{}</code></pre>"#,
-            escape_html(code)
-        ));
+        return code_block_html(
+            format!(
+                r#"<pre class="memo-code"><code>{}</code></pre>"#,
+                escape_html(code)
+            ),
+            &label,
+        );
     };
     let theme_name = match render_theme {
         RenderTheme::Dark => "base16-ocean.dark",
@@ -207,18 +260,22 @@ fn highlight_code(code: &str, language: &str, render_theme: RenderTheme) -> Stri
             } else {
                 format!(r#"<pre class="memo-code">{html}</pre>"#)
             };
-            code_block_html(html)
+            code_block_html(html, &label)
         }
-        None => code_block_html(format!(
-            r#"<pre class="memo-code"><code>{}</code></pre>"#,
-            escape_html(code)
-        )),
+        None => code_block_html(
+            format!(
+                r#"<pre class="memo-code"><code>{}</code></pre>"#,
+                escape_html(code)
+            ),
+            &label,
+        ),
     }
 }
 
-fn code_block_html(code: String) -> String {
+fn code_block_html(code: String, language: &str) -> String {
     format!(
-        r#"<div class="memo-code-block"><button type="button" class="memo-code-copy" data-memo-code-copy aria-label="Copy code">Copy</button>{code}</div>"#
+        r#"<div class="memo-code-block"><div class="memo-code-toolbar"><span class="memo-code-language">{language}</span><button type="button" class="memo-code-copy" data-memo-code-copy aria-label="Copy code">Copy</button></div>{code}</div>"#,
+        language = escape_html(language),
     )
 }
 

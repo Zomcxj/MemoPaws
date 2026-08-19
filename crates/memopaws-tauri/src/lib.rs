@@ -20,7 +20,7 @@ use commands::{
     image_preprocess, image_mosaic_region, image_crop, list_displays, test_api_connection, get_data_dir,
     choose_data_dir, get_storage_dir_conflict, migrate_data_dir, restart_app, set_close_behavior,
     show_main_window_when_ready,
-    set_floating_widget_visible, set_clipboard_max_items, set_history_max_items,
+    set_clipboard_max_items, set_history_max_items,
     text_replacement_list, text_replacement_create, text_replacement_update, text_replacement_delete,
 };
 use commands::{KeyVaultState, TextReplacerState};
@@ -115,9 +115,6 @@ pub fn run() {
             if config.text_replacements.iter().any(|r| !r.abbr.is_empty()) {
                 if let Err(error) = text_replacer_hook::init(text_replacer) { eprintln!("text replacement listener: {error}"); }
             }
-            if config.show_floating_widget.unwrap_or(true) {
-                commands::set_floating_widget_visible(true, app.handle().clone())?;
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -153,7 +150,6 @@ pub fn run() {
             restart_app,
             show_main_window_when_ready,
             set_close_behavior,
-            set_floating_widget_visible,
             set_clipboard_max_items,
             set_history_max_items,
             ai_ocr,

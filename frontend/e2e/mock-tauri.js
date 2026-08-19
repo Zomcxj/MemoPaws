@@ -39,7 +39,7 @@
        get_config: {
         language: "zh", close_behavior: "tray",
        has_api_key: true,
-      clipboard_max_items: 50, history_max_items: 100, show_floating_widget: true,
+       clipboard_max_items: 50, history_max_items: 100,
        shortcuts: { capture: "Alt+X", canvas_fit: "Ctrl+F", new_memo: "Ctrl+N", global_search: "Ctrl+Shift+F" }
     },
     status: { has_master: true, unlocked: true, load_failed: false, version: 3 },
@@ -77,7 +77,7 @@
           return resolve({ status_code: 200, elapsed_ms: 44, vision_result: { success: true, text: "OCR test" } });
         } else if (command === "set_clipboard_max_items" || command === "set_history_max_items") {
           runtimeUpdates.push({ command: command, value: args && (args.value ?? args.max_items) }); resolve();
-        } else if (command === "set_close_behavior" || command === "set_floating_widget_visible") {
+        } else if (command === "set_close_behavior") {
           runtimeUpdates.push({ command: command, value: args && (args.value ?? args.visible) }); resolve();
         } else if (command === "get_storage_dir_conflict") {
           resolve(Boolean(args && args.path && String(args.path).includes("conflict")));
@@ -99,6 +99,10 @@
           resolve({ image: [137, 80, 78, 71], preview: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'%3E%3Crect width='1280' height='720' fill='%23456789'/%3E%3C/svg%3E" });
         } else if (command === "image_crop") {
           resolve({ image: [137, 80, 78, 71] });
+        } else if (command === "ai_ocr") {
+          resolve({ text: "Mock OCR text" });
+        } else if (command === "ai_translate") {
+          resolve({ text: "Mock translation" });
         } else if (command === "clipboard_get_image" || command === "capture_get_image") {
           resolve([137, 80, 78, 71]);
         } else {

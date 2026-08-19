@@ -17,29 +17,31 @@ export interface CaptureLabels {
   colorHint: string;
   processing: string;
   panelTitle: string;
+  resize: string;
 }
 
 interface Props {
   background: string;
   hint: string;
-  onConfirm: (region: RegionCss, scale: number) => void;
+  onConfirm: (result: { image: Uint8Array; ocrText: string; translation: string }) => Promise<void> | void;
+  onCrop: (region: RegionCss, scale: number) => Promise<Uint8Array>;
   onCancel: () => void;
-  onRecognize?: (region: RegionCss, scale: number) => void;
-  onTranslate?: (region: RegionCss, scale: number) => void;
+  onRecognize?: (region: RegionCss, scale: number) => Promise<string>;
+  onTranslate?: (region: RegionCss, scale: number) => Promise<{ ocrText: string; translation: string }>;
   onCopyImage?: (region: RegionCss, scale: number) => void;
   onSaveImage?: (region: RegionCss, scale: number) => void;
-  onClearResult?: () => void;
-  result?: string;
-  busy?: boolean;
   labels?: Partial<CaptureLabels>;
 }
 
-const MIN_SIZE = 4;
+const MIN_SIZE = 8;
 const MAGNIFIER_SIZE = 132;
 const MAGNIFIER_ZOOM = 8;
 const MAGNIFIER_OFFSET = 24;
-const BAR_ESTIMATED_WIDTH = 360;
-const BAR_ESTIMATED_HEIGHT = 40;
+const RESULT_WINDOW_MIN_WIDTH = 450;
+const RESULT_WINDOW_MIN_HEIGHT = 533;
+const RESULT_WINDOW_MAX_WIDTH = 900;
+const RESULT_WINDOW_MAX_HEIGHT = 800;
+const RESULT_WINDOW_GAP = 16;
 
 const DEFAULT_LABELS: CaptureLabels = {
   recognize: "Recognize",
@@ -52,6 +54,7 @@ const DEFAULT_LABELS: CaptureLabels = {
   colorHint: "Press C to copy HEX",
   processing: "Working…",
   panelTitle: "Result",
+  resize: "Resize result window",
 };
 
 const toHex = (r: number, g: number, b: number) =>
@@ -61,14 +64,12 @@ export function CaptureOverlay({
   background,
   hint,
   onConfirm,
+  onCrop,
   onCancel,
   onRecognize,
   onTranslate,
   onCopyImage,
   onSaveImage,
-  onClearResult,
-  result = "",
-  busy = false,
   labels,
 }: Props) {
   const text = { ...DEFAULT_LABELS, ...labels };
@@ -83,6 +84,16 @@ export function CaptureOverlay({
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const [color, setColor] = useState<{ hex: string; rgb: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [ocrText, setOcrText] = useState("");
+  const [translation, setTranslation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [resultError, setResultError] = useState("");
+  const [resultWindow, setResultWindow] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [draggingResultWindow, setDraggingResultWindow] = useState<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
+  const [resizingResultWindow, setResizingResultWindow] = useState<{ pointerId: number; x: number; y: number; width: number; height: number } | null>(null);
+  const confirmSelectionRef = useRef<() => Promise<void>>(async () => {});
+  const operationTokenRef = useRef(0);
+  const cancelSelection = useCallback(() => { operationTokenRef.current += 1; onCancel(); }, [onCancel]);
 
   // Geometry shared by preview sampling and region math: the image is object-fit: contain.
   const layout = useCallback(() => {
@@ -207,12 +218,12 @@ export function CaptureOverlay({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onCancel();
+        cancelSelection();
         return;
       }
       if (event.key === "Enter" && selection) {
         event.preventDefault();
-        onConfirm(selection.region, selection.scale);
+        void confirmSelectionRef.current();
         return;
       }
       if ((event.key === "c" || event.key === "C") && color) {
@@ -227,7 +238,7 @@ export function CaptureOverlay({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel, onConfirm, selection, color]);
+  }, [cancelSelection, onConfirm, selection, color]);
 
   useEffect(() => {
     if (!drag && !editRef.current) return;
@@ -277,12 +288,12 @@ export function CaptureOverlay({
       setDrag(null);
       if (!start) return;
       if (Math.abs(event.clientX - start.x) < MIN_SIZE || Math.abs(event.clientY - start.y) < MIN_SIZE) {
-        onCancel();
+        cancelSelection();
         return;
       }
       const resolved = regionFrom(start.x, start.y, event.clientX, event.clientY);
       if (!resolved) {
-        onCancel();
+         cancelSelection();
         return;
       }
       const bounds = layout();
@@ -312,7 +323,7 @@ export function CaptureOverlay({
   }, [drag !== null, editing, layout, onCancel, regionFrom]);
 
   const beginSelectionEdit = (kind: SelectionEdit["kind"], event: ReactMouseEvent<HTMLDivElement | HTMLButtonElement>) => {
-    if (!selection || event.button !== 0) return;
+    if (!selection || busy || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     editRef.current = { kind, startX: event.clientX, startY: event.clientY, rect: selection.rect };
@@ -322,10 +333,15 @@ export function CaptureOverlay({
   const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (busy) return;
     if (event.button !== 0) return;
-     if ((event.target as HTMLElement).closest(".capture-overlay-actions")) return;
+      if ((event.target as HTMLElement).closest(".capture-result-window")) return;
     event.preventDefault();
     event.stopPropagation();
+    operationTokenRef.current += 1;
     setSelection(null);
+    setResultWindow(null);
+    setOcrText("");
+    setTranslation("");
+    setResultError("");
     startRef.current = { x: event.clientX, y: event.clientY };
     setDrag({ startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, width: 0, height: 0 });
   };
@@ -362,30 +378,111 @@ export function CaptureOverlay({
     };
   })();
 
-  const barStyle = (() => {
+  const defaultResultWindow = (() => {
     if (!rectStyle) return undefined;
-    const preferredTop = rectStyle.top + rectStyle.height + 8;
-    const top = preferredTop + BAR_ESTIMATED_HEIGHT > window.innerHeight
-      ? Math.max(4, rectStyle.top - BAR_ESTIMATED_HEIGHT - 8)
-      : preferredTop;
-    const left = Math.min(
-      Math.max(4, rectStyle.left),
-      Math.max(4, window.innerWidth - BAR_ESTIMATED_WIDTH - 4),
-    );
-    return { left, top };
+    const left = rectStyle.left + rectStyle.width + RESULT_WINDOW_GAP + RESULT_WINDOW_MIN_WIDTH <= window.innerWidth
+      ? rectStyle.left + rectStyle.width + RESULT_WINDOW_GAP
+      : Math.max(0, rectStyle.left - RESULT_WINDOW_GAP - RESULT_WINDOW_MIN_WIDTH);
+    return {
+      left: Math.min(left, Math.max(0, window.innerWidth - RESULT_WINDOW_MIN_WIDTH)),
+      top: Math.max(0, Math.min(rectStyle.top, window.innerHeight - RESULT_WINDOW_MIN_HEIGHT)),
+      width: RESULT_WINDOW_MIN_WIDTH,
+      height: RESULT_WINDOW_MIN_HEIGHT,
+    };
   })();
 
-  const panelStyle = (() => {
-    if (!rectStyle) return undefined;
-    const PANEL_W = 320;
-    const GAP = 12;
-    const preferredLeft = rectStyle.left + rectStyle.width + GAP;
-    const left = preferredLeft + PANEL_W > window.innerWidth
-      ? Math.max(4, rectStyle.left - PANEL_W - GAP)
-      : preferredLeft;
-    const top = Math.max(4, Math.min(rectStyle.top, window.innerHeight - 200));
-    return { left, top };
-  })();
+  const clampResultWindow = (next: { left: number; top: number; width: number; height: number }) => {
+    const width = Math.min(RESULT_WINDOW_MAX_WIDTH, Math.max(RESULT_WINDOW_MIN_WIDTH, Math.min(next.width, window.innerWidth)));
+    const height = Math.min(RESULT_WINDOW_MAX_HEIGHT, Math.max(RESULT_WINDOW_MIN_HEIGHT, Math.min(next.height, window.innerHeight)));
+    return {
+      left: Math.max(0, Math.min(next.left, window.innerWidth - width)),
+      top: Math.max(0, Math.min(next.top, window.innerHeight - height)),
+      width,
+      height,
+    };
+  };
+
+  const confirmSelection = async () => {
+    if (!selection || busy) return;
+    const operationToken = ++operationTokenRef.current;
+    setBusy(true);
+    setResultError("");
+    try {
+      const image = await onCrop(selection.region, selection.scale);
+      if (operationTokenRef.current === operationToken) await onConfirm({ image, ocrText, translation });
+    } catch (reason) {
+      setResultError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+  confirmSelectionRef.current = confirmSelection;
+
+  const runRecognize = async () => {
+    if (!selection || !onRecognize || busy) return;
+    const operationToken = ++operationTokenRef.current;
+    if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
+    setBusy(true); setResultError("");
+    try {
+      const result = await onRecognize(selection.region, selection.scale);
+      if (operationTokenRef.current === operationToken) setOcrText(result);
+    }
+    catch (reason) { setResultError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+
+  const runTranslate = async () => {
+    if (!selection || !onTranslate || busy) return;
+    const operationToken = ++operationTokenRef.current;
+    if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
+    setBusy(true); setResultError("");
+    try {
+      const result = await onTranslate(selection.region, selection.scale);
+      if (operationTokenRef.current === operationToken) {
+        setOcrText(result.ocrText); setTranslation(result.translation);
+      }
+    } catch (reason) { setResultError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+
+  const resultWindowStyle = resultWindow ? {
+    left: resultWindow.left,
+    top: resultWindow.top,
+    width: resultWindow.width,
+    height: resultWindow.height,
+  } : undefined;
+
+  const actionStyle = rectStyle ? {
+    left: Math.min(Math.max(4, rectStyle.left), Math.max(4, window.innerWidth - 216)),
+    top: rectStyle.top + rectStyle.height + 36 > window.innerHeight
+      ? Math.max(4, rectStyle.top - 36)
+      : rectStyle.top + rectStyle.height + 8,
+  } : undefined;
+
+  const beginResultWindowDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !resultWindow) return;
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingResultWindow({ pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: resultWindow.left, top: resultWindow.top });
+  };
+  const moveResultWindow = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingResultWindow || draggingResultWindow.pointerId !== event.pointerId) return;
+    setResultWindow(clampResultWindow({ ...resultWindow!, left: draggingResultWindow.left + event.clientX - draggingResultWindow.x, top: draggingResultWindow.top + event.clientY - draggingResultWindow.y }));
+  };
+  const endResultWindowDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (draggingResultWindow?.pointerId === event.pointerId) setDraggingResultWindow(null);
+  };
+  const beginResultWindowResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0 || !resultWindow) return;
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+    setResizingResultWindow({ pointerId: event.pointerId, x: event.clientX, y: event.clientY, width: resultWindow.width, height: resultWindow.height });
+  };
+  const resizeResultWindow = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!resizingResultWindow || resizingResultWindow.pointerId !== event.pointerId) return;
+    setResultWindow(clampResultWindow({ ...resultWindow!, width: resizingResultWindow.width + event.clientX - resizingResultWindow.x, height: resizingResultWindow.height + event.clientY - resizingResultWindow.y }));
+  };
+  const endResultWindowResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (resizingResultWindow?.pointerId === event.pointerId) setResizingResultWindow(null);
+  };
 
   const act = (handler?: (region: RegionCss, scale: number) => void) => () => {
     if (!selection || !handler) return;
@@ -411,19 +508,38 @@ export function CaptureOverlay({
       )}
 
       <div className="capture-overlay-live" aria-live="polite">
-        {busy ? text.processing : result || (copied ? text.copied : color ? `${color.hex} — ${text.colorHint}` : "")}
+        {busy ? text.processing : copied ? text.copied : color ? `${color.hex} — ${text.colorHint}` : ""}
       </div>
 
-      {(busy || result) && (
-        <aside className={"capture-overlay-panel" + (busy ? " is-running" : "")} style={panelStyle} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="capture-overlay-panel-head">
-            <span>{busy ? text.processing : text.panelTitle}</span>
-            {!busy && result && onClearResult && (
-              <button type="button" aria-label={text.cancel} onClick={onClearResult}>×</button>
-            )}
+      {selection && resultWindow && (
+        <aside className={`capture-result-window${busy ? " is-running" : ""}`} style={resultWindowStyle} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="capture-result-window-title" onPointerDown={beginResultWindowDrag} onPointerMove={moveResultWindow} onPointerUp={endResultWindowDrag}>
+            <span>{text.panelTitle}</span><span>{busy ? text.processing : ""}</span>
           </div>
-          <pre className="capture-overlay-panel-body">{busy ? text.processing : result}</pre>
+          <section className="capture-result-section"><h3>{text.recognize}</h3><textarea aria-label={text.recognize} value={ocrText} readOnly /></section>
+          <section className="capture-result-section"><h3>{text.translate}</h3><textarea aria-label={text.translate} value={translation} readOnly /></section>
+          {resultError && <div className="capture-result-error" role="alert">{resultError}</div>}
+          <div className="capture-result-actions">
+            {onRecognize && <button className="capture-overlay-action" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>R</button>}
+            {onTranslate && <button className="capture-overlay-action" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>T</button>}
+            {onCopyImage && <button className="capture-overlay-action" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>C</button>}
+            {onSaveImage && <button className="capture-overlay-action" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>S</button>}
+            <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
+           <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
+          </div>
+          <button className="capture-result-window-resize" type="button" aria-label={text.resize} onPointerDown={beginResultWindowResize} onPointerMove={resizeResultWindow} onPointerUp={endResultWindowResize} />
         </aside>
+      )}
+
+      {selection && !resultWindow && (
+        <div className="capture-overlay-actions" style={actionStyle} onMouseDown={(event) => event.stopPropagation()}>
+          {onRecognize && <button className="capture-overlay-action" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>R</button>}
+          {onTranslate && <button className="capture-overlay-action" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>T</button>}
+          {onCopyImage && <button className="capture-overlay-action" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>C</button>}
+          {onSaveImage && <button className="capture-overlay-action" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>S</button>}
+          <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
+           <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
+        </div>
       )}
 
       {rectStyle && Math.abs(active!.width) >= MIN_SIZE && Math.abs(active!.height) >= MIN_SIZE && (
@@ -450,28 +566,6 @@ export function CaptureOverlay({
         </>
       )}
 
-      {selection && (
-        <div className="capture-overlay-actions" style={barStyle} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="capture-overlay-bar">
-            {onRecognize && (
-              <button type="button" aria-label={text.recognize} onClick={act(onRecognize)} disabled={busy}>{text.recognize}</button>
-            )}
-            {onTranslate && (
-              <button type="button" aria-label={text.translate} onClick={act(onTranslate)} disabled={busy}>{text.translate}</button>
-            )}
-            {onCopyImage && (
-              <button type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>
-            )}
-            {onSaveImage && (
-              <button type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>
-            )}
-            <button type="button" className="is-primary" aria-label={text.confirm} onClick={act(onConfirm)} disabled={busy}>
-              {text.confirm}
-            </button>
-            <button type="button" aria-label={text.cancel} onClick={onCancel} disabled={busy}>{text.cancel}</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

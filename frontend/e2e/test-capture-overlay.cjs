@@ -46,6 +46,7 @@ async function run() {
 
   const selection = page.locator(".capture-overlay-rect");
   await selection.waitFor();
+  if (await page.locator(".capture-overlay-handle").count() !== 8) throw new Error("Expected all eight selection resize handles");
   await drag(page, { x: 250, y: 200 }, { x: 300, y: 250 });
   let box = await selection.boundingBox();
   if (!box || Math.round(box.x) !== 150 || Math.round(box.y) !== 150) throw new Error(`Selection did not move by the drag delta: ${JSON.stringify(box)}`);
@@ -60,10 +61,32 @@ async function run() {
 
   const callsBefore = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "image_crop").length);
   await overlay.getByRole("button", { name: "AI识别" }).click();
+  const resultWindow = page.locator(".capture-result-window");
+  await resultWindow.waitFor();
   const callsAfterOverlayAction = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "image_crop").length);
   if (callsAfterOverlayAction !== callsBefore + 1) throw new Error("Overlay action did not crop its selected region");
   if (await page.locator(".capture-overlay").count() !== 1) throw new Error("Non-confirm overlay action closed the overlay");
   if (await page.locator(".image-canvas").count() !== 0) throw new Error("Non-confirm overlay action changed the canvas");
+  if (await resultWindow.locator("textarea").count() !== 2) throw new Error("Expected vertical OCR and translation result fields");
+  const initialResultBox = await resultWindow.boundingBox();
+  if (!initialResultBox || Math.round(initialResultBox.width) !== 450 || Math.round(initialResultBox.height) !== 533) {
+    throw new Error(`Result window did not start at the Python minimum size: ${JSON.stringify(initialResultBox)}`);
+  }
+  const titleBox = await resultWindow.locator(".capture-result-window-title").boundingBox();
+  if (!titleBox) throw new Error("Result window title bar has no box");
+  await drag(page, { x: titleBox.x + 80, y: titleBox.y + 12 }, { x: titleBox.x + 120, y: titleBox.y + 42 });
+  const movedResultBox = await resultWindow.boundingBox();
+  if (!movedResultBox || Math.round(movedResultBox.x - initialResultBox.x) !== 40 || Math.round(movedResultBox.y - initialResultBox.y) !== 30) {
+    throw new Error(`Result window title bar did not move the window: ${JSON.stringify({ initialResultBox, movedResultBox })}`);
+  }
+  const resultGrip = resultWindow.locator(".capture-result-window-resize");
+  const gripBox = await resultGrip.boundingBox();
+  if (!gripBox) throw new Error("Result window resize grip has no box");
+  await drag(page, { x: gripBox.x + gripBox.width / 2, y: gripBox.y + gripBox.height / 2 }, { x: gripBox.x + 100, y: gripBox.y + 70 });
+  const resizedResultBox = await resultWindow.boundingBox();
+  if (!resizedResultBox || resizedResultBox.width <= initialResultBox.width || resizedResultBox.height <= initialResultBox.height || resizedResultBox.width > 900 || resizedResultBox.height > 800) {
+    throw new Error(`Result window bottom-right resize did not update its size: ${JSON.stringify(resizedResultBox)}`);
+  }
 
   await page.keyboard.press("Escape");
   await overlay.waitFor({ state: "detached" });
@@ -107,6 +130,40 @@ async function run() {
   windowCalls = await page.evaluate(() => window.__MOCK_TAURI_WINDOW_CALLS__);
   const restoreAfterConfirm = windowCalls.filter((call) => call.command === "plugin:window|set_position" && call.value?.position?.x === 0 && call.value?.position?.y === 0).length;
   if (restoreAfterConfirm < 2) throw new Error(`Capture confirmation did not restore the original geometry: ${JSON.stringify(windowCalls)}`);
+
+  // OCR/translate text flow: mock text must reach the result window, and Enter must
+  // confirm the latest OCR/translation state rather than a stale closure.
+  await page.getByRole("button", { name: "截图" }).click();
+  await overlay.waitFor();
+  await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+  await overlay.getByRole("button", { name: "AI识别" }).click();
+  await page.waitForFunction(() => document.querySelector(".capture-result-window textarea")?.value?.length > 0);
+  const ocrField = resultWindow.locator("textarea").first();
+  const translateField = resultWindow.locator("textarea").nth(1);
+  if ((await ocrField.inputValue()) !== "Mock OCR text") throw new Error(`OCR text did not reach the result window: ${JSON.stringify(await ocrField.inputValue())}`);
+  await overlay.getByRole("button", { name: "AI翻译" }).click();
+  await page.waitForFunction(() => { const fields = document.querySelectorAll(".capture-result-window textarea"); return fields.length === 2 && Boolean(fields[1].value); });
+  if ((await translateField.inputValue()) !== "Mock translation") throw new Error(`Translation text did not reach the result window: ${JSON.stringify(await translateField.inputValue())}`);
+  await page.keyboard.press("Enter");
+  await overlay.waitFor({ state: "detached" });
+  let mainOcr = await page.locator("textarea[aria-label='AI识别']").inputValue();
+  let mainTranslate = await page.locator("textarea[aria-label='AI翻译']").inputValue();
+  if (mainOcr !== "Mock OCR text" || mainTranslate !== "Mock translation") throw new Error(`Enter confirmed stale OCR/translation text: ${JSON.stringify({ mainOcr, mainTranslate })}`);
+
+  // A new selection must clear the previous result window and text so a new image
+  // cannot be confirmed with old text.
+  await page.getByRole("button", { name: "截图" }).click();
+  await overlay.waitFor();
+  await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+  await overlay.getByRole("button", { name: "AI识别" }).click();
+  await page.waitForFunction(() => document.querySelector(".capture-result-window textarea")?.value?.length > 0);
+  await drag(page, { x: 900, y: 650 }, { x: 950, y: 690 });
+  if (await page.locator(".capture-result-window").count() !== 0) throw new Error("New selection did not clear the previous result window");
+  await page.keyboard.press("Enter");
+  await overlay.waitFor({ state: "detached" });
+  mainOcr = await page.locator("textarea[aria-label='AI识别']").inputValue();
+  mainTranslate = await page.locator("textarea[aria-label='AI翻译']").inputValue();
+  if (mainOcr !== "" || mainTranslate !== "") throw new Error(`New selection confirmed with stale OCR/translation text: ${JSON.stringify({ mainOcr, mainTranslate })}`);
 
   await browser.close();
 }

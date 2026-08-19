@@ -286,6 +286,37 @@ fn renderer_filters_unsafe_link_and_image_protocols() {
 }
 
 #[test]
+fn renderer_blocked_destinations_suppress_children_without_orphan_closers() {
+    let blocked = render_markdown(
+        "[![LEAKALT](https://img.example/a.png)](javascript:alert(1))",
+        RenderTheme::Light,
+    );
+    assert!(!blocked.contains("LEAKALT"), "alt text inside blocked link leaked: {blocked}");
+    assert!(!blocked.contains("img.example"), "safe image inside blocked link leaked: {blocked}");
+    assert!(!blocked.contains("<a "), "blocked link opener leaked: {blocked}");
+    assert!(!blocked.contains("</a>"), "orphan closing link tag emitted: {blocked}");
+
+    let standalone = render_markdown("![LEAKALT](data:text/html,boom)", RenderTheme::Light);
+    assert!(!standalone.contains("LEAKALT"), "blocked image alt text leaked: {standalone}");
+    assert!(!standalone.contains("data:text"), "blocked image destination leaked: {standalone}");
+
+    let safe_after = render_markdown(
+        "[![LEAKALT](https://img.example/a.png)](javascript:alert(1))\n\nSafe [good](https://safe.example)",
+        RenderTheme::Light,
+    );
+    assert!(
+        safe_after.contains("href=\"https://safe.example\">good</a>"),
+        "safe link after blocked structure missing: {safe_after}"
+    );
+    assert_eq!(
+        safe_after.matches("</a>").count(),
+        1,
+        "orphan closing tags after blocked structure: {safe_after}"
+    );
+    assert!(!safe_after.contains("LEAKALT"), "blocked content still leaked: {safe_after}");
+}
+
+#[test]
 fn renderer_uses_vscode_dark_plus_palette_typography_and_core_markup_styles() {
     let markdown = "# Title\n\nParagraph with `inline`.\n\n- item\n\n> quote\n\n```rust\nfn main() {}\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n---\n\n- [x] done\n\n![image](https://example.com/image.png)";
     let html = render_markdown(markdown, RenderTheme::Dark);
@@ -355,4 +386,43 @@ fn renderer_adds_safe_copy_controls_to_fenced_code_only() {
     assert!(html.contains("data-memo-code-copy"));
     assert!(html.contains("<code>code</code>"));
     assert!(!html.contains("onclick="));
+}
+
+#[test]
+fn renderer_labels_fenced_languages_and_keeps_unknown_code_escaped() {
+    let known = render_markdown("```python\nprint(\"safe\")\n```", RenderTheme::Light);
+    assert!(known.contains("class=\"memo-code-language\">PYTHON</span>"));
+    assert!(known.contains("class=\"memo-code-copy\" data-memo-code-copy"));
+
+    let plain = render_markdown("```\nplain <code>\n```", RenderTheme::Light);
+    assert!(plain.contains("class=\"memo-code-language\">TEXT</span>"));
+    assert!(plain.contains("plain &lt;code&gt;"));
+
+    let unknown = render_markdown(
+        "```not-a-language\n<script>alert(1)</script>\n```",
+        RenderTheme::Light,
+    );
+    assert!(unknown.contains("class=\"memo-code-language\">NOT-A-LANGUAGE</span>"));
+    assert!(!unknown.to_ascii_lowercase().contains("<script"));
+    assert!(unknown.contains("&lt;script&gt;"));
+}
+
+#[test]
+fn renderer_exposes_preview_layout_styles_for_markdown_extensions() {
+    let html = render_markdown(
+        "# Heading\n\n- [ ] task\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n> quote\n\n![image](https://example.com/image.png)\n\n[^1]: note",
+        RenderTheme::Dark,
+    );
+
+    for selector in [
+        ".memo-code-language",
+        ".memo-code-toolbar",
+        ".memo-markdown .task-list-item input",
+        ".memo-markdown table",
+        ".memo-markdown blockquote",
+        ".memo-markdown img",
+        ".memo-markdown .footnote-backref",
+    ] {
+        assert!(html.contains(selector), "missing {selector}");
+    }
 }

@@ -25,7 +25,7 @@ const errorText = (reason: unknown) => reason instanceof Error ? reason.message 
 
 interface ContextMenuState { x: number; y: number }
 
-export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { language?: Lang; pasteOcrRequest?: number }) {
+export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const t = copy[language];
   const [image, setImage] = useState<Uint8Array | null>(null);
   const [preview, setPreview] = useState("");
@@ -42,8 +42,6 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
   const [overlay, setOverlay] = useState(false);
   const [captureBackground, setCaptureBackground] = useState("");
   const [captureBytes, setCaptureBytes] = useState<Uint8Array | null>(null);
-  const [captureResult, setCaptureResult] = useState("");
-  const [captureBusy, setCaptureBusy] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [past, setPast] = useState<Uint8Array[]>([]);
   const [future, setFuture] = useState<Uint8Array[]>([]);
@@ -106,7 +104,6 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
       const result = await invoke<{ image: number[]; preview: string }>("capture_screen", { displayIndex: displays.length > 1 ? selectedDisplay : undefined });
       setCaptureBytes(new Uint8Array(result.image));
       setCaptureBackground(result.preview);
-      setCaptureResult("");
       setOverlay(true);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await window.show();
@@ -120,6 +117,7 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
     const geometry = windowGeometryRef.current;
     if (!geometry) return;
     const window = getCurrentWindow();
+    let restoreSucceeded = false;
     try {
       await window.hide();
       if (await window.isFullscreen()) await window.setFullscreen(false);
@@ -129,24 +127,18 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
       setOverlay(false);
       setCaptureBytes(null);
       setCaptureBackground("");
-      setCaptureResult("");
+      restoreSucceeded = true;
     } finally {
-      await window.show();
-      windowGeometryRef.current = null;
+      try {
+        await window.show();
+        if (restoreSucceeded) windowGeometryRef.current = null;
+      } catch (reason) {
+        windowGeometryRef.current = geometry;
+        throw reason;
+      }
     }
   };
   captureRef.current = () => { void capture(); };
-  const captureRegion = async (region: RegionCss, scale: number) => {
-    if (!captureBytes) return;
-    setCaptureBusy(true);
-    try {
-      const f = scale || window.devicePixelRatio || 1;
-      const result = await invoke<{ image: number[] }>("image_crop", { image: Array.from(captureBytes), x: Math.round(region.x * f), y: Math.round(region.y * f), width: Math.max(1, Math.round(region.width * f)), height: Math.max(1, Math.round(region.height * f)) });
-      const bytes = new Uint8Array(result.image);
-      setOriginal(bytes); setBytes(bytes, false); setOcrText(""); setTranslation("");
-      await restoreCaptureWindow();
-    } catch (reason) { setError(errorText(reason)); } finally { setCaptureBusy(false); }
-  };
   const exportImage = () => { if (!image) return; const url = urlFor(image); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `memopaws-${Date.now()}.png`; anchor.click(); URL.revokeObjectURL(url); };
   // Crop from the already-captured screenshot, avoiding re-capturing from the screen
   // (the overlay's dark backdrop would pollute a live re-capture).
@@ -162,16 +154,24 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
     });
     return new Uint8Array(result.image);
   };
-  const overlayRecognize = (region: RegionCss, scale: number) => void (async () => {
-    setCaptureBusy(true); setCaptureResult("");
-    try { const bytes = await cropFromImage(region, scale); const result = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() }); setCaptureResult(result.text || "(无识别结果)"); }
-    catch (reason) { setCaptureResult(errorText(reason)); } finally { setCaptureBusy(false); }
-  })();
-  const overlayTranslate = (region: RegionCss, scale: number) => void (async () => {
-    setCaptureBusy(true); setCaptureResult("");
-    try { const bytes = await cropFromImage(region, scale); const ocr = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() }); const tr = await invoke<TextResult>("ai_translate", { text: ocr.text, target, source, ...config() }); setCaptureResult(tr.text || "(翻译失败)"); }
-    catch (reason) { setCaptureResult(errorText(reason)); } finally { setCaptureBusy(false); }
-  })();
+  const overlayRecognize = async (region: RegionCss, scale: number) => {
+    const bytes = await cropFromImage(region, scale);
+    const result = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() });
+    return result.text || "(无识别结果)";
+  };
+  const overlayTranslate = async (region: RegionCss, scale: number) => {
+    const bytes = await cropFromImage(region, scale);
+    const ocr = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() });
+    const tr = await invoke<TextResult>("ai_translate", { text: ocr.text, target, source, ...config() });
+    return { ocrText: ocr.text, translation: tr.text || "(翻译失败)" };
+  };
+  const confirmCapture = async ({ image, ocrText: confirmedOcr, translation: confirmedTranslation }: { image: Uint8Array; ocrText: string; translation: string }) => {
+    setOriginal(image);
+    setBytes(image, false);
+    setOcrText(confirmedOcr);
+    setTranslation(confirmedTranslation);
+    await restoreCaptureWindow();
+  };
   const overlayCopyImage = (region: RegionCss, scale: number) => void run(async () => {
     const bytes = await cropFromImage(region, scale);
     const blob = new Blob([bytes.slice()], { type: "image/png" });
@@ -254,7 +254,6 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
 
   useEffect(() => { let active = true; Promise.all([invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([records, disp]) => { if (active) { setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
   useEffect(() => { const captureEvent = () => captureRef.current(); const fitEvent = () => setZoom(1); const recognizeTextEvent = (event: Event) => { const text = (event as CustomEvent<{ text?: unknown }>).detail?.text; if (typeof text === "string") { setOcrText(text); setTranslation(""); setError(""); setCopied(false); } }; const recognizeImageEvent = (event: Event) => { const bytes = (event as CustomEvent<{ image?: unknown }>).detail?.image; if (!Array.isArray(bytes) || !bytes.every((byte) => typeof byte === "number")) return; setOriginal(new Uint8Array(bytes)); setBytes(new Uint8Array(bytes), false); setOcrText(""); setTranslation(""); setError(""); }; window.addEventListener("memopaws-capture", captureEvent); window.addEventListener("canvas_fit", fitEvent); window.addEventListener("recognize-text", recognizeTextEvent); window.addEventListener("recognize-image", recognizeImageEvent); return () => { window.removeEventListener("memopaws-capture", captureEvent); window.removeEventListener("canvas_fit", fitEvent); window.removeEventListener("recognize-text", recognizeTextEvent); window.removeEventListener("recognize-image", recognizeImageEvent); }; }, []);
-  useEffect(() => { if (pasteOcrRequest) contextPasteImage(); }, [pasteOcrRequest]);
   useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
 
   const closeOverlay = async () => { await restoreCaptureWindow(); };
@@ -327,16 +326,14 @@ export function RecognizePage({ language = "zh", pasteOcrRequest = 0 }: { langua
      {overlay && captureBackground && <CaptureOverlay
        background={captureBackground}
       hint={t.overlay}
-      onConfirm={(region, scale) => void captureRegion(region, scale)}
+       onConfirm={confirmCapture}
+       onCrop={cropFromImage}
       onCancel={() => void closeOverlay()}
       onRecognize={overlayRecognize}
       onTranslate={overlayTranslate}
       onCopyImage={overlayCopyImage}
        onSaveImage={overlaySaveImage}
-       result={captureResult}
-       busy={captureBusy}
-       onClearResult={() => setCaptureResult("")}
-       labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX" }}
+        labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX", resize: language === "zh" ? "调整结果窗口大小" : "Resize result window" }}
     />}
   </section>;
 }

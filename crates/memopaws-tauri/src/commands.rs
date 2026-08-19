@@ -260,9 +260,6 @@ fn validate_config_request(config: &serde_json::Value) -> Result<(), String> {
         let behavior = behavior.as_str().ok_or_else(|| "close_behavior must be a string".to_string())?;
         if !matches!(behavior, "exit" | "tray") { return Err("close_behavior must be exit or tray".to_string()); }
     }
-    if let Some(value) = config.get("show_floating_widget") {
-        if !value.is_boolean() { return Err("show_floating_widget must be a boolean".to_string()); }
-    }
     if let Some(shortcuts) = config.get("shortcuts") {
         let shortcuts = shortcuts.as_object().ok_or_else(|| "shortcuts must be an object".to_string())?;
         for (action, shortcut) in shortcuts {
@@ -358,7 +355,6 @@ pub async fn save_config(config: serde_json::Value, vault: tauri::State<'_, KeyV
         lock_recover!(clipboard).set_max_items(max as usize)?;
     }
     if let Some(value) = config.get("close_behavior").and_then(|value| value.as_str()) { let _ = app.emit("close-behavior-changed", value); }
-    if let Some(value) = config.get("show_floating_widget").and_then(|value| value.as_bool()) { let _ = app.emit("floating-widget-visibility-changed", value); }
     Ok(())
 }
 
@@ -380,7 +376,6 @@ fn apply_config_patch(app_config: &mut memopaws_config::config::AppConfig, confi
     if let Some(max) = config.get("history_max_items").and_then(|v| v.as_u64()) { app_config.history_max_items = Some(max as usize); }
     if let Some(api_url) = config.get("api_url").and_then(|v| v.as_str()) { app_config.api_url = Some(api_url.trim().to_owned()); }
     if let Some(api_model) = config.get("api_model").and_then(|v| v.as_str()) { app_config.api_model = Some(api_model.trim().to_owned()); }
-    if let Some(show) = config.get("show_floating_widget").and_then(|v| v.as_bool()) { app_config.show_floating_widget = Some(show); }
     if let Some(shortcuts) = config.get("shortcuts").and_then(|v| v.as_object()) {
         app_config.shortcuts = Some(shortcuts.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_owned())).collect());
     }
@@ -705,7 +700,15 @@ fn classify_api_error(error: &str) -> &'static str {
     let lower = error.to_ascii_lowercase();
     if lower.contains("timeout") || lower.contains("timed out") { "timeout" }
     else if lower.contains("401") || lower.contains("unauthorized") { "unauthorized" }
+    else if lower.contains("403") || lower.contains("forbidden") { "forbidden" }
+    else if lower.contains("429") || lower.contains("too many requests") { "rate_limit" }
     else if lower.contains("404") || lower.contains("not found") { "not_found" }
+    else if lower.contains("408") || lower.contains("request timeout") { "request_timeout" }
+    else if lower.contains("500") || lower.contains("internal server error") { "server_error" }
+    else if lower.contains("502") || lower.contains("bad gateway") { "bad_gateway" }
+    else if lower.contains("503") || lower.contains("service unavailable") { "service_unavailable" }
+    else if lower.contains("400") || lower.contains("bad request") { "bad_request" }
+    else if lower.contains("http ") { "http_error" }
     else if lower.contains("connect") || lower.contains("connection") || lower.contains("request failed") { "connect" }
     else if lower.contains("multimodal") || lower.contains("vision") || lower.contains("image") { "multimodal" }
     else { "generic" }
@@ -714,8 +717,7 @@ fn classify_api_error(error: &str) -> &'static str {
 fn api_error_result(error: &str, elapsed_ms: u128) -> serde_json::Value {
     let kind = classify_api_error(error);
     let mut result = serde_json::json!({"error": kind, "elapsed_ms": elapsed_ms});
-    if matches!(kind, "unauthorized" | "not_found") {
-        let code = if kind == "unauthorized" { 401 } else { 404 };
+    if let Some(code) = error.split_whitespace().find_map(|part| part.parse::<u16>().ok().filter(|code| (100..=599).contains(code))) {
         result["status_code"] = serde_json::json!(code);
     }
     result
@@ -728,6 +730,82 @@ fn multimodal_probe_image() -> &'static [u8] {
 
 // Bounded so the UI never appears frozen: reachability probe plus a shorter vision probe.
 const API_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+const KEY_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy)]
+enum KeyProbeFamily { Claude, Grok, Compatible }
+
+struct KeyProbeRequest {
+    family: KeyProbeFamily,
+    endpoint: String,
+    payload: serde_json::Value,
+}
+
+fn key_probe_request(api_url: &str, model: &str) -> KeyProbeRequest {
+    let family = if model.trim().to_ascii_lowercase().starts_with("claude") {
+        KeyProbeFamily::Claude
+    } else if model.trim().to_ascii_lowercase().starts_with("grok") {
+        KeyProbeFamily::Grok
+    } else {
+        KeyProbeFamily::Compatible
+    };
+    let compatible_endpoint = ApiConfig::new(api_url, model, "").endpoint();
+    let base = compatible_endpoint
+        .trim_end_matches("/chat/completions")
+        .trim_end_matches("/messages")
+        .trim_end_matches("/responses");
+    match family {
+        KeyProbeFamily::Claude => KeyProbeRequest {
+            family,
+            endpoint: format!("{base}/messages"),
+            payload: serde_json::json!({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}),
+        },
+        KeyProbeFamily::Grok => KeyProbeRequest {
+            family,
+            endpoint: format!("{base}/responses"),
+            payload: serde_json::json!({"model": model, "input": "hi", "max_output_tokens": 1}),
+        },
+        KeyProbeFamily::Compatible => KeyProbeRequest {
+            family,
+            endpoint: compatible_endpoint,
+            payload: serde_json::json!({"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}),
+        },
+    }
+}
+
+async fn run_key_probe(api_url: &str, model: &str, api_key: &str) -> Result<serde_json::Value, String> {
+    let request = key_probe_request(api_url, model);
+    let client = reqwest::Client::builder().no_proxy().timeout(KEY_PROBE_TIMEOUT).build()
+        .map_err(|_| "API connection failed".to_string())?;
+    let started = std::time::Instant::now();
+    let response = match request.family {
+        KeyProbeFamily::Claude => client.post(&request.endpoint)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&request.payload)
+            .send()
+            .await,
+        KeyProbeFamily::Grok | KeyProbeFamily::Compatible => client.post(&request.endpoint)
+            .bearer_auth(api_key)
+            .json(&request.payload)
+            .send()
+            .await,
+    };
+    let elapsed = started.elapsed().as_millis();
+    match response {
+        Ok(response) if response.status().as_u16() == 200 => Ok(serde_json::json!({"status_code": 200, "elapsed_ms": elapsed})),
+        Ok(response) => Ok(api_error_result(&format!("HTTP {}", response.status().as_u16()), elapsed)),
+        Err(error) => Ok(api_error_result(&error.to_string(), elapsed)),
+    }
+}
+
+fn key_probe_status_result(status_code: u16, elapsed_ms: u128) -> serde_json::Value {
+    if status_code == 200 {
+        serde_json::json!({"status_code": 200, "elapsed_ms": elapsed_ms})
+    } else {
+        api_error_result(&format!("HTTP {status_code}"), elapsed_ms)
+    }
+}
 
 // The probe reuses the same OCR path as real image recognition, so a working
 // AI key/vision model is verified through the exact endpoint the app uses.
@@ -758,7 +836,7 @@ pub async fn test_api_connection(key_entry_id: Option<u64>, model: Option<String
         return run_api_probe(ApiConfig::new(api_url.unwrap_or_default(), model, key.to_string())).await;
     }
     // No inline key: fall back to the saved settings entry so a stored key still tests.
-    let config = {
+    let (api_url, anthropic_url, model, key) = {
         let vault = lock_recover!(vault);
         if !vault.status().unlocked {
             return Err("key vault is locked, unlock it first".to_string());
@@ -773,9 +851,16 @@ pub async fn test_api_connection(key_entry_id: Option<u64>, model: Option<String
         };
         if entry.entry_type != "llm" { return Err("selected key entry is not an LLM key".to_string()); }
         let key = Zeroizing::new(vault.get_value(entry.id).map_err(|_| "API connection failed".to_string())?);
-        resolve_ai_config(entry, key, Some(model.clone()))?
+        let anthropic_url = entry.url_anthropic.clone();
+        let config = resolve_ai_config(entry, key.clone(), Some(model.clone()))?;
+        (config.endpoint().trim_end_matches("/chat/completions").to_string(), anthropic_url, config.model().to_string(), key)
     };
-    run_api_probe(config).await
+    let probe_url = if model.trim().to_ascii_lowercase().starts_with("claude") && !anthropic_url.trim().is_empty() {
+        anthropic_url.as_str()
+    } else {
+        api_url.as_str()
+    };
+    run_key_probe(probe_url, &model, key.as_str()).await
 }
 
 #[tauri::command]
@@ -793,22 +878,6 @@ pub fn show_main_window_when_ready(app: tauri::AppHandle) -> Result<(), String> 
     let window = app.get_webview_window("main").ok_or_else(|| "main window not found".to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn set_floating_widget_visible(visible: bool, app: tauri::AppHandle) -> Result<(), String> {
-    let mut config = memopaws_config::config::AppConfig::load().map_err(|error| error.to_string())?;
-    config.show_floating_widget = Some(visible);
-    config.save().map_err(|error| error.to_string())?;
-    if visible {
-        let window = app.get_webview_window("floating").ok_or_else(|| "floating window not found".to_string())?;
-        window.show().map_err(|error| format!("failed to show floating window: {error}"))?;
-        window.set_focus().map_err(|error| format!("failed to focus floating window: {error}"))?;
-    } else if let Some(window) = app.get_webview_window("floating") {
-        window.hide().map_err(|error| format!("failed to hide floating window: {error}"))?;
-    }
-    let _ = app.emit("floating-widget-visibility-changed", visible);
     Ok(())
 }
 
@@ -989,7 +1058,7 @@ pub fn capture_delete(id: u64, state: tauri::State<'_, CaptureState>) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::{Arc, Mutex}, time::{SystemTime, UNIX_EPOCH}};
+    use std::{sync::{Arc, Mutex}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
     use memopaws_keys::{KeyEntryInput, KeyVault};
     use memopaws_memo::model::Memo;
@@ -1099,9 +1168,6 @@ mod tests {
             "close_behavior": "minimize"
         })).is_err());
         assert!(super::validate_config_request(&serde_json::json!({
-            "show_floating_widget": "yes"
-        })).is_err());
-        assert!(super::validate_config_request(&serde_json::json!({
             "shortcuts": {"screenshot_ocr": ""}
         })).is_err());
         assert!(super::validate_config_request(&serde_json::json!({
@@ -1116,8 +1182,7 @@ mod tests {
             "api_model": "vision",
             "clipboard_max_items": 50,
             "history_max_items": 100,
-            "close_behavior": "tray",
-            "show_floating_widget": true,
+             "close_behavior": "tray",
             "shortcuts": {"screenshot_ocr": "Alt+X"}
         })).is_ok());
     }
@@ -1281,6 +1346,9 @@ mod tests {
     fn api_error_classification_covers_all_categories() {
         assert_eq!(super::classify_api_error("request timed out"), "timeout");
         assert_eq!(super::classify_api_error("API returned HTTP 401"), "unauthorized");
+        assert_eq!(super::classify_api_error("API returned HTTP 403"), "forbidden");
+        assert_eq!(super::classify_api_error("API returned HTTP 429"), "rate_limit");
+        assert_eq!(super::classify_api_error("API returned HTTP 503"), "service_unavailable");
         assert_eq!(super::classify_api_error("404 not found"), "not_found");
         assert_eq!(super::classify_api_error("connection refused"), "connect");
         assert_eq!(super::classify_api_error("request failed: hyper error"), "connect");
@@ -1299,8 +1367,66 @@ mod tests {
         let missing = super::api_error_result("404 not found", 3);
         assert_eq!(missing["status_code"], 404);
 
+        for (message, kind, status) in [
+            ("HTTP 403 forbidden", "forbidden", 403),
+            ("HTTP 429 too many requests", "rate_limit", 429),
+            ("HTTP 503 service unavailable", "service_unavailable", 503),
+        ] {
+            let result = super::api_error_result(message, 5);
+            assert_eq!(result["error"], kind);
+            assert_eq!(result["status_code"], status);
+        }
+
         let timeout = super::api_error_result("timed out", 8000);
         assert!(timeout.get("status_code").is_none());
+    }
+
+    #[test]
+    fn key_probe_accepts_only_http_200_and_preserves_other_statuses() {
+        for status in [201, 204, 400, 408, 500, 502] {
+            let result = super::key_probe_status_result(status, 7);
+            assert_eq!(result["status_code"], status);
+            assert!(result.get("error").is_some());
+        }
+        assert_eq!(super::key_probe_status_result(200, 7)["status_code"], 200);
+        assert!(super::key_probe_status_result(200, 7).get("error").is_none());
+        assert_eq!(super::key_probe_status_result(201, 7)["error"], "http_error");
+        assert_eq!(super::key_probe_status_result(408, 7)["error"], "request_timeout");
+        assert_eq!(super::key_probe_status_result(500, 7)["error"], "server_error");
+    }
+
+    #[test]
+    fn key_probe_selects_model_family_endpoint_and_payload() {
+        let claude = super::key_probe_request("https://api.anthropic.com/v1/", "claude-3-5-haiku");
+        assert_eq!(claude.endpoint, "https://api.anthropic.com/v1/messages");
+        assert_eq!(claude.payload, serde_json::json!({
+            "model": "claude-3-5-haiku",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "hi"}]
+        }));
+
+        let grok = super::key_probe_request("https://api.x.ai/v1/chat/completions", "grok-3");
+        assert_eq!(grok.endpoint, "https://api.x.ai/v1/responses");
+        assert_eq!(grok.payload, serde_json::json!({
+            "model": "grok-3",
+            "input": "hi",
+            "max_output_tokens": 1
+        }));
+
+        for model in ["gpt-4o-mini", "glm-4-flash", "deepseek-chat", "custom-model"] {
+            let request = super::key_probe_request("https://provider.example/v1/", model);
+            assert_eq!(request.endpoint, "https://provider.example/v1/chat/completions");
+            assert_eq!(request.payload, serde_json::json!({
+                "model": model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1
+            }));
+        }
+    }
+
+    #[test]
+    fn key_probe_timeout_is_ten_seconds() {
+        assert_eq!(super::KEY_PROBE_TIMEOUT, Duration::from_secs(10));
     }
 
     #[test]
@@ -1355,8 +1481,7 @@ mod tests {
             "clipboard_max_items": 60,
             "history_max_items": 200,
             "api_url": " https://example.test/v1 ",
-            "api_model": " model-x ",
-            "show_floating_widget": false,
+             "api_model": " model-x ",
             "shortcuts": {"capture": "Ctrl+Shift+C", "screenshot_ocr": "Ctrl+Shift+D"},
             "text_replacements": [{"abbr": ":w", "replacement": "welcome"}]
         })).unwrap();
@@ -1367,7 +1492,6 @@ mod tests {
         assert_eq!(config.history_max_items, Some(200));
         assert_eq!(config.api_url.as_deref(), Some("https://example.test/v1"));
         assert_eq!(config.api_model.as_deref(), Some("model-x"));
-        assert_eq!(config.show_floating_widget, Some(false));
         assert_eq!(config.shortcuts.as_ref().unwrap()["capture"], "Ctrl+Shift+C");
         assert_eq!(config.shortcuts.as_ref().unwrap()["screenshot_ocr"], "Ctrl+Shift+D");
         assert_eq!(config.text_replacements[0].abbr, ":w");

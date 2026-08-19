@@ -3,6 +3,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "KeysPage.tsx"), "utf8");
+for (const category of ["unauthorized", "not_found", "timeout", "connect", "request_timeout", "bad_request", "server_error", "bad_gateway", "http_error"]) {
+  assert.match(source, new RegExp(`${category}:`), `KeysPage must localize ${category}`);
+}
+assert.match(source, /typeof localized === "string"/, "speed errors must render localized text instead of raw categories");
 
 assert.match(
   source,
@@ -39,5 +43,15 @@ assert.match(
   /try \{[\s\S]*for \(const entry of llm\) \{[\s\S]*\} finally \{[\s\S]*window\.clearInterval\(ticker\);[\s\S]*setTestingGlyphs\(\{\}\);[\s\S]*setTesting\(false\);[\s\S]*\}/,
   "speed test cleanup must run when an invocation throws",
 );
+
+assert.doesNotMatch(
+  source.match(/for \(const entry of llm\) \{[\s\S]*?\n  \};/)?.[0] || "",
+  /vision_result|vision:\s*Boolean/,
+  "key-list speed probes must not consume or display a vision probe result",
+);
+
+for (const kind of ["forbidden", "rate_limit", "service_unavailable"]) {
+  assert.match(source, new RegExp(`${kind}:`), `key-list speed tests must localize ${kind}`);
+}
 
 console.log("KeysPage interaction refinement contract passed");

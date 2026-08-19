@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { SegmentedControl } from "../components/SegmentedControl";
 import type { Lang } from "../i18n/lang";
+import { useTheme } from "../hooks/useTheme";
 import "./MemoPage.css";
 
 interface Memo {
@@ -21,6 +22,11 @@ interface SearchResult {
 }
 
 type ViewMode = "edit" | "split" | "preview";
+
+const MIN_PREVIEW_SCALE = 0.85;
+const MAX_PREVIEW_SCALE = 1.35;
+const PREVIEW_SCALE_STEP = 0.001;
+const PREVIEW_CACHE_MAX = 50;
 
 const copy = {
   zh: {
@@ -119,6 +125,7 @@ interface MemoPageProps {
 
 export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
   const t = copy[language];
+  const { theme } = useTheme();
   const [memos, setMemos] = useState<Memo[]>([]);
   const [selected, setSelected] = useState<Memo | null>(null);
   const [query, setQuery] = useState("");
@@ -127,6 +134,7 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
   const [searchError, setSearchError] = useState("");
   const [mode, setMode] = useState<ViewMode>("edit");
   const [preview, setPreview] = useState("");
+  const [previewScale, setPreviewScale] = useState(1);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -135,6 +143,7 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const searchToken = useRef(0);
   const renderToken = useRef(0);
+  const previewCache = useRef(new Map<string, string>());
   const copyFeedbackTimer = useRef<number | null>(null);
 
   const runSearch = async (value: string) => {
@@ -187,9 +196,22 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
     // Keep previous HTML while re-rendering to avoid flash (Python debounce behavior).
     if (!preview) setPreviewLoading(true);
     const timer = window.setTimeout(() => {
-      const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+      const cacheKey = JSON.stringify({ content: selected.content, theme, scale: previewScale });
+      const cached = previewCache.current.get(cacheKey);
+      if (cached !== undefined) {
+        if (active && token === renderToken.current) {
+          setPreview(cached);
+          setPreviewLoading(false);
+        }
+        return;
+      }
       invoke<string>("memo_render", { content: selected.content, theme })
         .then((html) => {
+          previewCache.current.set(cacheKey, html);
+          if (previewCache.current.size > PREVIEW_CACHE_MAX) {
+            const oldest = previewCache.current.keys().next().value;
+            if (oldest !== undefined) previewCache.current.delete(oldest);
+          }
           if (active && token === renderToken.current) setPreview(html);
         })
         .catch((reason) => {
@@ -203,7 +225,7 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [mode, selected?.content, selected?.id]);
+  }, [mode, selected?.content, selected?.id, previewScale, theme]);
 
   const visibleMemos: SearchResult[] = query.trim()
     ? (searchResults ?? [])
@@ -240,6 +262,15 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
     } catch (reason) {
       setError(errorText(reason));
     }
+  };
+
+  const handlePreviewWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    setPreviewScale((current) => Math.min(
+      MAX_PREVIEW_SCALE,
+      Math.max(MIN_PREVIEW_SCALE, current - event.deltaY * PREVIEW_SCALE_STEP),
+    ));
   };
 
   const canDiscard = () => !dirty || window.confirm(t.unsaved);
@@ -456,7 +487,13 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
                 previewLoading && !preview ? (
                   <div className="memo-preview-state" role="status">{t.previewing}</div>
                 ) : (
-                  <div className="memo-preview" onClick={copyPreviewCode} dangerouslySetInnerHTML={{ __html: preview }} />
+                  <div
+                    className="memo-preview"
+                    onClick={copyPreviewCode}
+                    onWheel={handlePreviewWheel}
+                    style={{ "--memo-preview-scale": previewScale } as React.CSSProperties}
+                    dangerouslySetInnerHTML={{ __html: preview }}
+                  />
                 )
               )}
             </div>

@@ -72,22 +72,12 @@ assert.match(
   "capture overlay must be opaque so the app UI never shows through",
 );
 
-const panelCss = overlayCss.match(/\.capture-overlay-panel \{[\s\S]*?\}/);
-assert.ok(panelCss && !/right: 16px/.test(panelCss[0]) && /position: absolute/.test(panelCss[0]), "the panel position must be driven by the selection");
-const panelSource = overlaySource.match(/const panelStyle =[\s\S]*?return \{[\s\S]*?\};/);
+const panelCss = overlayCss.match(/\.capture-result-window \{[\s\S]*?\}/);
+assert.ok(panelCss && /position: absolute/.test(panelCss[0]), "the result window must be positioned relative to the selection");
+const panelSource = overlaySource.match(/const defaultResultWindow =[\s\S]*?return \{[\s\S]*?\};/);
 assert.ok(
-  panelSource && /preferredLeft = rectStyle\.left \+ rectStyle\.width \+ GAP/.test(panelSource[0]),
-  "the result panel must hug the right edge of the selection like the Python version",
-);
-assert.match(
-  overlaySource,
-  /onClearResult\?:\s*\(\) => void/,
-  "the result panel must support a clear action",
-);
-assert.match(
-  recognizeSource,
-  /onClearResult=\{\(\) => setCaptureResult\(""\)\}/,
-  "RecognizePage must wire the result panel clear button",
+  panelSource && /rectStyle\.left \+ rectStyle\.width \+ RESULT_WINDOW_GAP/.test(panelSource[0]),
+  "the result window must hug the selection with the Python gap",
 );
 
 const recognizeCss = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "RecognizePage.css"), "utf8");
@@ -102,5 +92,42 @@ assert.match(
   /\+\s*\(loading \? " is-running" : ""\)/,
   "the is-running class must be driven by the loading state",
 );
+
+assert.match(
+  overlaySource,
+  /onConfirm: \(result: \{ image: Uint8Array; ocrText: string; translation: string \}\)/,
+  "CaptureOverlay confirmation must return the selected image and both result fields",
+);
+assert.match(overlaySource, /\["n", "ne", "e", "se", "s", "sw", "w", "nw"\]/);
+for (const handle of ["n", "ne", "e", "se", "s", "sw", "w", "nw"]) {
+  assert.match(overlayCss, new RegExp(`\\.capture-overlay-handle--${handle}`));
+}
+assert.match(overlaySource, /capture-result-window/);
+assert.match(overlaySource, /capture-result-window-title/);
+assert.match(overlaySource, /draggingResultWindow/);
+assert.match(overlaySource, /resizingResultWindow/);
+assert.match(overlaySource, /capture-result-window-resize/);
+assert.match(overlaySource, /RESULT_WINDOW_MIN_WIDTH = 450/);
+assert.match(overlaySource, /RESULT_WINDOW_MIN_HEIGHT = 533/);
+assert.match(overlaySource, /RESULT_WINDOW_MAX_WIDTH = 900/);
+assert.match(overlaySource, /RESULT_WINDOW_MAX_HEIGHT = 800/);
+assert.match(overlaySource, /RESULT_WINDOW_GAP = 16/);
+assert.match(overlaySource, /ocrText/);
+assert.match(overlaySource, /translation/);
+assert.ok(!overlaySource.includes("capture-overlay-bar"), "the capsule action bar must be removed");
+assert.match(overlayCss, /\.capture-overlay-action \{[\s\S]*?width: 28px[\s\S]*?height: 28px[\s\S]*?border-radius: 3px/);
+assert.match(overlayCss, /min-width: 450px/);
+assert.match(overlayCss, /min-height: 533px/);
+assert.match(overlayCss, /max-width: 900px/);
+assert.match(overlayCss, /max-height: 800px/);
+assert.match(
+  recognizeSource,
+  /setOriginal\(image\)[\s\S]*?setBytes\(image, false\)[\s\S]*?setOcrText\(confirmedOcr\)[\s\S]*?setTranslation\(confirmedTranslation\)[\s\S]*?restoreCaptureWindow\(\)/,
+  "confirmation must update image, OCR, translation, and restore the capture window",
+);
+assert.match(recognizeSource, /windowGeometryRef\.current = geometry/, "failed restore must retain geometry for retry");
+assert.match(recognizeSource, /if \(restoreSucceeded\)/, "capture restore must only clear geometry after every operation succeeds");
+assert.match(overlaySource, /operationTokenRef/, "overlay async operations must use a generation token");
+assert.match(overlaySource, /operationTokenRef\.current === operationToken/, "late overlay results must be rejected");
 
 console.log("settings key promotion and capture overlay contracts passed");

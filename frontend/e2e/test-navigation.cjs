@@ -146,12 +146,11 @@ async function runTests() {
 
   console.log('\n--- Test 4: Settings interactions ---');
   const settings = page.locator('.settings-page');
-  for (const heading of ['主题', '语言', 'API 配置', '剪贴板设置', '操作历史', '存储目录', '快捷键', '悬浮窗', '关闭行为']) {
+  for (const heading of ['主题', '语言', 'API 配置', '剪贴板设置', '操作历史', '存储目录', '快捷键', '关闭行为']) {
     if (await settings.getByRole('heading', { name: heading }).count() !== 1) throw new Error(`Missing settings section ${heading}`);
   }
   await settings.getByLabel('剪贴板设置最大条数').fill('80');
   await settings.getByLabel('操作历史最大条数').fill('120');
-  await settings.getByRole('button', { name: '显示' }).click();
   await settings.getByRole('button', { name: '退出' }).click();
   await settings.locator('input[aria-label*="截图识别"]').press('Control+Y');
   await settings.getByRole('button', { name: '测试连接' }).click();
@@ -160,7 +159,7 @@ async function runTests() {
   await settings.locator('.settings-footer').getByRole('button', { name: '保存设置' }).click();
   await page.waitForTimeout(100);
   const runtimeUpdates = await page.evaluate(() => window.__MOCK_TAURI_RUNTIME_UPDATES__);
-  for (const command of ['set_close_behavior', 'set_floating_widget_visible']) {
+  for (const command of ['set_close_behavior']) {
     if (!runtimeUpdates.some((entry) => entry.command === command)) throw new Error(`Missing runtime update ${command}`);
   }
   const commandCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__);

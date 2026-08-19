@@ -13,7 +13,7 @@ interface KeyEntry {
 interface Draft {
   name: string; type: KeyType; value: string; url: string; url_anthropic: string; note: string;
 }
-type Latency = { ms?: number; error?: string; vision?: boolean };
+type Latency = { ms?: number; error?: string };
 const MATRIX_CHARS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789";
 const matrixFrame = () => Array.from({ length: 8 }, () => MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)]).join("");
 const waitForRender = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -51,6 +51,19 @@ const copy = {
     add: "添加密钥",
     testSpeed: "测试速度",
     testing: "测试中…",
+    unauthorized: "API Key 无效 (401)",
+    not_found: "地址不存在 (404)",
+    timeout: "网络超时",
+    connect: "无法连接服务器",
+    forbidden: "无权限 (403)",
+    rate_limit: "请求过多 (429)",
+    service_unavailable: "服务暂不可用 (503)",
+    request_timeout: "请求超时 (408)",
+    bad_request: "请求无效 (400)",
+    server_error: "服务器错误 (500)",
+    bad_gateway: "网关错误 (502)",
+    http_error: "请求失败",
+    generic: "请求失败",
     cancel: "取消",
     close: "关闭",
     newKey: "添加密钥",
@@ -110,6 +123,19 @@ const copy = {
     add: "Add Key",
     testSpeed: "Test Speed",
     testing: "Testing…",
+    unauthorized: "Invalid API Key (401)",
+    not_found: "Endpoint not found (404)",
+    timeout: "Network timeout",
+    connect: "Could not connect to server",
+    forbidden: "Forbidden (403)",
+    rate_limit: "Rate limited (429)",
+    service_unavailable: "Service unavailable (503)",
+    request_timeout: "Request timeout (408)",
+    bad_request: "Bad request (400)",
+    server_error: "Server error (500)",
+    bad_gateway: "Bad gateway (502)",
+    http_error: "Request failed",
+    generic: "Request failed",
     cancel: "Cancel",
     close: "Close",
     newKey: "Add Key",
@@ -358,18 +384,16 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
             keyEntryId: entry.id,
             model: entry.note || "glm-4-flash",
           });
-          result = response.status_code === 200
+            result = response.status_code === 200
             ? {
                 ms: typeof response.elapsed_ms === "number" ? response.elapsed_ms : undefined,
-                vision: Boolean((response.vision_result as { success?: boolean } | undefined)?.success),
               }
             : {
-                error:
-                  response.status_code === 401
-                    ? "401"
-                    : response.status_code === 404
-                      ? "404"
-                      : String(response.error || response.status_code || "fail"),
+                error: (() => {
+                  const category = typeof response.error === "string" ? response.error : "generic";
+                  const localized = t[category as keyof Texts];
+                  return typeof localized === "string" ? localized : `${t.http_error} (${response.status_code || ""})`;
+                })(),
               };
         } catch (reason) {
           result = { error: errorText(reason) };
@@ -828,7 +852,7 @@ function LlmCard({
   onPointerMove: (event: PointerEvent<HTMLElement>) => void;
   onPointerUp: (event: PointerEvent<HTMLElement>) => void;
 }) {
-  const vision = latency?.vision ?? isVisionModel(entry.note);
+  const vision = isVisionModel(entry.note);
   const latencyText = testingGlyph || (latency?.error
     ? latency.error
     : latency?.ms != null

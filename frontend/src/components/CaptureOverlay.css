@@ -161,64 +161,30 @@
 .capture-overlay-actions {
   position: absolute;
   z-index: 5;
-  padding: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 8px;
-  background: rgba(20, 20, 20, 0.92);
-  cursor: default;
-}
-
-.capture-overlay-bar {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
-  max-width: min(720px, calc(100vw - 24px));
+  background: transparent;
 }
 
-.capture-overlay-result {
-  display: block;
-  max-width: min(560px, calc(100vw - 24px));
-  max-height: 180px;
-  margin: 0 0 6px;
-  overflow: auto;
-  color: #fff;
-  font: 12px/1.5 inherit;
-  white-space: pre-wrap;
-}
-
-.capture-overlay-bar button {
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 6px;
-  padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.capture-overlay-actions {
-  max-width: calc(100vw - 24px);
-  box-sizing: border-box;
-}
-
-.capture-overlay-panel {
+.capture-result-window {
   position: absolute;
   z-index: 6;
-  width: min(320px, calc(100vw - 32px));
-  max-height: calc(100vh - 48px);
+  min-width: 450px;
+  min-height: 533px;
+  max-width: 900px;
+  max-height: 800px;
   display: flex;
   flex-direction: column;
-  border: 1px solid rgba(77, 163, 255, 0.5);
-  border-radius: 10px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 3px;
   background: rgba(20, 20, 20, 0.94);
   color: #fff;
   box-shadow: 0 0 24px rgba(77, 163, 255, 0.35);
   cursor: default;
 }
 
-.capture-overlay-panel.is-running {
+.capture-result-window.is-running {
   animation: panel-glow 1.8s ease-in-out infinite;
 }
 
@@ -233,48 +199,103 @@
   }
 }
 
-.capture-overlay-panel-head {
+.capture-result-window-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
+  min-height: 30px;
+  box-sizing: border-box;
   font-size: 12px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.75);
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: move;
+  user-select: none;
 }
 
-.capture-overlay-panel-head button {
-  border: none;
-  background: none;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.capture-overlay-panel-head button:hover {
-  color: #fff;
-}
-
-.capture-overlay-panel-body {
-  margin: 0;
-  padding: 10px 12px;
-  overflow: auto;
-  font: 12px/1.6 inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
-  flex: 1;
+.capture-result-section {
   min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 0;
 }
 
-.capture-overlay-bar button:hover {
+.capture-result-section h3 {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+}
+
+.capture-result-section textarea {
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: #fff;
+  font: 12px/1.6 inherit;
+}
+
+.capture-result-error {
+  margin: 8px 12px 0;
+  color: #ff9b9b;
+  font-size: 12px;
+}
+
+.capture-result-actions {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.capture-overlay-action {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .55);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.capture-overlay-action:hover {
   background: rgba(255, 255, 255, 0.18);
 }
 
-.capture-overlay-bar button.is-primary {
-  border-color: transparent;
+.capture-overlay-action.is-primary {
+  margin-left: auto;
   background: var(--accent);
+}
+
+.capture-result-window-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: linear-gradient(135deg, transparent 45%, rgba(255, 255, 255, .75) 46%, rgba(255, 255, 255, .75) 52%, transparent 53%);
+  cursor: nwse-resize;
+}
+
+.capture-result-window-resize::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid rgba(255, 255, 255, .75);
+  border-bottom: 1px solid rgba(255, 255, 255, .75);
 }

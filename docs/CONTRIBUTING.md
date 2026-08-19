@@ -71,7 +71,6 @@ node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
 node frontend/e2e/test-tauri-app.cjs
 node frontend/e2e/test-tauri-driver.cjs
-node frontend/e2e/test-floating-widget.cjs
 node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-clipboard-layout.cjs
 node frontend/e2e/test-key-interaction-refinement.cjs

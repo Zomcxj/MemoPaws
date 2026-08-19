@@ -124,12 +124,12 @@ async function runTests() {
   console.log('Screenshot: 08-theme-dark.png');
 
   const settings = page.locator('.settings-page');
-  for (const heading of ['主题', '语言', 'API 配置', '剪贴板设置', '操作历史', '存储目录', '快捷键', '悬浮窗', '关闭行为']) {
+  for (const heading of ['主题', '语言', 'API 配置', '剪贴板设置', '操作历史', '存储目录', '快捷键', '关闭行为']) {
     if (await settings.getByRole('heading', { name: heading }).count() !== 1) throw new Error(`Missing settings section: ${heading}`);
   }
   await settings.getByRole('button', { name: 'English' }).click();
   await page.waitForTimeout(100);
-  for (const text of ['Theme', 'Language', 'API Configuration', 'Clipboard Settings', 'History', 'Storage Directory', 'Keyboard Shortcuts', 'Floating Widget', 'Close Behavior']) {
+  for (const text of ['Theme', 'Language', 'API Configuration', 'Clipboard Settings', 'History', 'Storage Directory', 'Keyboard Shortcuts', 'Close Behavior']) {
     if (await settings.getByText(text, { exact: true }).count() < 1) throw new Error(`Missing translated settings text: ${text}`);
   }
   if (await settings.getByText('test-api-key-12345', { exact: false }).count() !== 0) throw new Error('API key rendered in settings');

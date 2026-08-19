@@ -44,7 +44,6 @@ pub struct AppConfig {
     pub shortcuts: Option<HashMap<String, String>>,
     #[serde(default, deserialize_with = "deserialize_text_replacements")]
     pub text_replacements: Vec<TextReplacement>,
-    pub show_floating_widget: Option<bool>,
 }
 
 impl Default for AppConfig {
@@ -72,7 +71,6 @@ impl Default for AppConfig {
                 .collect(),
             ),
             text_replacements: Vec::new(),
-            show_floating_widget: Some(true),
         }
     }
 }
