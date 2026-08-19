@@ -13,7 +13,6 @@ fn missing_config_creates_defaults_and_round_trips_through_disk() {
     assert_eq!(defaults.language.as_deref(), Some("zh"));
     assert_eq!(defaults.close_behavior.as_deref(), Some("tray"));
     assert_eq!(defaults.clipboard_max_items, Some(50));
-    assert_eq!(defaults.history_max_items, Some(100));
     assert!(path.exists());
 
     let reloaded = AppConfig::load_from(&path).unwrap();
@@ -34,11 +33,18 @@ fn round_trip_preserves_all_user_fields() {
         api_url: Some("https://example.test/v1/chat/completions".into()),
         api_model: Some("vision-model".into()),
         clipboard_max_items: Some(120),
-        history_max_items: Some(240),
-        shortcuts: Some([("capture".into(), "Ctrl+Shift+A".into()), ("toggle_clipboard".into(), "".into())].into_iter().collect()),
-        text_replacements: vec![
-            memopaws_config::config::TextReplacement { abbr: ":brb".into(), replacement: "be right back".into() },
-        ],
+        shortcuts: Some(
+            [
+                ("capture".into(), "Ctrl+Shift+A".into()),
+                ("toggle_clipboard".into(), "".into()),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        text_replacements: vec![memopaws_config::config::TextReplacement {
+            abbr: ":brb".into(),
+            replacement: "be right back".into(),
+        }],
     };
     config.save_to(&path).unwrap();
 
@@ -53,7 +59,11 @@ fn round_trip_preserves_all_user_fields() {
 fn legacy_floating_config_field_is_ignored_when_loading() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("setting.json");
-    fs::write(&path, r#"{"theme":"light","show_floating_widget":false,"future_field":true}"#).unwrap();
+    fs::write(
+        &path,
+        r#"{"theme":"light","show_floating_widget":false,"future_field":true}"#,
+    )
+    .unwrap();
 
     let loaded = AppConfig::load_from(&path).unwrap();
     assert_eq!(loaded.theme.as_deref(), Some("light"));
@@ -63,7 +73,11 @@ fn legacy_floating_config_field_is_ignored_when_loading() {
 fn non_standard_theme_and_language_values_are_preserved_verbatim() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("setting.json");
-    fs::write(&path, r#"{"theme":"blue","language":"fr","close_behavior":"tray"}"#).unwrap();
+    fs::write(
+        &path,
+        r#"{"theme":"blue","language":"fr","close_behavior":"tray"}"#,
+    )
+    .unwrap();
 
     let loaded = AppConfig::load_from(&path).unwrap();
     assert_eq!(loaded.theme.as_deref(), Some("blue"));

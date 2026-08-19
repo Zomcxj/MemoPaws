@@ -32,7 +32,6 @@ MemoPaws 提供以下功能：
 | `memo/` | 备忘录文件 |
 | `keys.json` | 加密密钥库 |
 | `clipboard.json` | 剪贴板历史 |
-| `history.json` | 操作历史 |
 | `setting.json` | 应用配置 |
 | `clipboard_images/` | 剪贴板图片 |
 | `captures/` | 截图文件 |
@@ -49,6 +48,6 @@ MemoPaws 提供以下功能：
 - `api_key`、`api_url`、`api_model`：AI 服务配置
 - `shortcuts`：快捷键覆盖
 - `text_replacements`：文字替换规则
-- `clipboard_max_items`、`history_max_items`：历史记录上限
+- `clipboard_max_items`：剪贴板历史记录上限
 
 API Key 也可以通过应用内的密钥管理页面保存。旧配置中的未知字段会被忽略，以便未来版本兼容读取。

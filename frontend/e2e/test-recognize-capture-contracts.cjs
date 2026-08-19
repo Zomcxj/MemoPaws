@@ -81,17 +81,12 @@ assert.ok(
 );
 
 const recognizeCss = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "RecognizePage.css"), "utf8");
-assert.match(
-  recognizeCss,
-  /\.recognize-panel\.result-panel\.is-running \{[\s\S]*?animation: result-glow/,
-  "the OCR/translate panels must run the glow animation only while recognizing or translating",
-);
-assert.match(recognizeCss, /@keyframes result-glow/, "the result-glow keyframes must exist");
-assert.match(
-  recognizeSource,
-  /\+\s*\(loading \? " is-running" : ""\)/,
-  "the is-running class must be driven by the loading state",
-);
+assert.match(recognizeSource, /const \[recognizing, setRecognizing\]/, "OCR must have its own running state");
+assert.match(recognizeSource, /const \[translating, setTranslating\]/, "translation must have its own running state");
+assert.match(recognizeSource, /result-panel" \+ \(recognizing \? " is-running" : ""\)/, "only the OCR panel may glow during OCR");
+assert.match(recognizeSource, /result-panel" \+ \(translating \? " is-running" : ""\)/, "only the translation panel may glow during translation");
+assert.doesNotMatch(recognizeSource, /result-panel" \+ \(loading \? " is-running" : ""\)/, "a shared loading state must not animate both result panels");
+assert.doesNotMatch(recognizeSource, /history_list|history_delete|history_clear|recognize-history|HistoryRecord/, "recognition and translation operation history must be removed");
 
 assert.match(
   overlaySource,
@@ -116,6 +111,7 @@ assert.match(overlaySource, /ocrText/);
 assert.match(overlaySource, /translation/);
 assert.ok(!overlaySource.includes("capture-overlay-bar"), "the capsule action bar must be removed");
 assert.match(overlayCss, /\.capture-overlay-action \{[\s\S]*?width: 28px[\s\S]*?height: 28px[\s\S]*?border-radius: 3px/);
+assert.match(overlayCss, /\.capture-overlay-action--label \{[\s\S]*?width: auto[\s\S]*?min-width: 48px/, "localized screenshot actions must have room for full labels");
 assert.match(overlayCss, /min-width: 450px/);
 assert.match(overlayCss, /min-height: 533px/);
 assert.match(overlayCss, /max-width: 900px/);
@@ -129,5 +125,10 @@ assert.match(recognizeSource, /windowGeometryRef\.current = geometry/, "failed r
 assert.match(recognizeSource, /if \(restoreSucceeded\)/, "capture restore must only clear geometry after every operation succeeds");
 assert.match(overlaySource, /operationTokenRef/, "overlay async operations must use a generation token");
 assert.match(overlaySource, /operationTokenRef\.current === operationToken/, "late overlay results must be rejected");
+assert.match(overlaySource, />\{text\.recognize\}<\/button>/, "screenshot OCR action must render the localized full label");
+assert.match(overlaySource, />\{text\.translate\}<\/button>/, "screenshot translate action must render the localized full label");
+assert.match(overlaySource, />\{text\.copyImage\}<\/button>/, "screenshot copy action must render the localized full label");
+assert.match(overlaySource, />\{text\.saveImage\}<\/button>/, "screenshot save action must render the localized full label");
+assert.doesNotMatch(overlaySource, />R<\/button>|>T<\/button>|>C<\/button>|>S<\/button>/, "screenshot actions must not use English letter abbreviations");
 
 console.log("settings key promotion and capture overlay contracts passed");

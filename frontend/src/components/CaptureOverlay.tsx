@@ -453,7 +453,7 @@ export function CaptureOverlay({
   } : undefined;
 
   const actionStyle = rectStyle ? {
-    left: Math.min(Math.max(4, rectStyle.left), Math.max(4, window.innerWidth - 216)),
+    left: Math.min(Math.max(4, rectStyle.left), Math.max(4, window.innerWidth - 420)),
     top: rectStyle.top + rectStyle.height + 36 > window.innerHeight
       ? Math.max(4, rectStyle.top - 36)
       : rectStyle.top + rectStyle.height + 8,
@@ -520,10 +520,10 @@ export function CaptureOverlay({
           <section className="capture-result-section"><h3>{text.translate}</h3><textarea aria-label={text.translate} value={translation} readOnly /></section>
           {resultError && <div className="capture-result-error" role="alert">{resultError}</div>}
           <div className="capture-result-actions">
-            {onRecognize && <button className="capture-overlay-action" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>R</button>}
-            {onTranslate && <button className="capture-overlay-action" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>T</button>}
-            {onCopyImage && <button className="capture-overlay-action" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>C</button>}
-            {onSaveImage && <button className="capture-overlay-action" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>S</button>}
+            {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
+            {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
+            {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
+            {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
             <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
            <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
           </div>
@@ -533,10 +533,10 @@ export function CaptureOverlay({
 
       {selection && !resultWindow && (
         <div className="capture-overlay-actions" style={actionStyle} onMouseDown={(event) => event.stopPropagation()}>
-          {onRecognize && <button className="capture-overlay-action" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>R</button>}
-          {onTranslate && <button className="capture-overlay-action" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>T</button>}
-          {onCopyImage && <button className="capture-overlay-action" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>C</button>}
-          {onSaveImage && <button className="capture-overlay-action" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>S</button>}
+          {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
+          {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
+          {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
+          {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
           <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
            <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
         </div>

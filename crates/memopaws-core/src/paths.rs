@@ -25,9 +25,7 @@ pub struct MigrationPreview {
 }
 
 fn home_dir() -> Result<PathBuf> {
-    dirs::home_dir()
-        .map(Into::into)
-        .ok_or(Error::HomeDir)
+    dirs::home_dir().map(Into::into).ok_or(Error::HomeDir)
 }
 
 fn anchor_file() -> Result<PathBuf> {
@@ -96,7 +94,9 @@ pub fn normalize_migration_base(path: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.eq_ignore_ascii_case(CONFIG_DIR_NAME))
     {
-        path.parent().map(Path::to_path_buf).unwrap_or_else(|| path.to_path_buf())
+        path.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| path.to_path_buf())
     } else {
         path.to_path_buf()
     }
@@ -144,10 +144,6 @@ pub fn clipboard_images_dir() -> Result<PathBuf> {
 
 pub fn captures_dir() -> Result<PathBuf> {
     data_dir().map(|d| d.join("captures"))
-}
-
-pub fn history_path() -> Result<PathBuf> {
-    data_dir().map(|d| d.join("history.json"))
 }
 
 pub fn save_anchor(data_dir: &str) -> Result<()> {
@@ -205,7 +201,9 @@ fn migrate_data_from(
     }
     validate_migration_paths(&target)?;
     if !source.is_dir() {
-        return Err(Error::Custom("source data directory is not a directory".into()));
+        return Err(Error::Custom(
+            "source data directory is not a directory".into(),
+        ));
     }
     if mode == MigrationMode::Merge {
         ensure_no_conflicts(source, &target)?;
@@ -231,7 +229,8 @@ fn paths_refer_to_same_dir(left: &Path, right: &Path) -> bool {
     }
     #[cfg(windows)]
     {
-        left.to_string_lossy().eq_ignore_ascii_case(&right.to_string_lossy())
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
     }
     #[cfg(not(windows))]
     {
@@ -258,7 +257,10 @@ fn ensure_no_conflicts(source: &Path, target: &Path) -> Result<()> {
             if entry.path().is_dir() && destination.is_dir() {
                 ensure_no_conflicts(&entry.path(), &destination)?;
             } else if entry.path().is_dir() || destination.is_dir() {
-                return Err(Error::Custom(format!("merge conflict at {}", destination.display())));
+                return Err(Error::Custom(format!(
+                    "merge conflict at {}",
+                    destination.display()
+                )));
             }
             // Both are files: source wins (overwrite).
         }
@@ -296,7 +298,9 @@ fn write_anchor(anchor: &Path, base: &Path) -> Result<()> {
         let _ = fs::remove_file(anchor);
         if let Err(fallback) = fs::rename(&temporary, anchor) {
             let _ = fs::remove_file(&temporary);
-            return Err(Error::Custom(format!("anchor update failed: {error} / {fallback}")));
+            return Err(Error::Custom(format!(
+                "anchor update failed: {error} / {fallback}"
+            )));
         }
     }
     Ok(())
@@ -360,8 +364,12 @@ mod tests {
         let result = migrate_data_from(&source, &target, MigrationMode::Merge, &anchor).unwrap();
 
         assert_eq!(result, Some(target.join(CONFIG_DIR_NAME)));
-        assert_eq!(fs::read_to_string(target.join(CONFIG_DIR_NAME).join("memo/item.txt")).unwrap(), "source");
-        let anchor_value: serde_json::Value = serde_json::from_str(&fs::read_to_string(anchor).unwrap()).unwrap();
+        assert_eq!(
+            fs::read_to_string(target.join(CONFIG_DIR_NAME).join("memo/item.txt")).unwrap(),
+            "source"
+        );
+        let anchor_value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(anchor).unwrap()).unwrap();
         assert_eq!(anchor_value["data_dir"].as_str(), target.to_str());
     }
 
@@ -379,8 +387,12 @@ mod tests {
         let result = migrate_data_from(&source, &target, MigrationMode::Merge, &anchor).unwrap();
         assert_eq!(result, Some(target.join(CONFIG_DIR_NAME)));
         // Source wins for file conflicts.
-        assert_eq!(fs::read_to_string(target_data.join("memo/item.txt")).unwrap(), "source");
-        let anchor_value: serde_json::Value = serde_json::from_str(&fs::read_to_string(anchor).unwrap()).unwrap();
+        assert_eq!(
+            fs::read_to_string(target_data.join("memo/item.txt")).unwrap(),
+            "source"
+        );
+        let anchor_value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(anchor).unwrap()).unwrap();
         assert_eq!(anchor_value["data_dir"].as_str(), target.to_str());
     }
 
@@ -392,7 +404,10 @@ mod tests {
         let anchor = dirs.path("anchor.json");
         fs::write(&anchor, "old-anchor").unwrap();
 
-        assert_eq!(migrate_data_from(&source, &target, MigrationMode::Cancel, &anchor).unwrap(), None);
+        assert_eq!(
+            migrate_data_from(&source, &target, MigrationMode::Cancel, &anchor).unwrap(),
+            None
+        );
         assert!(!target.exists());
         assert_eq!(fs::read_to_string(anchor).unwrap(), "old-anchor");
     }
@@ -404,7 +419,13 @@ mod tests {
         let anchor = dirs.path("anchor.json");
         fs::write(&anchor, "old-anchor").unwrap();
 
-        let result = migrate_data_from(&source, source.parent().unwrap(), MigrationMode::Replace, &anchor).unwrap();
+        let result = migrate_data_from(
+            &source,
+            source.parent().unwrap(),
+            MigrationMode::Replace,
+            &anchor,
+        )
+        .unwrap();
 
         assert_eq!(result, None);
         assert!(source.join("memo/item.txt").exists());
@@ -472,13 +493,19 @@ mod tests {
             .unwrap();
 
         for child in ["memo", "keys", "clipboard_images", "captures"] {
-            assert!(migrated.join(child).is_dir(), "missing {child} after migration");
+            assert!(
+                migrated.join(child).is_dir(),
+                "missing {child} after migration"
+            );
         }
         assert!(migrated.join("setting.json").is_file());
         let anchor_value: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&anchor).unwrap()).unwrap();
         assert_eq!(anchor_value["data_dir"].as_str(), target.to_str());
-        assert!(!anchor.with_extension("tmp").exists(), "temp anchor file was left behind");
+        assert!(
+            !anchor.with_extension("tmp").exists(),
+            "temp anchor file was left behind"
+        );
     }
 
     #[test]
@@ -507,13 +534,19 @@ mod tests {
         let anchor = dirs.path("anchor.json");
         fs::write(&anchor, "old-anchor").unwrap();
 
-        let result = migrate_data_from(&source, &target, MigrationMode::Replace, &anchor).unwrap().unwrap();
+        let result = migrate_data_from(&source, &target, MigrationMode::Replace, &anchor)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(result, target_data);
-        assert_eq!(fs::read_to_string(target_data.join("memo/item.txt")).unwrap(), "source");
+        assert_eq!(
+            fs::read_to_string(target_data.join("memo/item.txt")).unwrap(),
+            "source"
+        );
         assert!(!target_data.join("stale.txt").exists());
         assert!(target_data.join("memo").is_dir());
-        let anchor_value: serde_json::Value = serde_json::from_str(&fs::read_to_string(anchor).unwrap()).unwrap();
+        let anchor_value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(anchor).unwrap()).unwrap();
         assert_eq!(anchor_value["data_dir"].as_str(), target.to_str());
     }
 
@@ -525,12 +558,25 @@ mod tests {
         fs::write(source.join(CONFIG_DIR_NAME).join("docs/note.txt"), "source").unwrap();
         let target = dirs.path("target");
         fs::create_dir_all(target.join(CONFIG_DIR_NAME)).unwrap();
-        fs::write(target.join(CONFIG_DIR_NAME).join("docs"), "target file in the way").unwrap();
+        fs::write(
+            target.join(CONFIG_DIR_NAME).join("docs"),
+            "target file in the way",
+        )
+        .unwrap();
         let anchor = dirs.path("anchor.json");
         fs::write(&anchor, "old-anchor").unwrap();
 
-        assert!(migrate_data_from(source.join(CONFIG_DIR_NAME).as_path(), &target, MigrationMode::Merge, &anchor).is_err());
-        assert_eq!(fs::read_to_string(target.join(CONFIG_DIR_NAME).join("docs")).unwrap(), "target file in the way");
+        assert!(migrate_data_from(
+            source.join(CONFIG_DIR_NAME).as_path(),
+            &target,
+            MigrationMode::Merge,
+            &anchor
+        )
+        .is_err());
+        assert_eq!(
+            fs::read_to_string(target.join(CONFIG_DIR_NAME).join("docs")).unwrap(),
+            "target file in the way"
+        );
         assert_eq!(fs::read_to_string(anchor).unwrap(), "old-anchor");
     }
 
@@ -554,10 +600,18 @@ mod tests {
 
         let target_base_file = dirs.path("target-as-file");
         fs::write(&target_base_file, "not a directory").unwrap();
-        assert!(migrate_data_from(&source, &target_base_file, MigrationMode::Replace, &anchor).is_err());
+        assert!(
+            migrate_data_from(&source, &target_base_file, MigrationMode::Replace, &anchor).is_err()
+        );
 
         let source_itself = dirs.path("missing-source");
-        assert!(migrate_data_from(&source_itself, dirs.path("t").as_path(), MigrationMode::Merge, &anchor).is_err());
+        assert!(migrate_data_from(
+            &source_itself,
+            dirs.path("t").as_path(),
+            MigrationMode::Merge,
+            &anchor
+        )
+        .is_err());
     }
 
     #[test]
@@ -567,7 +621,13 @@ mod tests {
         let anchor = dirs.path("anchor.json");
         fs::write(&anchor, "keep-me").unwrap();
 
-        let result = migrate_data_from(&source, source.parent().unwrap(), MigrationMode::Replace, &anchor).unwrap();
+        let result = migrate_data_from(
+            &source,
+            source.parent().unwrap(),
+            MigrationMode::Replace,
+            &anchor,
+        )
+        .unwrap();
         assert_eq!(result, None);
         assert!(source.join("memo/item.txt").exists());
         assert_eq!(fs::read_to_string(anchor).unwrap(), "keep-me");

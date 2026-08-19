@@ -18,8 +18,8 @@ interface Props {
 }
 
 const labels = {
-  zh: { title: "全局搜索", placeholder: "搜索剪切板和历史记录", loading: "搜索中...", empty: "没有找到匹配内容", error: "搜索失败，请重试", clipboard: "剪切板", history: "历史记录" },
-  en: { title: "Global Search", placeholder: "Search clipboard and history", loading: "Searching...", empty: "No matching content", error: "Search failed. Try again.", clipboard: "Clipboard", history: "History" },
+  zh: { title: "全局搜索", placeholder: "搜索剪切板和备忘录", loading: "搜索中...", empty: "没有找到匹配内容", error: "搜索失败，请重试", clipboard: "剪切板", memo: "备忘录" },
+  en: { title: "Global Search", placeholder: "Search clipboard and notes", loading: "Searching...", empty: "No matching content", error: "Search failed. Try again.", clipboard: "Clipboard", memo: "Notes" },
 };
 
 export default function GlobalSearch({ language, onClose, onNavigate }: Props) {
@@ -91,7 +91,7 @@ export default function GlobalSearch({ language, onClose, onNavigate }: Props) {
         <div className="global-search-results">
           {results.map((result) => (
             <button type="button" className="global-search-result" key={`${result.source}-${result.id}`} onClick={() => selectResult(result)}>
-              <span className="global-search-result-meta"><strong>{result.source === "clipboard" ? t.clipboard : t.history}</strong><time>{result.time}</time></span>
+              <span className="global-search-result-meta"><strong>{result.source === "clipboard" ? t.clipboard : t.memo}</strong><time>{result.time}</time></span>
               <span className="global-search-result-title">{result.title}</span>
               <span className="global-search-result-text">{result.text}</span>
             </button>

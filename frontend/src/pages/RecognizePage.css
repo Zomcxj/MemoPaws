@@ -171,7 +171,7 @@
 }
 
 .recognize-left {
-  grid-template-rows: minmax(0, 1fr) minmax(140px, .28fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .recognize-right {

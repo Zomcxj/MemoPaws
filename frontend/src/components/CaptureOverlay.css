@@ -162,7 +162,9 @@
   position: absolute;
   z-index: 5;
   display: flex;
+  max-width: calc(100vw - 8px);
   gap: 6px;
+  flex-wrap: wrap;
   background: transparent;
 }
 
@@ -266,6 +268,13 @@
   color: #fff;
   cursor: pointer;
   font: inherit;
+}
+
+.capture-overlay-action--label {
+  width: auto;
+  min-width: 48px;
+  padding: 0 8px;
+  white-space: nowrap;
 }
 
 .capture-overlay-action:hover {
