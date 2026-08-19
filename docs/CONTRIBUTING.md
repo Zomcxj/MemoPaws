@@ -87,6 +87,10 @@ npm --prefix frontend run build
 
 确保 TypeScript 编译通过且 Vite 打包无错误。
 
+## Cargo.lock
+
+根目录的 `Cargo.lock` 纳入版本控制。修改依赖后，在仓库根目录运行 `cargo check --workspace` 或 `cargo build --workspace`，确认构建成功后检查并提交对应的锁文件变更。
+
 ### 完整测试流程
 
 ```bash
