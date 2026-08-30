@@ -50,7 +50,7 @@
   }
 }
 
-.capture-overlay-handle {
+.capture-overlay .capture-overlay-handle {
   position: absolute;
   z-index: 1;
   width: 12px;
@@ -69,26 +69,26 @@
   50% { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 10px rgba(77, 163, 255, 0.95); }
 }
 
-.capture-overlay-handle--n,
-.capture-overlay-handle--s {
+.capture-overlay .capture-overlay-handle--n,
+.capture-overlay .capture-overlay-handle--s {
   left: 50%;
   margin-left: -6px;
 }
 
-.capture-overlay-handle--e,
-.capture-overlay-handle--w {
+.capture-overlay .capture-overlay-handle--e,
+.capture-overlay .capture-overlay-handle--w {
   top: 50%;
   margin-top: -6px;
 }
 
-.capture-overlay-handle--n { top: -6px; cursor: ns-resize; }
-.capture-overlay-handle--ne { top: -6px; right: -6px; cursor: nesw-resize; }
-.capture-overlay-handle--e { right: -6px; cursor: ew-resize; }
-.capture-overlay-handle--se { right: -6px; bottom: -6px; cursor: nwse-resize; }
-.capture-overlay-handle--s { bottom: -6px; cursor: ns-resize; }
-.capture-overlay-handle--sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
-.capture-overlay-handle--w { left: -6px; cursor: ew-resize; }
-.capture-overlay-handle--nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.capture-overlay .capture-overlay-handle--n { top: -6px; cursor: ns-resize; }
+.capture-overlay .capture-overlay-handle--ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.capture-overlay .capture-overlay-handle--e { right: -6px; cursor: ew-resize; }
+.capture-overlay .capture-overlay-handle--se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.capture-overlay .capture-overlay-handle--s { bottom: -6px; cursor: ns-resize; }
+.capture-overlay .capture-overlay-handle--sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.capture-overlay .capture-overlay-handle--w { left: -6px; cursor: ew-resize; }
+.capture-overlay .capture-overlay-handle--nw { top: -6px; left: -6px; cursor: nwse-resize; }
 
 .capture-overlay-size {
   position: absolute;

@@ -9,6 +9,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{codecs::png::PngEncoder, DynamicImage};
 use memopaws_canvas::{CaptureManager, CaptureRecord};
 use memopaws_clipboard::{ClipboardItem, ClipboardManager};
+use memopaws_config::history::{HistoryManager, HistoryRecord};
 use memopaws_keys::{KeyEntry, KeyEntryInput, KeyVault, VaultStatus};
 use memopaws_memo::model::Memo;
 use memopaws_memo::renderer::{render_markdown, RenderTheme};
@@ -315,7 +316,7 @@ fn validate_config_request(config: &serde_json::Value) -> Result<(), String> {
             return Err("api_model must be 1-200 characters".to_string());
         }
     }
-    for field in ["clipboard_max_items"] {
+    for field in ["clipboard_max_items", "history_max_items"] {
         if let Some(value) = config.get(field) {
             let value = value
                 .as_u64()
@@ -422,6 +423,7 @@ pub fn set_language(language: String, app: tauri::AppHandle) -> Result<(), Strin
 pub async fn save_config(
     config: serde_json::Value,
     vault: tauri::State<'_, KeyVaultState>,
+    history: tauri::State<'_, HistoryState>,
     clipboard: tauri::State<'_, ClipboardState>,
     text_replacer: tauri::State<'_, Arc<TextReplacerState>>,
     app: tauri::AppHandle,
@@ -475,6 +477,14 @@ pub async fn save_config(
     {
         lock_recover!(clipboard).set_max_items(max as usize)?;
     }
+    if let Some(max) = config
+        .get("history_max_items")
+        .and_then(|value| value.as_u64())
+    {
+        lock_recover!(history)
+            .set_max_items(max as usize)
+            .map_err(|error| error.to_string())?;
+    }
     if let Some(value) = config
         .get("close_behavior")
         .and_then(|value| value.as_str())
@@ -508,6 +518,9 @@ fn apply_config_patch(
     }
     if let Some(max) = config.get("clipboard_max_items").and_then(|v| v.as_u64()) {
         app_config.clipboard_max_items = Some(max as usize);
+    }
+    if let Some(max) = config.get("history_max_items").and_then(|v| v.as_u64()) {
+        app_config.history_max_items = Some(max as usize);
     }
     if let Some(api_url) = config.get("api_url").and_then(|v| v.as_str()) {
         app_config.api_url = Some(api_url.trim().to_owned());
@@ -660,6 +673,7 @@ pub fn restart_app(app: tauri::AppHandle) {
 }
 
 pub type KeyVaultState = Mutex<KeyVault>;
+pub type HistoryState = Mutex<HistoryManager>;
 pub type ClipboardState = Mutex<ClipboardManager>;
 pub type CaptureState = Mutex<CaptureManager>;
 
@@ -1341,11 +1355,16 @@ pub async fn ai_ocr(
     key_entry_id: Option<u64>,
     model: Option<String>,
     vault: tauri::State<'_, KeyVaultState>,
+    history: tauri::State<'_, HistoryState>,
 ) -> Result<OcrResult, String> {
-    ai_client(vault, key_entry_id, model)?
+    let result = ai_client(vault, key_entry_id, model)?
         .ocr(&image)
         .await
-        .map_err(|error| safe_ai_command_error(&error.to_string()))
+        .map_err(|error| safe_ai_command_error(&error.to_string()))?;
+    history_mut(history, |manager| {
+        manager.add_success("ocr", &result.text, Some(&result.text), None)
+    })?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1356,14 +1375,53 @@ pub async fn ai_translate(
     key_entry_id: Option<u64>,
     model: Option<String>,
     vault: tauri::State<'_, KeyVaultState>,
+    history: tauri::State<'_, HistoryState>,
 ) -> Result<TranslateResult, String> {
     if text.len() > 100_000 {
         return Err("translation input is too large".into());
     }
-    ai_client(vault, key_entry_id, model)?
+    let result = ai_client(vault, key_entry_id, model)?
         .translate(&text, target, source)
         .await
-        .map_err(|error| safe_ai_command_error(&error.to_string()))
+        .map_err(|error| safe_ai_command_error(&error.to_string()))?;
+    history_mut(history, |manager| {
+        manager.add_success("translate", &result.text, Some(&text), Some(&result.text))
+    })?;
+    Ok(result)
+}
+
+fn history_mut<T>(
+    state: tauri::State<'_, HistoryState>,
+    operation: impl FnOnce(&mut HistoryManager) -> memopaws_core::Result<T>,
+) -> Result<T, String> {
+    let mut history = lock_recover!(state);
+    operation(&mut history).map_err(|_| "history operation failed".to_string())
+}
+
+#[tauri::command]
+pub fn history_list(state: tauri::State<'_, HistoryState>) -> Result<Vec<HistoryRecord>, String> {
+    history_mut(state, |manager| Ok(manager.records().to_vec()))
+}
+
+#[tauri::command]
+pub fn history_delete(index: usize, state: tauri::State<'_, HistoryState>) -> Result<(), String> {
+    history_mut(state, |manager| manager.delete_record(index))
+}
+
+#[tauri::command]
+pub fn history_clear(state: tauri::State<'_, HistoryState>) -> Result<(), String> {
+    history_mut(state, HistoryManager::clear)
+}
+
+#[tauri::command]
+pub fn set_history_max_items(
+    value: usize,
+    state: tauri::State<'_, HistoryState>,
+) -> Result<(), String> {
+    validate_config_request(&serde_json::json!({"history_max_items": value as u64}))?;
+    lock_recover!(state)
+        .set_max_items(value)
+        .map_err(|error| error.to_string())
 }
 
 fn clipboard_mut<T>(

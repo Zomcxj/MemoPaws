@@ -7,6 +7,7 @@ import "./RecognizePage.css";
 
 type OcrLanguage = "zh" | "en" | "ja" | "ko" | "fr" | "de" | "es" | "ru";
 interface TextResult { text: string }
+interface HistoryRecord { time: string; type: string; text: string; ocr_text?: string; translate_text?: string }
 interface DisplayInfo { index: number; name: string; x: number; y: number; width: number; height: number; is_primary: boolean }
 interface WindowGeometry { position: PhysicalPosition; size: PhysicalSize; fullscreen: boolean }
 
@@ -16,8 +17,8 @@ const languages: { value: OcrLanguage; label: string }[] = [
   { value: "es", label: "Español" }, { value: "ru", label: "Русский" },
 ];
 const copy = {
-  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", mosaicBlock: "马赛克块大小" },
-  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", mosaicBlock: "Mosaic block size" },
+  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", mosaicBlock: "马赛克块大小" },
+  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", mosaicBlock: "Mosaic block size" },
 } as const;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
@@ -40,6 +41,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const [copied, setCopied] = useState(false);
   const [copiedTranslation, setCopiedTranslation] = useState(false);
   const [overlay, setOverlay] = useState(false);
+  const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [captureBackground, setCaptureBackground] = useState("");
   const [captureBytes, setCaptureBytes] = useState<Uint8Array | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -71,6 +73,28 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   };
   const importImage = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); };
   const dropImage = (event: DragEvent<HTMLElement>) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void importFile(file); };
+  // History actions.
+  const formatTime = (raw: string) => {
+    const stamp = Number(raw);
+    if (!raw || !Number.isFinite(stamp) || stamp <= 0) return raw;
+    return new Date(stamp * 1000).toLocaleString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  };
+  const deleteHistory = (index: number) => void run(async () => { await invoke("history_delete", { index }); setHistory((await invoke<HistoryRecord[]>("history_list"))); });
+  const clearAllHistory = () => { if (!window.confirm(t.clearHistory)) return; void run(async () => { await invoke("history_clear"); setHistory([]); }); };
+  const loadHistory = (record: HistoryRecord) => {
+    // HistoryRecord has no image field; restore text only and inform the user.
+    setOcrText(record.ocr_text || ""); setTranslation(record.translate_text || "");
+    setError(t.historyNoImage);
+  };
+
   const config = () => ({ keyEntryId: null });
   const run = async (operation: () => Promise<void>) => { setLoading(true); setError(""); try { await operation(); } catch (reason) { setError(errorText(reason)); } finally { setLoading(false); } };
   const recognize = () => void run(async () => { if (!image) throw new Error(t.needImage); setRecognizing(true); try { const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() }); setOcrText(result.text); setTranslation(""); } finally { setRecognizing(false); } });
@@ -129,6 +153,8 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       setOverlay(false);
       setCaptureBytes(null);
       setCaptureBackground("");
+      // 等浮层真正卸载后再显示窗口，避免旧画面闪现一帧
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       restoreSucceeded = true;
     } finally {
       try {
@@ -232,7 +258,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const contextSave = () => { closeContextMenu(); void exportImage(); };
   const contextReset = () => { closeContextMenu(); reset(); };
 
-  useEffect(() => { let active = true; invoke<DisplayInfo[]>("list_displays").then((disp) => { if (active) { setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
+  useEffect(() => { let active = true; Promise.all([invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([records, disp]) => { if (active) { setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
   useEffect(() => { const captureEvent = () => captureRef.current(); const fitEvent = () => setZoom(1); const recognizeTextEvent = (event: Event) => { const text = (event as CustomEvent<{ text?: unknown }>).detail?.text; if (typeof text === "string") { setOcrText(text); setTranslation(""); setError(""); setCopied(false); } }; const recognizeImageEvent = (event: Event) => { const bytes = (event as CustomEvent<{ image?: unknown }>).detail?.image; if (!Array.isArray(bytes) || !bytes.every((byte) => typeof byte === "number")) return; setOriginal(new Uint8Array(bytes)); setBytes(new Uint8Array(bytes), false); setOcrText(""); setTranslation(""); setError(""); }; window.addEventListener("memopaws-capture", captureEvent); window.addEventListener("canvas_fit", fitEvent); window.addEventListener("recognize-text", recognizeTextEvent); window.addEventListener("recognize-image", recognizeImageEvent); return () => { window.removeEventListener("memopaws-capture", captureEvent); window.removeEventListener("canvas_fit", fitEvent); window.removeEventListener("recognize-text", recognizeTextEvent); window.removeEventListener("recognize-image", recognizeImageEvent); }; }, []);
   useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
 
@@ -276,6 +302,20 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
             </div>
           </> : <div className="image-empty"><strong>{t.empty}</strong></div>}
         </article>
+        <section className="recognize-history">
+          <div className="history-head"><h2>{t.history}</h2>{history.length > 0 && <button type="button" onClick={clearAllHistory}>{t.historyClear}</button>}</div>
+          {history.length ? history.map((record, index) => (
+            <div className="history-row" key={`${record.time}-${index}`}>
+              <button className="history-main" onClick={() => loadHistory(record)} title={t.historyLoad}>
+                <span className="history-time">{formatTime(record.time)}</span>
+                <span className="history-text">{record.text}</span>
+              </button>
+              <div className="history-row-actions">
+                <button type="button" onClick={() => void deleteHistory(index)} aria-label={t.historyDelete}>{t.historyDelete}</button>
+              </div>
+            </div>
+          )) : <div className="history-empty">{t.emptyHistory}</div>}
+        </section>
       </div>
       <div className="recognize-right">
         <article className={"recognize-panel result-panel" + (recognizing ? " is-running" : "")}><div className="result-heading"><h2>{t.ocr}</h2><div className="result-actions"><button type="button" onClick={() => void copyOcrText()} disabled={!ocrText || loading}>{copied ? t.copied : t.copy}</button><button type="button" onClick={clearOcrText} disabled={!ocrText || loading}>{t.clearText}</button></div></div><div className="ocr-controls"><button type="button" onClick={recognize} disabled={!image || loading}>{recognizing ? t.processing : t.ocr}</button><select value={source} onChange={(event) => setSource(event.target.value as OcrLanguage)}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><textarea aria-label={t.ocr} value={ocrText} onChange={(event) => { setOcrText(event.target.value); setCopied(false); }} /></article>

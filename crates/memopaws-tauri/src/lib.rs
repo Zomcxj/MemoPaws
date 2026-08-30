@@ -15,11 +15,12 @@ use commands::{
     choose_data_dir, clipboard_clear, clipboard_delete, clipboard_delete_many, clipboard_get_image,
     clipboard_list, clipboard_paste_image, clipboard_set_locked, clipboard_update_text, delete,
     get_config, get_data_dir, get_storage_dir_conflict, get_theme, get_value, global_search,
-    image_crop, image_mosaic_region, image_preprocess, key_list, list, list_displays, lock,
+    history_clear, history_delete, history_list, image_crop, image_mosaic_region, image_preprocess,
+    key_list, list, list_displays, lock,
     memo_create, memo_delete, memo_get, memo_list, memo_render, memo_search, memo_update,
     migrate_data_dir, remove_master, reorder, restart_app, save_config, set_clipboard_max_items,
-    set_close_behavior, set_language, set_master, set_settings_key, set_theme,
-    show_main_window_when_ready, status, test_api_connection, text_replacement_create,
+    set_close_behavior, set_history_max_items, set_language, set_master, set_settings_key,
+    set_theme, show_main_window_when_ready, status, test_api_connection, text_replacement_create,
     text_replacement_delete, text_replacement_list, text_replacement_update, unlock, update,
 };
 use commands::{KeyVaultState, TextReplacerState};
@@ -103,6 +104,10 @@ pub fn run() {
             let vault = memopaws_keys::KeyVault::load(path)
                 .unwrap_or_else(|error| error.into_locked_vault());
             app.manage(Mutex::new(vault));
+            let history = memopaws_config::history::HistoryManager::new()
+                .load()
+                .map_err(|error| error.to_string())?;
+            app.manage(Mutex::new(history));
             let clipboard =
                 memopaws_clipboard::ClipboardManager::load().map_err(|error| error.to_string())?;
             app.manage(Mutex::new(clipboard));
@@ -163,9 +168,13 @@ pub fn run() {
             show_main_window_when_ready,
             set_close_behavior,
             set_clipboard_max_items,
+            set_history_max_items,
             ai_ocr,
             ai_translate,
             set_settings_key,
+            history_list,
+            history_delete,
+            history_clear,
             clipboard_list,
             clipboard_delete,
             clipboard_clear,

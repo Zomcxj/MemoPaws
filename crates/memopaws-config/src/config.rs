@@ -42,6 +42,7 @@ pub struct AppConfig {
     pub api_url: Option<String>,
     pub api_model: Option<String>,
     pub clipboard_max_items: Option<usize>,
+    pub history_max_items: Option<usize>,
     pub shortcuts: Option<HashMap<String, String>>,
     #[serde(default, deserialize_with = "deserialize_text_replacements")]
     pub text_replacements: Vec<TextReplacement>,
@@ -57,6 +58,7 @@ impl Default for AppConfig {
             api_url: Some("https://open.bigmodel.cn/api/paas/v4/chat/completions".into()),
             api_model: Some("glm-4-flash".into()),
             clipboard_max_items: Some(50),
+            history_max_items: Some(100),
             shortcuts: Some(
                 [
                     ("capture".into(), "Alt+X".into()),

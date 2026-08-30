@@ -146,6 +146,10 @@ pub fn captures_dir() -> Result<PathBuf> {
     data_dir().map(|d| d.join("captures"))
 }
 
+pub fn history_path() -> Result<PathBuf> {
+    data_dir().map(|d| d.join("history.json"))
+}
+
 pub fn save_anchor(data_dir: &str) -> Result<()> {
     let anchor = anchor_file()?;
     let parent = anchor.parent().ok_or(Error::HomeDir)?;

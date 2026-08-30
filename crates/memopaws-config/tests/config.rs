@@ -13,6 +13,7 @@ fn missing_config_creates_defaults_and_round_trips_through_disk() {
     assert_eq!(defaults.language.as_deref(), Some("zh"));
     assert_eq!(defaults.close_behavior.as_deref(), Some("tray"));
     assert_eq!(defaults.clipboard_max_items, Some(50));
+    assert_eq!(defaults.history_max_items, Some(100));
     assert!(path.exists());
 
     let reloaded = AppConfig::load_from(&path).unwrap();
@@ -33,6 +34,7 @@ fn round_trip_preserves_all_user_fields() {
         api_url: Some("https://example.test/v1/chat/completions".into()),
         api_model: Some("vision-model".into()),
         clipboard_max_items: Some(120),
+        history_max_items: Some(240),
         shortcuts: Some(
             [
                 ("capture".into(), "Ctrl+Shift+A".into()),

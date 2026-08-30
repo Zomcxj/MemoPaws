@@ -86,7 +86,9 @@ assert.match(recognizeSource, /const \[translating, setTranslating\]/, "translat
 assert.match(recognizeSource, /result-panel" \+ \(recognizing \? " is-running" : ""\)/, "only the OCR panel may glow during OCR");
 assert.match(recognizeSource, /result-panel" \+ \(translating \? " is-running" : ""\)/, "only the translation panel may glow during translation");
 assert.doesNotMatch(recognizeSource, /result-panel" \+ \(loading \? " is-running" : ""\)/, "a shared loading state must not animate both result panels");
-assert.doesNotMatch(recognizeSource, /history_list|history_delete|history_clear|recognize-history|HistoryRecord/, "recognition and translation operation history must be removed");
+assert.match(recognizeSource, /history_list/, "recognition page must load the operation history");
+assert.match(recognizeSource, /history_delete|history_clear/, "recognition page must support deleting and clearing history");
+assert.match(recognizeSource, /recognize-history/, "recognition page must render the history panel");
 
 assert.match(
   overlaySource,
