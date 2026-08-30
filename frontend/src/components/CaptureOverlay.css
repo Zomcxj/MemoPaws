@@ -53,41 +53,42 @@
 .capture-overlay-handle {
   position: absolute;
   z-index: 1;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   box-sizing: border-box;
   padding: 0;
-  border: 1px solid #fff;
-  border-radius: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
   background: #4da3ff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
   animation: capture-handle-pulse 1.8s ease-in-out infinite;
 }
 
 @keyframes capture-handle-pulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(77, 163, 255, 0.5); }
-  50% { box-shadow: 0 0 10px rgba(77, 163, 255, 0.95); }
+  0%, 100% { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 4px rgba(77, 163, 255, 0.5); }
+  50% { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 10px rgba(77, 163, 255, 0.95); }
 }
 
 .capture-overlay-handle--n,
 .capture-overlay-handle--s {
   left: 50%;
-  margin-left: -5px;
+  margin-left: -6px;
 }
 
 .capture-overlay-handle--e,
 .capture-overlay-handle--w {
   top: 50%;
-  margin-top: -5px;
+  margin-top: -6px;
 }
 
-.capture-overlay-handle--n { top: -5px; cursor: ns-resize; }
-.capture-overlay-handle--ne { top: -5px; right: -5px; cursor: nesw-resize; }
-.capture-overlay-handle--e { right: -5px; cursor: ew-resize; }
-.capture-overlay-handle--se { right: -5px; bottom: -5px; cursor: nwse-resize; }
-.capture-overlay-handle--s { bottom: -5px; cursor: ns-resize; }
-.capture-overlay-handle--sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
-.capture-overlay-handle--w { left: -5px; cursor: ew-resize; }
-.capture-overlay-handle--nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.capture-overlay-handle--n { top: -6px; cursor: ns-resize; }
+.capture-overlay-handle--ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.capture-overlay-handle--e { right: -6px; cursor: ew-resize; }
+.capture-overlay-handle--se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.capture-overlay-handle--s { bottom: -6px; cursor: ns-resize; }
+.capture-overlay-handle--sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.capture-overlay-handle--w { left: -6px; cursor: ew-resize; }
+.capture-overlay-handle--nw { top: -6px; left: -6px; cursor: nwse-resize; }
 
 .capture-overlay-size {
   position: absolute;

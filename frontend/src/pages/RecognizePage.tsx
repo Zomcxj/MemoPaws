@@ -95,6 +95,8 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
         fullscreen: await window.isFullscreen(),
       };
       await window.hide();
+      // 等待 Windows 合成器播完隐藏动画，否则主窗口残影会留在截图里
+      await new Promise((resolve) => setTimeout(resolve, 320));
       if (windowGeometryRef.current.fullscreen) await window.setFullscreen(false);
       const display = displays.find((item) => item.index === selectedDisplay);
       if (display) {
