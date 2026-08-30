@@ -445,7 +445,7 @@ pub async fn save_config(
         let model = config
             .get("api_model")
             .and_then(|value| value.as_str())
-            .unwrap_or("glm-4-flash");
+            .unwrap_or("glm-4v-flash");
         save_settings_key(
             &vault,
             key,
@@ -551,7 +551,7 @@ fn save_settings_key(
 ) -> Result<(), String> {
     let mut vault = lock_recover!(state);
     let note = if model.trim().is_empty() {
-        "glm-4-flash".to_string()
+        "glm-4v-flash".to_string()
     } else {
         model.trim().to_string()
     };
@@ -918,7 +918,7 @@ fn settings_client_from(
     let model = model
         .filter(|model| !model.trim().is_empty())
         .or_else(|| config.api_model.clone())
-        .unwrap_or_else(|| "glm-4-flash".to_string());
+        .unwrap_or_else(|| "glm-4v-flash".to_string());
     Ok(Client::new(ApiConfig::new(
         config.api_url.clone().unwrap_or_default(),
         model,
@@ -940,7 +940,7 @@ fn promote_key_to_settings(vault: &mut KeyVault, entry_id: u64) -> Result<(), St
         .map_err(|error| error.to_string())?;
     let url = entry.url.clone();
     let note = if entry.note.trim().is_empty() {
-        "glm-4-flash".to_string()
+        "glm-4v-flash".to_string()
     } else {
         entry.note.trim().to_string()
     };
@@ -1011,7 +1011,7 @@ fn resolve_ai_config(
                     .ok()
                     .and_then(|config| config.api_model)
             })
-            .unwrap_or_else(|| "glm-4-flash".to_string())
+            .unwrap_or_else(|| "glm-4v-flash".to_string())
     } else {
         entry.note
     };
@@ -2037,7 +2037,7 @@ mod tests {
 
         for model in [
             "gpt-4o-mini",
-            "glm-4-flash",
+            "glm-4v-flash",
             "deepseek-chat",
             "custom-model",
         ] {

@@ -382,7 +382,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
         try {
           const response = await invoke<Record<string, unknown>>("test_api_connection", {
             keyEntryId: entry.id,
-            model: entry.note || "glm-4-flash",
+            model: entry.note || "glm-4v-flash",
           });
             result = response.status_code === 200
             ? {
@@ -1069,7 +1069,7 @@ function EntryDialog({
               <input
                 value={draft.note}
                 onChange={(e) => onChange({ ...draft, note: e.target.value })}
-                placeholder="glm-4-flash"
+                placeholder="glm-4v-flash"
               />
             </label>
           </>

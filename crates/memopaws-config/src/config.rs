@@ -56,7 +56,7 @@ impl Default for AppConfig {
             close_behavior: Some("tray".into()),
             api_key: None,
             api_url: Some("https://open.bigmodel.cn/api/paas/v4/chat/completions".into()),
-            api_model: Some("glm-4-flash".into()),
+            api_model: Some("glm-4v-flash".into()),
             clipboard_max_items: Some(50),
             history_max_items: Some(100),
             shortcuts: Some(
@@ -94,7 +94,11 @@ impl AppConfig {
     pub fn load_from(path: &std::path::Path) -> Result<Self> {
         if path.exists() {
             let raw = fs::read_to_string(&path)?;
-            let cfg = serde_json::from_str(&raw)?;
+            let mut cfg: AppConfig = serde_json::from_str(&raw)?;
+            // 旧默认模型 glm-4-flash 不支持图片识别，迁移到多模态默认值
+            if cfg.api_model.as_deref() == Some("glm-4-flash") {
+                cfg.api_model = Some("glm-4v-flash".into());
+            }
             Ok(cfg)
         } else {
             let cfg = Self::default();

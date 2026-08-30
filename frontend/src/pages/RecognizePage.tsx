@@ -17,8 +17,8 @@ const languages: { value: OcrLanguage; label: string }[] = [
   { value: "es", label: "Español" }, { value: "ru", label: "Русский" },
 ];
 const copy = {
-  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", mosaicBlock: "马赛克块大小" },
-  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", mosaicBlock: "Mosaic block size" },
+  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyHide: "收起", historyShow: "展开", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", mosaicBlock: "马赛克块大小" },
+  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyHide: "Collapse", historyShow: "Expand", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", mosaicBlock: "Mosaic block size" },
 } as const;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
@@ -42,6 +42,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const [copiedTranslation, setCopiedTranslation] = useState(false);
   const [overlay, setOverlay] = useState(false);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(true);
   const [covering, setCovering] = useState(false);
   const [captureBackground, setCaptureBackground] = useState("");
   const [captureBytes, setCaptureBytes] = useState<Uint8Array | null>(null);
@@ -308,8 +309,14 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
           </> : <div className="image-empty"><strong>{t.empty}</strong></div>}
         </article>
         <section className="recognize-history">
-          <div className="history-head"><h2>{t.history}</h2>{history.length > 0 && <button type="button" onClick={clearAllHistory}>{t.historyClear}</button>}</div>
-          {history.length ? history.map((record, index) => (
+          <div className="history-head">
+            <h2>{t.history}</h2>
+            <div className="history-head-actions">
+              {history.length > 0 && <button type="button" onClick={clearAllHistory}>{t.historyClear}</button>}
+              <button type="button" className="history-toggle" onClick={() => setHistoryOpen((value) => !value)} aria-expanded={historyOpen}>{historyOpen ? t.historyHide : t.historyShow}</button>
+            </div>
+          </div>
+          {historyOpen && (history.length ? <div className="history-list">{history.map((record, index) => (
             <div className="history-row" key={`${record.time}-${index}`}>
               <button className="history-main" onClick={() => loadHistory(record)} title={t.historyLoad}>
                 <span className="history-time">{formatTime(record.time)}</span>
@@ -319,7 +326,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
                 <button type="button" onClick={() => void deleteHistory(index)} aria-label={t.historyDelete}>{t.historyDelete}</button>
               </div>
             </div>
-          )) : <div className="history-empty">{t.emptyHistory}</div>}
+          ))}</div> : <div className="history-empty">{t.emptyHistory}</div>)}
         </section>
       </div>
       <div className="recognize-right">

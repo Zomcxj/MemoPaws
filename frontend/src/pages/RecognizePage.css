@@ -633,3 +633,15 @@
   z-index: 9999;
   background: #262624;
 }
+
+.history-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 默认展示约 4 行，超出滚动 */
+.history-list {
+  max-height: 132px;
+  overflow-y: auto;
+}
