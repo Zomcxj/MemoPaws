@@ -291,10 +291,10 @@
 /* 右下角 ∟ 形拖拽手柄：提权覆盖 .recognize-page button 全局样式 */
 .capture-overlay .capture-result-window-resize {
   position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 14px;
-  height: 14px;
+  right: 2px;
+  bottom: 2px;
+  width: 10px;
+  height: 10px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -305,10 +305,7 @@
 .capture-overlay .capture-result-window-resize::after {
   content: "";
   position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 10px;
-  height: 10px;
+  inset: 0;
   border-right: 2px solid rgba(255, 255, 255, 0.85);
   border-bottom: 2px solid rgba(255, 255, 255, 0.85);
 }
