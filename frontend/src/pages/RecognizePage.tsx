@@ -42,6 +42,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const [copiedTranslation, setCopiedTranslation] = useState(false);
   const [overlay, setOverlay] = useState(false);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [covering, setCovering] = useState(false);
   const [captureBackground, setCaptureBackground] = useState("");
   const [captureBytes, setCaptureBytes] = useState<Uint8Array | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -145,6 +146,10 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     const window = getCurrentWindow();
     let restoreSucceeded = false;
     try {
+      // 窗口隐藏时 WebView2 合成器不换帧，show() 会先呈现旧的整屏截图帧。
+      // 因此在窗口仍可见时先用纯色遮罩盖住浮层，让合成器换上"干净帧"再隐藏。
+      setCovering(true);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await window.hide();
       if (await window.isFullscreen()) await window.setFullscreen(false);
       await window.setPosition(geometry.position);
@@ -153,10 +158,10 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       setOverlay(false);
       setCaptureBytes(null);
       setCaptureBackground("");
-      // 等浮层真正卸载后再显示窗口，避免旧画面闪现一帧
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      setCovering(false);
       restoreSucceeded = true;
     } finally {
+      setCovering(false);
       try {
         await window.show();
         if (restoreSucceeded) windowGeometryRef.current = null;
@@ -341,5 +346,6 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
        onSaveImage={overlaySaveImage}
         labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX", resize: language === "zh" ? "调整结果窗口大小" : "Resize result window" }}
     />}
+    {covering && <div className="capture-cover" aria-hidden="true" />}
   </section>;
 }

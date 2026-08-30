@@ -625,3 +625,11 @@
     grid-template-rows: minmax(240px, 320px) minmax(220px, 280px);
   }
 }
+
+/* 截图确认后恢复窗口期间的纯色过渡遮罩，防止旧截图帧闪现 */
+.capture-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #262624;
+}

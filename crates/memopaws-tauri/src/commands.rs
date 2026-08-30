@@ -317,7 +317,7 @@ fn validate_config_request(config: &serde_json::Value) -> Result<(), String> {
         }
     }
     for field in ["clipboard_max_items", "history_max_items"] {
-        if let Some(value) = config.get(field) {
+        if let Some(value) = config.get(field).filter(|value| !value.is_null()) {
             let value = value
                 .as_u64()
                 .ok_or_else(|| format!("{field} must be an integer"))?;
@@ -2234,6 +2234,10 @@ mod tests {
             super::save_config_at(&path, serde_json::json!({"clipboard_max_items": 5})).is_err()
         );
         assert!(super::save_config_at(&path, serde_json::json!({"api_url": "not a url"})).is_err());
+        // 旧版配置缺字段时前端会回传 null，校验必须跳过而非报错
+        assert!(
+            super::save_config_at(&path, serde_json::json!({"history_max_items": null})).is_ok()
+        );
         let _ = std::fs::remove_file(path);
     }
 

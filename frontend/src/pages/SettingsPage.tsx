@@ -47,11 +47,15 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) 
     ])
       .then(([raw, dir]) => {
         if (!active) return;
+        // 旧版配置缺字段时 serde 返回 null，剔除后让默认值兜底
+        const present = Object.fromEntries(
+          Object.entries(raw).filter(([, value]) => value !== null && value !== undefined),
+        );
         const loaded = {
           ...DEFAULT_CONFIG,
-          ...raw,
-          shortcuts: { ...DEFAULT_SHORTCUTS, ...((raw.shortcuts as ShortcutState) || {}) },
-          text_replacements: Array.isArray(raw.text_replacements) ? raw.text_replacements : [],
+          ...present,
+          shortcuts: { ...DEFAULT_CONFIG.shortcuts, ...((present.shortcuts as ShortcutState) || {}) },
+          text_replacements: Array.isArray(present.text_replacements) ? present.text_replacements : [],
         } as AppConfig;
         const baseDir = dir || loaded.data_dir || "";
         setConfig({ ...loaded, data_dir: baseDir });
