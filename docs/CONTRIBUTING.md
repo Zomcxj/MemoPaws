@@ -44,6 +44,14 @@ npm --prefix frontend run dev
 npm --prefix frontend run build
 ```
 
+### 构建安装包（Windows）
+
+```bash
+RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2 npm --prefix frontend exec -- tauri build --bundles nsis
+```
+
+产物位于 `target/release/bundle/nsis/`。两个环境变量在 Windows 上必须设置：`RUST_MIN_STACK` 限制测试/构建线程栈为 64MB（默认大栈会打爆提交内存），`CARGO_BUILD_JOBS=2` 限制并行编译任务避免内存耗尽。
+
 ## 测试
 
 ### Rust 测试
@@ -69,15 +77,22 @@ E2E 测试基于 Playwright，测试文件位于 `frontend/e2e/`：
 ```bash
 node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
-node frontend/e2e/test-tauri-app.cjs
-node frontend/e2e/test-tauri-driver.cjs
 node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-clipboard-layout.cjs
 node frontend/e2e/test-key-interaction-refinement.cjs
 node frontend/e2e/test-final-review-fixes.cjs
+node frontend/e2e/test-memo-preview-contracts.cjs
+node frontend/e2e/test-recognize-capture-contracts.cjs
+node frontend/e2e/test-window-acl-and-sidebar.cjs
+node frontend/e2e/test-floating-removal-contracts.cjs
+node frontend/e2e/test-tauri-app.cjs
+node frontend/e2e/test-tauri-driver.cjs
 ```
 
-> 注意：E2E 测试需要前端开发服务器运行在 `http://localhost:1420`。可使用 mock 模式模拟 Tauri API。
+> 注意：
+>
+> - E2E 测试需要前端开发服务器运行在 `http://localhost:1420`，可使用 mock 模式模拟 Tauri API。
+> - `test-tauri-app.cjs` 与 `test-tauri-driver.cjs` 需要正在运行的应用及 CDP 调试端口，在普通开发环境属于预期失败（存量基线）。
 
 ### 前端构建验证
 
