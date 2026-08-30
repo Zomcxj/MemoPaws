@@ -23,6 +23,8 @@ pub struct ClipboardItem {
     pub text: Option<String>,
     pub image_path: Option<String>,
     pub locked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<u64>,
 }
 
 impl<'de> Deserialize<'de> for ClipboardItem {
@@ -43,6 +45,8 @@ impl<'de> Deserialize<'de> for ClipboardItem {
             image_path: Option<String>,
             #[serde(default)]
             locked: bool,
+            #[serde(default)]
+            hash: Option<u64>,
         }
         let raw = Raw::deserialize(deserializer)?;
         let content_type = raw.content_type.or(raw.kind).unwrap_or_else(|| "text".into());
@@ -59,6 +63,7 @@ impl<'de> Deserialize<'de> for ClipboardItem {
             text,
             image_path,
             locked: raw.locked,
+            hash: raw.hash,
         })
     }
 }
@@ -130,7 +135,7 @@ impl ClipboardManager {
             }
         }
         self.items.extend(kept);
-        self.items.sort_by_key(|item| std::cmp::Reverse(item.id));
+        self.items.sort_by(|left, right| right.time.cmp(&left.time).then(right.id.cmp(&left.id)));
         self.max_items = max_items;
         self.save()
     }
@@ -138,7 +143,10 @@ impl ClipboardManager {
     pub fn add_text(&mut self, text: &str) -> Result<(), String> {
         let text = text.chars().take(MAX_TEXT_LENGTH).collect::<String>();
         if text.trim().is_empty() { return Ok(()); }
-        if self.items.first().and_then(|i| i.text.as_deref()) == Some(&text) { return Ok(()); }
+        // 同内容只保存一条；重复复制旧记录时刷新时间并置顶
+        if let Some(pos) = self.items.iter().position(|i| i.text.as_deref() == Some(&text)) {
+            return self.promote(pos, None);
+        }
         self.add(ClipboardItem {
             id: self.next_id,
             time: now_str(),
@@ -146,10 +154,15 @@ impl ClipboardManager {
             text: Some(text),
             image_path: None,
             locked: false,
+            hash: None,
         })
     }
 
     pub fn add_image(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let hash = bytes_hash(bytes);
+        if let Some(pos) = self.find_image(hash)? {
+            return self.promote(pos, Some(hash));
+        }
         let filename = format!("{}.png", self.next_id);
         let image_path = self.images_dir.join(&filename);
         fs::create_dir_all(&self.images_dir).map_err(|e| e.to_string())?;
@@ -161,7 +174,37 @@ impl ClipboardManager {
             text: None,
             image_path: Some(filename),
             locked: false,
+            hash: Some(hash),
         })
+    }
+
+    /// 按内容哈希查找已存的同图记录；旧记录缺哈希时读文件惰性补算
+    fn find_image(&self, hash: u64) -> Result<Option<usize>, String> {
+        for (pos, item) in self.items.iter().enumerate() {
+            if item.content_type != "image" { continue; }
+            match item.hash {
+                Some(existing) if existing == hash => return Ok(Some(pos)),
+                Some(_) => {}
+                None => {
+                    let path = item.image_path.as_ref().map(|p| self.images_dir.join(p));
+                    let matched = path
+                        .and_then(|path| fs::read(path).ok())
+                        .map(|stored| bytes_hash(&stored) == hash)
+                        .unwrap_or(false);
+                    if matched { return Ok(Some(pos)); }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// 刷新时间并移到列表顶部；顺带回填旧记录缺失的哈希
+    fn promote(&mut self, pos: usize, backfill_hash: Option<u64>) -> Result<(), String> {
+        let mut item = self.items.remove(pos);
+        item.time = now_str();
+        if backfill_hash.is_some() { item.hash = backfill_hash; }
+        self.items.insert(0, item);
+        self.save()
     }
 
     fn add(&mut self, mut item: ClipboardItem) -> Result<(), String> {
@@ -240,6 +283,14 @@ impl ClipboardManager {
 
 fn now_str() -> String {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default()
+}
+
+/// 图片内容哈希，用于识别重复复制的同图
+fn bytes_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Convert a Python-edition timestamp (`"YYYY-MM-DD HH:MM:SS"`) to unix seconds.
@@ -436,6 +487,54 @@ mod tests {
         m.add_text("hello").unwrap();
         m.add_text("hello").unwrap();
         assert_eq!(m.items.len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recopying_old_text_refreshes_time_and_promotes_to_top() {
+        let dir = unique_dir();
+        let mut m = manager(&dir.join("clipboard.json"));
+        m.add_text("old").unwrap();
+        m.add_text("new").unwrap();
+        assert_eq!(m.items[0].text.as_deref(), Some("new"));
+        m.items[0].time = "1".into(); // 人为把顶部记录时间拨旧，确保断言不靠运气
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        m.add_text("old").unwrap();
+        assert_eq!(m.items.len(), 2, "重复复制旧文本不应新增记录");
+        assert_eq!(m.items[0].text.as_deref(), Some("old"), "旧记录应被置顶");
+        let old_time: u64 = m.items[0].time.parse().unwrap();
+        assert!(old_time > 1, "置顶记录时间应刷新");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recopying_same_image_deduplicates_and_promotes() {
+        let dir = unique_dir();
+        let mut m = manager(&dir.join("clipboard.json"));
+        m.add_image(b"image-bytes").unwrap();
+        m.add_text("later-text").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        m.add_image(b"image-bytes").unwrap();
+        assert_eq!(m.items.len(), 2, "重复复制同图不应新增记录");
+        assert_eq!(m.items[0].content_type, "image", "同图记录应被置顶");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_image_without_hash_is_deduplicated_by_file_content() {
+        let dir = unique_dir();
+        let mut m = manager(&dir.join("clipboard.json"));
+        m.add_image(b"legacy-image").unwrap();
+        // 模拟旧版记录：清掉哈希字段
+        m.items[0].hash = None;
+        m.save().unwrap();
+        let mut m = ClipboardManager::load_from(
+            dir.join("clipboard.json"),
+            dir.join("clipboard_images"),
+        ).unwrap();
+        m.add_image(b"legacy-image").unwrap();
+        assert_eq!(m.items.len(), 1, "旧记录无哈希时应按文件内容去重");
+        assert_eq!(m.items[0].hash, Some(bytes_hash(b"legacy-image")), "去重后应回填哈希");
         let _ = fs::remove_dir_all(&dir);
     }
 

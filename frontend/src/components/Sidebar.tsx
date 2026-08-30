@@ -21,7 +21,7 @@ interface SidebarProps {
 }
 
 const labels: Record<Lang, Record<Page, string>> = {
-  zh: { settings: "设置", recognize: "贴图识别", clipboard: "剪切板", memo: "备忘录", keys: "密钥" },
+  zh: { settings: "设置", recognize: "图片识别", clipboard: "剪切板", memo: "备忘录", keys: "密钥" },
   en: { settings: "Settings", recognize: "Recognition", clipboard: "Clipboard", memo: "Notes", keys: "Keys" },
 };
 

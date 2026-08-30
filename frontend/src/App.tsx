@@ -61,6 +61,8 @@ export default function App() {
     const unlisten = listen<string>("global-shortcut", (event) => {
       switch (event.payload) {
         case "capture":
+          // 页面切换是异步的，此时监听器未挂载会丢事件；用待办标记让识别页挂载后补触发
+          (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = true;
           navigateRef.current("recognize");
           window.dispatchEvent(new CustomEvent("memopaws-capture"));
           break;

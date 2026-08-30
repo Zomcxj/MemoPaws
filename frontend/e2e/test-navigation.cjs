@@ -180,9 +180,9 @@ async function runTests() {
   // Test 5: Verify page elements exist
   console.log('\n--- Test 5: Page element verification ---');
   // Go to recognize page
-  const recognizeBtn = page.locator('.sidebar-item:has-text("贴图识别")');
+  const recognizeBtn = page.locator('.sidebar-item:has-text("图片识别")');
   if (await recognizeBtn.count() !== 1) {
-    throw new Error(`Expected one navigation button for 贴图识别, found ${await recognizeBtn.count()}`);
+    throw new Error(`Expected one navigation button for 图片识别, found ${await recognizeBtn.count()}`);
   }
   await recognizeBtn.click();
   await page.waitForTimeout(500);
