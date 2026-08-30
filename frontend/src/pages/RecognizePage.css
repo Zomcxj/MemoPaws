@@ -536,18 +536,6 @@
   color: var(--text-secondary);
 }
 
-.image-canvas.is-mosaic-mode {
-  cursor: crosshair;
-}
-
-.mosaic-selection {
-  position: absolute;
-  z-index: 2;
-  border: 1px dashed var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  pointer-events: none;
-}
-
 .context-menu {
   position: fixed;
   z-index: 2000;

@@ -17,8 +17,8 @@ const languages: { value: OcrLanguage; label: string }[] = [
   { value: "es", label: "Español" }, { value: "ru", label: "Русский" },
 ];
 const copy = {
-  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", mosaicRegion: "区域马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyHide: "收起", historyShow: "展开", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", mosaicBlock: "马赛克块大小" },
-  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", mosaicRegion: "Region Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyHide: "Collapse", historyShow: "Expand", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", mosaicBlock: "Mosaic block size" },
+  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyHide: "收起", historyShow: "展开", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本" },
+  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyHide: "Collapse", historyShow: "Expand", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored" },
 } as const;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
@@ -51,8 +51,8 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const [future, setFuture] = useState<Uint8Array[]>([]);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [selectedDisplay, setSelectedDisplay] = useState(0);
-  const [mosaicRegionMode, setMosaicRegionMode] = useState(false);
-  const [mosaicDrag, setMosaicDrag] = useState<{ startX: number; startY: number; x: number; y: number } | null>(null);
+  
+
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef(preview);
@@ -223,34 +223,6 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     URL.revokeObjectURL(url);
   };
 
-  // Mosaic region selection on the canvas.
-  const imageCoords = (clientX: number, clientY: number): { x: number; y: number } | null => {
-    const img = canvasRef.current?.querySelector("img");
-    if (!img) return null;
-    const rect = img.getBoundingClientRect();
-    return { x: (clientX - rect.left) / zoom, y: (clientY - rect.top) / zoom };
-  };
-
-  const onCanvasMouseDown = (event: React.MouseEvent) => {
-    if (!mosaicRegionMode || !image) return;
-    const coords = imageCoords(event.clientX, event.clientY);
-    if (!coords) return;
-    event.preventDefault();
-    setMosaicDrag({ startX: coords.x, startY: coords.y, x: coords.x, y: coords.y });
-  };
-  const onCanvasMouseMove = (event: React.MouseEvent) => {
-    if (!mosaicDrag) return;
-    const coords = imageCoords(event.clientX, event.clientY);
-    if (!coords) return;
-    setMosaicDrag((current) => current ? { ...current, x: coords.x, y: coords.y } : current);
-  };
-  const onCanvasMouseUp = () => {
-    if (!mosaicDrag) return;
-    const rect = { x: Math.min(mosaicDrag.startX, mosaicDrag.x), y: Math.min(mosaicDrag.startY, mosaicDrag.y), width: Math.abs(mosaicDrag.x - mosaicDrag.startX), height: Math.abs(mosaicDrag.y - mosaicDrag.startY) };
-    setMosaicDrag(null);
-      if (rect.width < 2 || rect.height < 2) { return; }
-  };
-
   // Context menu.
   const onContextMenu = (event: React.MouseEvent) => {
     if (!image) return;
@@ -264,18 +236,12 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const contextSave = () => { closeContextMenu(); void exportImage(); };
   const contextReset = () => { closeContextMenu(); reset(); };
 
-  useEffect(() => { let active = true; Promise.all([invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([records, disp]) => { if (active) { setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); if ((window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture) { (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = false; window.setTimeout(() => captureRef.current(), 60); } } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
+  useEffect(() => { let active = true; Promise.all([invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([records, disp]) => { if (active) { setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); if ((window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture) { (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = false; // 等新页面绘制完成再隐藏窗口：刚挂载就 hide 会拖长 DWM 隐藏过渡，320ms 内拍不到干净画面（主界面半透明残影）
+requestAnimationFrame(() => requestAnimationFrame(() => captureRef.current())); } } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
   useEffect(() => { const captureEvent = () => { (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = false; captureRef.current(); }; const fitEvent = () => setZoom(1); const recognizeTextEvent = (event: Event) => { const text = (event as CustomEvent<{ text?: unknown }>).detail?.text; if (typeof text === "string") { setOcrText(text); setTranslation(""); setError(""); setCopied(false); } }; const recognizeImageEvent = (event: Event) => { const bytes = (event as CustomEvent<{ image?: unknown }>).detail?.image; if (!Array.isArray(bytes) || !bytes.every((byte) => typeof byte === "number")) return; setOriginal(new Uint8Array(bytes)); setBytes(new Uint8Array(bytes), false); setOcrText(""); setTranslation(""); setError(""); }; window.addEventListener("memopaws-capture", captureEvent); window.addEventListener("canvas_fit", fitEvent); window.addEventListener("recognize-text", recognizeTextEvent); window.addEventListener("recognize-image", recognizeImageEvent); return () => { window.removeEventListener("memopaws-capture", captureEvent); window.removeEventListener("canvas_fit", fitEvent); window.removeEventListener("recognize-text", recognizeTextEvent); window.removeEventListener("recognize-image", recognizeImageEvent); }; }, []);
   useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
 
   const closeOverlay = async () => { await restoreCaptureWindow(); };
-
-  const mosaicStyle = mosaicDrag ? {
-    left: Math.min(mosaicDrag.startX, mosaicDrag.x) * zoom,
-    top: Math.min(mosaicDrag.startY, mosaicDrag.y) * zoom,
-    width: Math.abs(mosaicDrag.x - mosaicDrag.startX) * zoom,
-    height: Math.abs(mosaicDrag.y - mosaicDrag.startY) * zoom,
-  } : null;
 
   return <section className="recognize-page" onDragOver={(event) => event.preventDefault()} onDrop={dropImage}>
     <header className="recognize-toolbar"><div className="toolbar-actions">
@@ -285,7 +251,6 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("gray")}>{t.gray}</button>
       <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("binary")}>{t.binary}</button>
       <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("mosaic")}>{t.mosaic}</button>
-      <button className="tool-button" disabled={!image || loading} onClick={() => setMosaicRegionMode((v) => !v)} aria-pressed={mosaicRegionMode}>{t.mosaicRegion}</button>
       <button className="tool-button" disabled={!past.length} onClick={undo}>↶</button><button className="tool-button" disabled={!future.length} onClick={redo}>↷</button>
       <button className="tool-button" disabled={!image} onClick={() => setZoom((value) => Math.min(8, value * 1.25))}>+</button><button className="tool-button" disabled={!image} onClick={() => setZoom((value) => Math.max(.1, value / 1.25))}>-</button>
       <button className="tool-button" disabled={!original} onClick={reset}>{t.reset}</button><button className="tool-button" disabled={!image} onClick={clear}>{t.clear}</button><button className="tool-button" disabled={!image} onClick={exportImage}>{t.save}</button>
@@ -295,16 +260,8 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       <div className="recognize-left">
         <article className="recognize-panel image-panel" onContextMenu={onContextMenu}>
           {preview ? <>
-            <div
-              className={`image-canvas${mosaicRegionMode ? " is-mosaic-mode" : ""}`}
-              ref={canvasRef}
-              onMouseDown={onCanvasMouseDown}
-              onMouseMove={onCanvasMouseMove}
-              onMouseUp={onCanvasMouseUp}
-              onMouseLeave={onCanvasMouseUp}
-            >
+            <div className="image-canvas" ref={canvasRef}>
               <img src={preview} alt={t.empty} style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }} draggable={false} />
-              {mosaicStyle && <div className="mosaic-selection" style={mosaicStyle} />}
             </div>
           </> : <div className="image-empty"><strong>{t.empty}</strong></div>}
         </article>
