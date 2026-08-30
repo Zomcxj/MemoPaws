@@ -19,6 +19,7 @@ name = "memopaws"
 path = "src/main.rs"
 
 [dependencies]
+dirs = "5"
 tauri = { version = "2", features = ["tray-icon", "custom-protocol"] }
 tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2"

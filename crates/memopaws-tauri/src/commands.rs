@@ -833,6 +833,66 @@ pub fn add(
     with_vault(state, |vault| vault.add(entry))
 }
 
+/// opencode 配置中的自定义提供商
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpencodeProvider {
+    pub id: String,
+    pub url: String,
+    pub api_key: String,
+    pub models: Vec<String>,
+}
+
+#[tauri::command]
+pub fn list_opencode_providers() -> Result<Vec<OpencodeProvider>, String> {
+    let path = dirs::home_dir()
+        .ok_or_else(|| "无法定位用户目录".to_string())?
+        .join(".config")
+        .join("opencode")
+        .join("opencode.json");
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|_| format!("未找到 opencode 配置: {}", path.display()))?;
+    parse_opencode_providers(&raw)
+}
+
+fn parse_opencode_providers(raw: &str) -> Result<Vec<OpencodeProvider>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|error| format!("opencode 配置解析失败: {error}"))?;
+    // 兼容 "provider" 与 "providers" 两种顶层键名
+    let providers = value
+        .get("provider")
+        .or_else(|| value.get("providers"))
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| "opencode 配置中没有 provider 定义".to_string())?;
+    let mut result = Vec::new();
+    for (id, def) in providers {
+        let options = def.get("options").cloned().unwrap_or_default();
+        let api_key = options
+            .get("apiKey")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if api_key.is_empty() {
+            continue;
+        }
+        let url = options
+            .get("baseURL")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let mut models: Vec<String> = def
+            .get("models")
+            .and_then(|models| models.as_object())
+            .map(|models| models.keys().cloned().collect())
+            .unwrap_or_default();
+        models.sort();
+        result.push(OpencodeProvider { id: id.clone(), url, api_key, models });
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 pub fn update(
     id: u64,
@@ -1555,6 +1615,32 @@ mod tests {
         sync::{Arc, Mutex},
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn opencode_providers_parse_provider_and_providers_keys_and_skip_keyless() {
+        let raw = r#"{
+            "provider": {
+                "sensenova": {
+                    "options": { "baseURL": "https://token.sensenova.cn/v1", "apiKey": "sk-abc" },
+                    "models": { "b-model": {}, "a-model": {} }
+                },
+                "no-key": { "options": { "baseURL": "https://x.example/v1" }, "models": { "m": {} } }
+            }
+        }"#;
+        let parsed = super::parse_opencode_providers(raw).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "sensenova");
+        assert_eq!(parsed[0].url, "https://token.sensenova.cn/v1");
+        assert_eq!(parsed[0].api_key, "sk-abc");
+        assert_eq!(parsed[0].models, vec!["a-model".to_string(), "b-model".to_string()]);
+
+        let legacy = r#"{ "providers": { "p": { "options": { "apiKey": "k" } } } }"#;
+        let parsed = super::parse_opencode_providers(legacy).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].models.is_empty());
+
+        assert!(super::parse_opencode_providers("{}").is_err());
+    }
 
     use memopaws_keys::{KeyEntryInput, KeyVault};
     use memopaws_memo::model::Memo;

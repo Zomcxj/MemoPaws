@@ -288,18 +288,27 @@
   background: var(--accent);
 }
 
-/* 直角方块拖拽手柄：提权覆盖 .recognize-page button 全局样式 */
+/* 右下角 ∟ 形拖拽手柄：提权覆盖 .recognize-page button 全局样式 */
 .capture-overlay .capture-result-window-resize {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
-  width: 12px;
-  height: 12px;
-  box-sizing: border-box;
+  right: 3px;
+  bottom: 3px;
+  width: 14px;
+  height: 14px;
   padding: 0;
-  border: 2px solid #fff;
+  border: 0;
   border-radius: 0;
-  background: #4da3ff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  background: transparent;
   cursor: nwse-resize;
+}
+
+.capture-overlay .capture-result-window-resize::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid rgba(255, 255, 255, 0.85);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.85);
 }

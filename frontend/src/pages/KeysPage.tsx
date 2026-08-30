@@ -50,6 +50,10 @@ const copy = {
     setMaster: "设置主密码",
     add: "添加密钥",
     testSpeed: "测试速度",
+    importOc: "读取 opencode",
+    ocConfirm: "从 opencode 读取到 {p} 个提供商 / {m} 个模型，全部导入为密钥？",
+    ocDone: "已导入 {a} 个密钥，跳过已存在 {s} 个",
+    ocNone: "opencode 配置中没有含 API Key 的提供商",
     testing: "测试中…",
     unauthorized: "API Key 无效 (401)",
     not_found: "地址不存在 (404)",
@@ -122,6 +126,10 @@ const copy = {
     setMaster: "Set master password",
     add: "Add Key",
     testSpeed: "Test Speed",
+    importOc: "Import opencode",
+    ocConfirm: "Found {p} providers / {m} models in opencode. Import all as keys?",
+    ocDone: "Imported {a} keys, skipped {s} existing",
+    ocNone: "No providers with API keys found in opencode config",
     testing: "Testing…",
     unauthorized: "Invalid API Key (401)",
     not_found: "Endpoint not found (404)",
@@ -294,6 +302,27 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
     setShowValue(false);
     setShowForm(true);
   };
+
+  const importOpencode = () => void run(async () => {
+    const providers = await invoke<{ id: string; url: string; apiKey: string; models: string[] }[]>("list_opencode_providers");
+    if (!providers.length) { setError(t.ocNone); return; }
+    const total = providers.reduce((count, provider) => count + provider.models.length, 0);
+    if (!window.confirm(t.ocConfirm.replace("{p}", String(providers.length)).replace("{m}", String(total)))) return;
+    const existing = new Set(entries.map((entry) => entry.name));
+    let added = 0;
+    let skipped = 0;
+    for (const provider of providers) {
+      for (const model of provider.models) {
+        const name = model ? `${provider.id}/${model}` : provider.id;
+        if (existing.has(name)) { skipped += 1; continue; }
+        await invoke("add", { entry: { name, type: "llm", value: provider.apiKey, url: provider.url, url_anthropic: "", note: model } });
+        existing.add(name);
+        added += 1;
+      }
+    }
+    await refresh();
+    window.alert(t.ocDone.replace("{a}", String(added)).replace("{s}", String(skipped)));
+  });
 
   const openEdit = async (entry: KeyEntry) => {
     setError("");
@@ -681,6 +710,9 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
           )}
           <button className="primary" onClick={openAdd} disabled={busy}>
             {t.add}
+          </button>
+          <button onClick={() => void importOpencode()} disabled={busy}>
+            {t.importOc}
           </button>
           <button onClick={() => void testSpeed()} disabled={busy || testing || !llmEntries.length}>
             {testing ? t.testing : t.testSpeed}
