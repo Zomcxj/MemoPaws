@@ -63,8 +63,8 @@ assert.match(keysPage, /const unionArea = dragArea \+ rect\.width \* rect\.heigh
   "LLM swap targets must require IoU greater than 0.4");
 assert.match(keysPage, /const unionArea = dragArea \+ rect\.width \* rect\.height - overlapArea;[\s\S]*if \(unionArea === 0 \|\| overlapArea \/ unionArea <= 0\.4\) continue;[\s\S]*insertAfter = movedRect\.top \+ movedRect\.height \/ 2 > rect\.top \+ rect\.height \/ 2;/,
   "secret reorder targets must require IoU greater than 0.4");
-assert.match(keysCss, /\.key-card-llm h3\s*\{[^}]*font-size:\s*14px[^}]*\}/s,
-  "LLM card model names must use the smaller 14px title size");
+assert.match(keysCss, /\.key-card-llm h3\s*\{[^}]*font-size:\s*13px[^}]*\}/s,
+  "LLM card model names must use the smaller 13px title size");
 assert.equal((keysPage.match(/className="key-drag-handle"/g) || []).length, 2,
   "each key layout must expose exactly one dedicated drag handle");
 assert.doesNotMatch(keysPage, /<article\s+[^>]*onPointerDown=/,

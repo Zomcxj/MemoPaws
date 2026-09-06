@@ -214,7 +214,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
   useEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
-  const pointerDrag = useRef<{ id: number; type: KeyType; x: number; y: number; started: boolean; targetId: number | null; insertAfter: boolean } | null>(null);
+  const pointerDrag = useRef<{ id: number; type: KeyType; x: number; y: number; rect: DOMRect; started: boolean; targetId: number | null; insertAfter: boolean } | null>(null);
 
   const wipeSensitiveState = () => {
     setDraft(blankDraft());
@@ -463,7 +463,9 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
   const beginPointerDrag = (event: PointerEvent<HTMLElement>, entry: KeyEntry) => {
     if (reordering) return;
     if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
-    pointerDrag.current = { id: entry.id, type: entry.type, x: event.clientX, y: event.clientY, started: false, targetId: null, insertAfter: false };
+    const card = event.currentTarget.closest<HTMLElement>("[data-key-id]");
+    if (!card) return;
+    pointerDrag.current = { id: entry.id, type: entry.type, x: event.clientX, y: event.clientY, rect: card.getBoundingClientRect(), started: false, targetId: null, insertAfter: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -484,9 +486,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
     if (!container) return;
     const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-key-id]"));
     if (!rows.length) return;
-    const dragged = container.querySelector<HTMLElement>(`[data-key-id="${drag.id}"]`);
-    if (!dragged) return;
-    const dragRect = dragged.getBoundingClientRect();
+    const dragRect = drag.rect;
     const movedRect = {
       left: dragRect.left + offsetX,
       top: dragRect.top + offsetY,
@@ -571,7 +571,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
       event.preventDefault();
       if (!drag || !drag.started || drag.id !== entry.id) {
         if (reordering) return;
-        pointerDrag.current = { id: entry.id, type: entry.type, x: 0, y: 0, started: true, targetId: null, insertAfter: false };
+        pointerDrag.current = { id: entry.id, type: entry.type, x: 0, y: 0, rect: new DOMRect(), started: true, targetId: null, insertAfter: false };
         setDragging({ id: entry.id, type: entry.type });
         setDragOffset({ x: 0, y: 0 });
       } else {
@@ -588,7 +588,7 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
       event.preventDefault();
       if (!drag || !drag.started || drag.id !== entry.id) {
         if (reordering) return;
-        pointerDrag.current = { id: entry.id, type: entry.type, x: 0, y: 0, started: true, targetId: null, insertAfter: false };
+        pointerDrag.current = { id: entry.id, type: entry.type, x: 0, y: 0, rect: new DOMRect(), started: true, targetId: null, insertAfter: false };
         setDragging({ id: entry.id, type: entry.type });
         setDragOffset({ x: 0, y: 0 });
       }
