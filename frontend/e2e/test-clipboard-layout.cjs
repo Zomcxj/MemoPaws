@@ -59,10 +59,12 @@ assert.match(keysCss, /\.key-latency\.is-testing\s*\{[^}]*color:\s*#3d9a5f[^}]*\
 assert.match(keysCss, /\.keys-dialog,\s*\.keys-popover\s*\{[^}]*max-height:\s*min\(620px, 92vh\)[^}]*\}/s);
 assert.match(keysPage, /const dragThreshold = entry\.type === "llm" \? 8 : 18;/,
   "LLM dragging must wait for an 8px threshold and secret dragging for an 18px threshold");
-assert.match(keysPage, /const overlapArea =[\s\S]*if \(overlapArea <= dragArea \/ 2\) continue;[\s\S]*const dragCenterX = movedRect\.left \+ movedRect\.width \/ 2;/,
-  "LLM swap targets must require the dragged card to overlap more than half its own area");
-assert.match(keysPage, /const overlapArea =[\s\S]*if \(overlapArea <= dragArea \/ 2\) continue;[\s\S]*insertAfter = movedRect\.top \+ movedRect\.height \/ 2 > rect\.top \+ rect\.height \/ 2;/,
-  "secret reorder targets must require the dragged row to overlap more than half its own area");
+assert.match(keysPage, /const unionArea = dragArea \+ rect\.width \* rect\.height - overlapArea;[\s\S]*if \(unionArea === 0 \|\| overlapArea \/ unionArea <= 0\.4\) continue;[\s\S]*const dragCenterX = movedRect\.left \+ movedRect\.width \/ 2;/,
+  "LLM swap targets must require IoU greater than 0.4");
+assert.match(keysPage, /const unionArea = dragArea \+ rect\.width \* rect\.height - overlapArea;[\s\S]*if \(unionArea === 0 \|\| overlapArea \/ unionArea <= 0\.4\) continue;[\s\S]*insertAfter = movedRect\.top \+ movedRect\.height \/ 2 > rect\.top \+ rect\.height \/ 2;/,
+  "secret reorder targets must require IoU greater than 0.4");
+assert.match(keysCss, /\.key-card-llm h3\s*\{[^}]*font-size:\s*14px[^}]*\}/s,
+  "LLM card model names must use the smaller 14px title size");
 assert.equal((keysPage.match(/className="key-drag-handle"/g) || []).length, 2,
   "each key layout must expose exactly one dedicated drag handle");
 assert.doesNotMatch(keysPage, /<article\s+[^>]*onPointerDown=/,

@@ -11,8 +11,8 @@ for (const perm of ["core:window:allow-hide", "core:window:allow-show", "core:wi
 const keysSource = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "KeysPage.tsx"), "utf8");
 assert.match(
   keysSource,
-  /if \(overlapArea <= dragArea \/ 2\) continue;[\s\S]*if \(overlapArea <= dragArea \/ 2\) continue;/,
-  "swap must require overlap exceeding half of the dragged item's own area",
+  /if \(unionArea === 0 \|\| overlapArea \/ unionArea <= 0\.4\) continue;[\s\S]*if \(unionArea === 0 \|\| overlapArea \/ unionArea <= 0\.4\) continue;/,
+  "swap must require IoU greater than 0.4",
 );
 
 const sidebarCss = fs.readFileSync(path.join(__dirname, "..", "src", "components", "Sidebar.css"), "utf8");

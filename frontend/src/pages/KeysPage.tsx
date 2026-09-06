@@ -507,7 +507,8 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
         const overlapArea =
           Math.max(0, Math.min(movedRect.right, rect.right) - Math.max(movedRect.left, rect.left)) *
           Math.max(0, Math.min(movedRect.bottom, rect.bottom) - Math.max(movedRect.top, rect.top));
-        if (overlapArea <= dragArea / 2) continue;
+        const unionArea = dragArea + rect.width * rect.height - overlapArea;
+        if (unionArea === 0 || overlapArea / unionArea <= 0.4) continue;
         const dragCenterX = movedRect.left + movedRect.width / 2;
         const dragCenterY = movedRect.top + movedRect.height / 2;
         const distance = Math.hypot(dragCenterX - (rect.left + rect.width / 2), dragCenterY - (rect.top + rect.height / 2));
@@ -524,7 +525,8 @@ export function KeysPage({ language = "zh" }: { language?: Lang }) {
         const overlapArea =
           Math.max(0, Math.min(movedRect.right, rect.right) - Math.max(movedRect.left, rect.left)) *
           Math.max(0, Math.min(movedRect.bottom, rect.bottom) - Math.max(movedRect.top, rect.top));
-        if (overlapArea <= dragArea / 2) continue;
+        const unionArea = dragArea + rect.width * rect.height - overlapArea;
+        if (unionArea === 0 || overlapArea / unionArea <= 0.4) continue;
         targetId = id;
         insertAfter = movedRect.top + movedRect.height / 2 > rect.top + rect.height / 2;
         break;
