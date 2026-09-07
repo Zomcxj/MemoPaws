@@ -37,7 +37,6 @@ Windows 上必须设置这两个环境变量（默认大栈与全量并行会打
 
 - [用户指南](docs/USER_GUIDE.md)：功能、快捷键、数据目录和配置
 - [贡献指南](docs/CONTRIBUTING.md)：开发、测试、构建和提交规范
-- [更新日志](docs/CHANGELOG.md)
 
 ## 许可
 
