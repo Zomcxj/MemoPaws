@@ -38,15 +38,6 @@ pub fn mosaic_png(bytes: &[u8], block: u32) -> Result<Vec<u8>, OcrError> {
     encode_png(&DynamicImage::ImageRgba8(image))
 }
 
-pub fn mosaic_region_png(bytes: &[u8], block: u32, x: u32, y: u32, width: u32, height: u32) -> Result<Vec<u8>, OcrError> {
-    let mut image = decode_limited(bytes)?.to_rgba8();
-    let (image_width, image_height) = image.dimensions();
-    let right = x.saturating_add(width).min(image_width);
-    let bottom = y.saturating_add(height).min(image_height);
-    if right > x && bottom > y { mosaic_area(&mut image, clamp_block(block), x, y, right - x, bottom - y); }
-    encode_png(&DynamicImage::ImageRgba8(image))
-}
-
 pub fn crop_png(bytes: &[u8], x: u32, y: u32, width: u32, height: u32) -> Result<Vec<u8>, OcrError> {
     if width == 0 || height == 0 { return Err(OcrError::Custom("crop width and height must be positive".into())); }
     let image = decode_limited(bytes)?;
@@ -132,41 +123,6 @@ mod tests {
         let coarse = decode_rgba(&mosaic_png(&original, 999).expect("mosaic succeeds"));
         let first = *coarse.get_pixel(0, 0);
         assert!(coarse.pixels().all(|pixel| *pixel == first), "clamped block covers whole image");
-    }
-
-    #[test]
-    fn mosaic_region_png_only_touches_region() {
-        let original = sample_png(8, 8);
-        let source = decode_rgba(&original);
-        let output = decode_rgba(&mosaic_region_png(&original, 4, 4, 0, 4, 4).expect("mosaic succeeds"));
-        let expected = *output.get_pixel(4, 0);
-        for y in 0..4 { for x in 4..8 { assert_eq!(*output.get_pixel(x, y), expected, "region pixel ({x},{y})"); } }
-        for y in 0..8 { for x in 0..8 {
-            if x >= 4 && y < 4 { continue; }
-            assert_eq!(output.get_pixel(x, y), source.get_pixel(x, y), "outside pixel ({x},{y})");
-        } }
-        assert_ne!(*output.get_pixel(4, 0), *source.get_pixel(4, 0));
-    }
-
-    #[test]
-    fn mosaic_region_png_clips_to_bounds() {
-        let original = sample_png(8, 8);
-        let source = decode_rgba(&original);
-        let output = decode_rgba(&mosaic_region_png(&original, 4, 6, 6, 100, 100).expect("mosaic succeeds"));
-        let expected = *output.get_pixel(6, 6);
-        for y in 6..8 { for x in 6..8 { assert_eq!(*output.get_pixel(x, y), expected); } }
-        for y in 0..6 { for x in 0..8 { assert_eq!(output.get_pixel(x, y), source.get_pixel(x, y)); } }
-    }
-
-    #[test]
-    fn mosaic_region_png_outside_image_returns_original_pixels() {
-        let original = sample_png(8, 8);
-        let source = decode_rgba(&original);
-        for region in [(100, 100, 10, 10), (0, 0, 0, 4), (8, 0, 4, 4)] {
-            let output = decode_rgba(&mosaic_region_png(&original, 4, region.0, region.1, region.2, region.3).expect("mosaic succeeds"));
-            assert_eq!(output.dimensions(), (8, 8), "region {region:?}");
-            assert_eq!(output.as_raw(), source.as_raw(), "region {region:?}");
-        }
     }
 }
 

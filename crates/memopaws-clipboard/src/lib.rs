@@ -275,14 +275,14 @@ impl ClipboardManager {
     }
 
     fn save(&self) -> Result<(), String> {
-        if let Some(parent) = self.path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
         let raw = serde_json::to_string_pretty(&self.items).map_err(|e| e.to_string())?;
-        fs::write(&self.path, raw).map_err(|e| e.to_string())
+        memopaws_core::write_file_atomic(&self.path, raw.as_bytes()).map_err(|e| e.to_string())
     }
 }
 
 fn now_str() -> String {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default()
+    // 毫秒粒度：同一秒内的多次复制也能区分先后；前端渲染按数量级自动识别秒/毫秒
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis().to_string()).unwrap_or_default()
 }
 
 /// 图片内容哈希，用于识别重复复制的同图

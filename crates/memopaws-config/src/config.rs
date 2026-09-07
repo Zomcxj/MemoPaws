@@ -112,12 +112,8 @@ impl AppConfig {
     }
 
     pub fn save_to(&self, path: &std::path::Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let raw = serde_json::to_string_pretty(self)?;
-        fs::write(&path, raw)?;
-        Ok(())
+        memopaws_core::write_file_atomic(path, raw.as_bytes())
     }
 }
 

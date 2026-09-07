@@ -21,7 +21,7 @@ assert.match(keys, /dragHandle:\s*"拖动以重新排序；按上箭头或下箭
   "the Chinese drag-handle label must disclose immediate ArrowUp/ArrowDown reordering");
 assert.match(keys, /dragHandle:\s*"Drag to reorder; press ArrowUp or ArrowDown to move immediately"/,
   "the English drag-handle label must disclose immediate ArrowUp/ArrowDown reordering");
-assert.match(keys, /if \(event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"\) \{[\s\S]*?if \(!drag \|\| !drag\.started \|\| drag\.id !== entry\.id\) \{[\s\S]*?pointerDrag\.current = \{ id: entry\.id, type: entry\.type, x: 0, y: 0, started: true/,
+assert.match(keys, /if \(event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"\) \{[\s\S]*?if \(!drag \|\| !drag\.started \|\| drag\.id !== entry\.id\) \{[\s\S]*?pointerDrag\.current = \{ id: entry\.id, type: entry\.type, x: 0, y: 0, rect: new DOMRect\(\), started: true/,
   "an arrow key must start keyboard reordering without holding Space or Enter");
 assert.doesNotMatch(keys, /const handleDragKeyUp[\s\S]*?commitDrag\(finished\)/,
   "reordering must not depend on releasing the Space or Enter key");

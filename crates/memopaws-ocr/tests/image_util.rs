@@ -1,5 +1,5 @@
 use image::GenericImageView;
-use memopaws_ocr::{image_util::{crop_png, grayscale_png, mosaic_png, mosaic_region_png, otsu_binary_png, prepare_image, MAX_INPUT_BYTES}, OcrError};
+use memopaws_ocr::{image_util::{crop_png, grayscale_png, mosaic_png, otsu_binary_png, prepare_image, MAX_INPUT_BYTES}, OcrError};
 
 #[test]
 fn image_is_detected_resized_and_encoded_as_png_data_uri() {
@@ -58,16 +58,6 @@ fn crop_png_rejects_zero_size_and_fully_outside_regions() {
     assert!(matches!(crop_png(&bytes, 0, 0, 4, 0), Err(OcrError::Custom(_))));
     assert!(matches!(crop_png(&bytes, 100, 100, 4, 4), Err(OcrError::Custom(_))));
     assert!(matches!(crop_png(&bytes, 8, 0, 4, 4), Err(OcrError::Custom(_))));
-}
-
-#[test]
-fn region_mosaic_matches_whole_image_mosaic_when_covering_everything() {
-    let source = image::RgbImage::from_fn(8, 8, |x, y| image::Rgb([(x * 7) as u8, (y * 11) as u8, 200]));
-    let bytes = encode(source);
-
-    let whole = mosaic_png(&bytes, 4).unwrap();
-    let region = mosaic_region_png(&bytes, 4, 0, 0, 8, 8).unwrap();
-    assert_eq!(whole, region);
 }
 
 fn encode(image: image::RgbImage) -> Vec<u8> {

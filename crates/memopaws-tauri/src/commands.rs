@@ -126,10 +126,9 @@ pub async fn capture_screen(
         DynamicImage::ImageRgba8(image)
             .write_with_encoder(PngEncoder::new(&mut png))
             .map_err(|error| format!("screen capture failed: {error}"))?;
-        Ok(CaptureResult {
-            image: png.clone(),
-            preview: format!("data:image/png;base64,{}", STANDARD.encode(&png)),
-        })
+        // 先借 png 生成 preview，再 move 进 image，避免整份 PNG 额外拷贝
+        let preview = format!("data:image/png;base64,{}", STANDARD.encode(&png));
+        Ok(CaptureResult { image: png, preview })
     })
     .await
     .map_err(|error| format!("screen capture task failed: {error}"))?
@@ -156,24 +155,6 @@ pub fn image_preprocess(image: Vec<u8>, mode: String) -> Result<ImageResult, Str
             _ => return Err(format!("unsupported preprocess mode: {mode}")),
         };
     Ok(ImageResult { image: processed })
-}
-
-#[tauri::command]
-pub fn image_mosaic_region(
-    image: Vec<u8>,
-    block: Option<u32>,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-) -> Result<ImageResult, String> {
-    if width == 0 || height == 0 {
-        return Err("mosaic region width and height must be positive".to_string());
-    }
-    let block = block.unwrap_or(DEFAULT_MOSAIC_BLOCK);
-    memopaws_ocr::image_util::mosaic_region_png(&image, block, x, y, width, height)
-        .map(|image| ImageResult { image })
-        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1421,9 +1402,10 @@ pub async fn ai_ocr(
         .ocr(&image)
         .await
         .map_err(|error| safe_ai_command_error(&error.to_string()))?;
-    history_mut(history, |manager| {
+    // 历史是次要记录：写入失败不应把已成功的识别结果误报为失败
+    let _ = history_mut(history, |manager| {
         manager.add_success("ocr", &result.text, Some(&result.text), None)
-    })?;
+    });
     Ok(result)
 }
 
@@ -1444,9 +1426,10 @@ pub async fn ai_translate(
         .translate(&text, target, source)
         .await
         .map_err(|error| safe_ai_command_error(&error.to_string()))?;
-    history_mut(history, |manager| {
+    // 历史是次要记录：写入失败不应把已成功的翻译结果误报为失败
+    let _ = history_mut(history, |manager| {
         manager.add_success("translate", &result.text, Some(&text), Some(&result.text))
-    })?;
+    });
     Ok(result)
 }
 
