@@ -16,6 +16,13 @@ interface ClipboardItem {
 
 const errorText = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
 
+// 兼容三种历史格式：毫秒时间戳（新）、秒时间戳（旧）、格式化字符串（更早的遗留数据）
+const formatClipboardTime = (time: string) => {
+  const value = Number(time);
+  if (Number.isNaN(value)) return time;
+  return new Date(value > 1e12 ? value : value * 1000).toLocaleString();
+};
+
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8;
 const ZOOM_STEP = 1.25;
@@ -457,7 +464,7 @@ export function ClipboardPage({ language = "zh" }: Props) {
                       disabled={item.locked}
                     />
                     {item.locked && <span className="clipboard-locked">{t.locked}</span>}
-                    <small className="clipboard-time">{new Date(Number(item.time) * 1000).toLocaleString()}</small>
+                    <small className="clipboard-time">{formatClipboardTime(item.time)}</small>
                   </label>
                   <div className="clipboard-item-body">
                     {view === "list" ? (
