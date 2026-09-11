@@ -562,7 +562,7 @@ fn save_settings_key(
 
 #[tauri::command]
 pub fn get_data_dir() -> Result<String, String> {
-    // UI shows the base directory (parent of `.memopaws-rust`), matching migration targets.
+    // UI shows the base directory (parent of `.memopaws`), matching migration targets.
     memopaws_core::paths::data_base_dir()
         .map(|path| path.to_string_lossy().into_owned())
         .map_err(|error| error.to_string())

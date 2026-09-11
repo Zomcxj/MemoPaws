@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const capabilityPath = path.join(__dirname, "..", "..", "crates", "memopaws-tauri", "capabilities", "default.json");
+const capabilityPath = path.join(__dirname, "..", "..", "crates", "tauri", "capabilities", "default.json");
 const capability = JSON.parse(fs.readFileSync(capabilityPath, "utf8"));
 for (const perm of ["core:window:allow-hide", "core:window:allow-show", "core:window:allow-minimize"]) {
   assert.ok(capability.permissions.includes(perm), `capability must include ${perm}`);

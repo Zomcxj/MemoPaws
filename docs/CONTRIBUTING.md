@@ -146,7 +146,7 @@ node frontend/e2e/test-pages.cjs
 ## 目录约定
 
 ```
-crates/memopaws-<name>/
+crates/<name>/
 ├── src/lib.rs          # crate 入口
 ├── Cargo.toml
 └── tests/              # 集成测试（可选）
@@ -160,4 +160,4 @@ frontend/src/
 
 ## 数据配置
 
-应用配置存储在 `%USERPROFILE%/.memopaws-rust/setting.json`，开发时可直接编辑该文件来测试配置变更。
+应用配置存储在 `%USERPROFILE%/.memopaws/setting.json`，开发时可直接编辑该文件来测试配置变更。

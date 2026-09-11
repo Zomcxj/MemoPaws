@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-memopaws-core = { path = "../memopaws-core" }
+memopaws-core = { path = "../core" }
 arboard = "3"
 clipboard-win = "5"
 image = "0.25"

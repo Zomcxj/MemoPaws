@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-memopaws-core = { path = "../memopaws-core" }
+memopaws-core = { path = "../core" }
 aes-gcm = { version = "0.10", features = ["aes"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 rand = "0.8"

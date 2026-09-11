@@ -26,13 +26,13 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-memopaws-core = { path = "../memopaws-core" }
-memopaws-config = { path = "../memopaws-config" }
-memopaws-memo = { path = "../memopaws-memo" }
-memopaws-keys = { path = "../memopaws-keys" }
-memopaws-ocr = { path = "../memopaws-ocr" }
-memopaws-clipboard = { path = "../memopaws-clipboard" }
-memopaws-canvas = { path = "../memopaws-canvas" }
+memopaws-core = { path = "../core" }
+memopaws-config = { path = "../config" }
+memopaws-memo = { path = "../memo" }
+memopaws-keys = { path = "../keys" }
+memopaws-ocr = { path = "../ocr" }
+memopaws-clipboard = { path = "../clipboard" }
+memopaws-canvas = { path = "../canvas" }
 arboard = "3"
 zeroize = "1"
 xcap = "0.9"

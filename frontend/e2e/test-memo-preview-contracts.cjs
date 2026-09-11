@@ -6,7 +6,7 @@ const root = path.resolve(__dirname, "..");
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 const memoPage = read("src", "pages", "MemoPage.tsx");
 const memoCss = read("src", "pages", "MemoPage.css");
-const renderer = fs.readFileSync(path.join(root, "..", "crates", "memopaws-memo", "src", "renderer.rs"), "utf8");
+const renderer = fs.readFileSync(path.join(root, "..", "crates", "memo", "src", "renderer.rs"), "utf8");
 
 assert.match(memoPage, /previewScale/);
 assert.match(memoPage, /PREVIEW_SCALE_STEP\s*=\s*0\.001/,

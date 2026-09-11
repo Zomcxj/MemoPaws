@@ -25,7 +25,7 @@ MemoPaws 提供以下功能：
 
 ## 数据存储
 
-应用数据默认存储在 `%USERPROFILE%/.memopaws-rust/`，包含：
+应用数据默认存储在 `%USERPROFILE%/.memopaws/`，包含：
 
 | 路径 | 内容 |
 |---|---|

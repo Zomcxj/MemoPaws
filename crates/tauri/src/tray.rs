@@ -98,7 +98,10 @@ mod tests {
 
     #[test]
     fn tray_uses_the_default_window_icon() {
-        let source = include_str!("tray.rs").split("#[cfg(test)]").next().unwrap();
+        // Normalize line endings so the source snapshot matches regardless of the
+        // platform checkout (repo stores LF; `core.autocrlf=true` yields CRLF on Windows).
+        let source = include_str!("tray.rs").replace("\r\n", "\n");
+        let source = source.split("#[cfg(test)]").next().unwrap();
 
         assert!(source.contains("app\n        .default_window_icon()\n        .cloned()\n        .ok_or("));
         assert!(source.contains(".icon(icon)"));

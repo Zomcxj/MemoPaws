@@ -10,7 +10,7 @@
 - **时刻维护文档** — 文件功能变更后，必须同步更新相关文档（README、AGENTS.md、教程等）
 - **文本替换审核** — 全局输入钩子仅在内存保留最多 64 个最近普通字符，不记录、上报或持久化用户输入；仅 Windows 启用。合成键盘事件必须带 `dwExtraInfo` 标记，钩子必须跳过该标记以防递归触发。
 - **Python 环境**：使用 `D:/software/miniforge3/envs/llm/python.exe`，不是系统 Python
-- **数据目录**：`%USERPROFILE%\.memopaws-rust\`（setting.json 配置、keys.json 加密密钥库）；API Key 永不入 setting.json
+- **数据目录**：`%USERPROFILE%\.memopaws\`（setting.json 配置、keys.json 加密密钥库）；API Key 永不入 setting.json
 - **构建命令**：必须 `RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2`（大栈/全量并行会打爆 Windows 提交内存）
 - **Git 规范**：变更通过全部测试（Rust + e2e；test-tauri-app/driver 需运行环境属存量必失败）后直接提交本地，不推送远程
 - 遵循全局AGENTS.md

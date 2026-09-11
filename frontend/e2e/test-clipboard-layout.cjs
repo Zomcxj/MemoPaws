@@ -8,7 +8,7 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 const clipboardPage = read("src", "pages", "ClipboardPage.tsx");
 const clipboardCss = read("src", "pages", "ClipboardPage.css");
 const memoPage = read("src", "pages", "MemoPage.tsx");
-const memoRenderer = fs.readFileSync(path.join(root, "..", "crates", "memopaws-memo", "src", "renderer.rs"), "utf8");
+const memoRenderer = fs.readFileSync(path.join(root, "..", "crates", "memo", "src", "renderer.rs"), "utf8");
 const keysPage = read("src", "pages", "KeysPage.tsx");
 const keysCss = read("src", "pages", "KeysPage.css");
 

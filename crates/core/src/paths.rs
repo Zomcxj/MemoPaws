@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 
-// Keep the Rust port's persisted data isolated from the Python application.
-const CONFIG_DIR_NAME: &str = ".memopaws-rust";
-const ANCHOR_FILE_NAME: &str = ".memopaws-rust.json";
+// The Rust port now owns the canonical `.memopaws` data directory.
+const CONFIG_DIR_NAME: &str = ".memopaws";
+const ANCHOR_FILE_NAME: &str = ".memopaws.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationMode {
@@ -32,7 +32,7 @@ fn anchor_file() -> Result<PathBuf> {
     home_dir().map(|h| h.join(ANCHOR_FILE_NAME))
 }
 
-/// Resolve an anchor-stored path (base OR full `.../.memopaws-rust`, legacy)
+/// Resolve an anchor-stored path (base OR full `.../.memopaws`, legacy)
 /// to the concrete data directory, if it exists.
 fn stored_path_to_data_dir(stored: &Path) -> Option<PathBuf> {
     if stored
@@ -70,7 +70,7 @@ pub fn data_dir() -> Result<PathBuf> {
     detect_data_dir()
 }
 
-/// Storage base directory (parent of `.memopaws-rust`).
+/// Storage base directory (parent of `.memopaws`).
 /// Anchor stores this path; UI shows it for migration targets.
 pub fn data_base_dir() -> Result<PathBuf> {
     let dir = data_dir()?;
@@ -87,7 +87,7 @@ pub fn data_base_dir() -> Result<PathBuf> {
 }
 
 /// Normalize a user-selected path to the migration base directory.
-/// Accepts either the base folder or a path ending in `.memopaws-rust`.
+/// Accepts either the base folder or a path ending in `.memopaws`.
 pub fn normalize_migration_base(path: &Path) -> PathBuf {
     if path
         .file_name()
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn normalize_strips_config_dir_suffix() {
-        let path = PathBuf::from(r"D:\data\.memopaws-rust");
+        let path = PathBuf::from(r"D:\data\.memopaws");
         assert_eq!(normalize_migration_base(&path), PathBuf::from(r"D:\data"));
         assert_eq!(
             normalize_migration_base(Path::new(r"D:\data")),
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn migration_creates_the_full_expected_tree_layout() {
         let dirs = TempDirs::new();
-        let source = dirs.path("source/.memopaws-rust");
+        let source = dirs.path("source/.memopaws");
         fs::create_dir_all(source.join("memo")).unwrap();
         fs::write(source.join("setting.json"), "{}").unwrap();
         let target = dirs.path("target");
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn normalize_migration_base_is_case_insensitive_about_config_dir() {
         assert_eq!(
-            normalize_migration_base(Path::new(r"D:\Data\.MEMOPAWS-RUST")),
+            normalize_migration_base(Path::new(r"D:\Data\.MEMOPAWS")),
             PathBuf::from(r"D:\Data")
         );
         assert_eq!(

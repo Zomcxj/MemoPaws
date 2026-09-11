@@ -12,8 +12,8 @@ function findTauriExe() {
   const possiblePaths = [
     path.join(__dirname, '..', '..', 'target', 'release', 'memopaws.exe'),
     path.join(__dirname, '..', '..', 'target', 'debug', 'memopaws.exe'),
-    path.join(__dirname, '..', '..', 'crates', 'memopaws-tauri', 'target', 'release', 'memopaws.exe'),
-    path.join(__dirname, '..', '..', 'crates', 'memopaws-tauri', 'target', 'debug', 'memopaws.exe'),
+    path.join(__dirname, '..', '..', 'crates', 'tauri', 'target', 'release', 'memopaws.exe'),
+    path.join(__dirname, '..', '..', 'crates', 'tauri', 'target', 'debug', 'memopaws.exe'),
   ];
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) return p;

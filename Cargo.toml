@@ -1,13 +1,13 @@
 [workspace]
 members = [
-    "crates/memopaws-core",
-    "crates/memopaws-config",
-    "crates/memopaws-ocr",
-    "crates/memopaws-clipboard",
-    "crates/memopaws-memo",
-    "crates/memopaws-keys",
-    "crates/memopaws-canvas",
-    "crates/memopaws-tauri",
+    "crates/core",
+    "crates/config",
+    "crates/ocr",
+    "crates/clipboard",
+    "crates/memo",
+    "crates/keys",
+    "crates/canvas",
+    "crates/tauri",
 ]
 resolver = "2"
 

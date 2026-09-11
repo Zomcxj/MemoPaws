@@ -4,6 +4,8 @@ dist/
 target/
 
 # Local runtime data (never commit)
+.memopaws/
+**/.memopaws/
 .memopaws-rust/
 **/.memopaws-rust/
 
@@ -13,7 +15,7 @@ frontend/node_modules/
 
 # Runtime / build artifacts
 package-lock.json
-crates/memopaws-tauri/gen/
+crates/tauri/gen/
 frontend/test-results/
 frontend/e2e/screenshots/
 frontend/dist/

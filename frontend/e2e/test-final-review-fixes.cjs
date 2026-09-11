@@ -7,9 +7,9 @@ const root = path.resolve(__dirname, "..");
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 const keys = read("src", "pages", "KeysPage.tsx");
 const keyStyles = read("src", "pages", "KeysPage.css");
-const config = read("..", "crates", "memopaws-tauri", "tauri.conf.json");
-const commands = read("..", "crates", "memopaws-tauri", "src", "commands.rs");
-const lib = read("..", "crates", "memopaws-tauri", "src", "lib.rs");
+const config = read("..", "crates", "tauri", "tauri.conf.json");
+const commands = read("..", "crates", "tauri", "src", "commands.rs");
+const lib = read("..", "crates", "tauri", "src", "lib.rs");
 
 assert.deepEqual(JSON.parse(config).app.windows.map((window) => window.label), ["main"]);
 assert.doesNotMatch(commands, /floating|show_floating_widget/);
