@@ -19,11 +19,11 @@ const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, "mock-tauri.js"), "utf-
   await page.mouse.move(overlay.x + 700, overlay.y + 500, { steps: 10 });
   await page.mouse.up();
   await page.waitForSelector(".capture-overlay-handle--e", { timeout: 5000 });
-  await page.screenshot({ path: "e2e/screenshots/handle-check.png" });
+  await page.screenshot({ path: path.join(__dirname, "screenshots", "handle-check.png") });
   // 单独放大截取手柄区域
   const handle = await page.locator(".capture-overlay-handle--ne").boundingBox();
   await page.screenshot({
-    path: "e2e/screenshots/handle-zoom.png",
+    path: path.join(__dirname, "screenshots", "handle-zoom.png"),
     clip: { x: handle.x - 40, y: handle.y - 40, width: 120, height: 120 },
   });
   await browser.close();

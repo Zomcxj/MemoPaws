@@ -14,9 +14,8 @@
 ### 克隆与安装
 
 ```bash
-git clone https://github.com/MemoPaws/MemoPaws-Rust.git
-cd MemoPaws-Rust
-cargo build --workspace
+git clone https://github.com/Zomcxj/MemoPaws.git
+cd MemoPaws
 npm --prefix frontend install
 ```
 
@@ -25,7 +24,7 @@ npm --prefix frontend install
 ### 启动开发服务器
 
 ```bash
-cargo tauri dev
+npm --prefix frontend exec -- tauri dev
 ```
 
 此命令会自动执行 `npm --prefix frontend run dev`（端口 1420），并打开 Tauri 窗口。前端修改即时热重载，Rust 修改触发重新编译。
@@ -46,29 +45,34 @@ npm --prefix frontend run build
 
 ### 构建安装包（Windows）
 
-```bash
-RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2 npm --prefix frontend exec -- tauri build --bundles nsis
+```powershell
+$env:RUST_MIN_STACK='67108864'
+$env:CARGO_BUILD_JOBS='2'
+npm --prefix frontend exec -- tauri build --bundles nsis
 ```
 
-产物位于 `target/release/bundle/nsis/`。两个环境变量在 Windows 上必须设置：`RUST_MIN_STACK` 限制测试/构建线程栈为 64MB（默认大栈会打爆提交内存），`CARGO_BUILD_JOBS=2` 限制并行编译任务避免内存耗尽。
+产物位于 `target/release/bundle/nsis/`。两个环境变量在 Windows 上必须设置：`RUST_MIN_STACK` 将测试/构建线程的最小栈设为 64MB，`CARGO_BUILD_JOBS=2` 限制并行编译任务，避免内存耗尽。
 
 ## 测试
 
 ### Rust 测试
 
-```bash
+```powershell
+$env:RUST_MIN_STACK='67108864'
+$env:CARGO_BUILD_JOBS='2'
 cargo test --workspace
 ```
 
 该命令运行所有 crate 的单元测试和集成测试，包括：
 
-- `memopaws-core`：路径迁移、锚点写入等
-- `memopaws-config`：配置读写、历史记录
-- `memopaws-keys`：密钥库加解密
-- `memopaws-memo`：备忘录存储与搜索
-- `memopaws-ocr`：图像工具函数
-- `memopaws-tauri`：热键映射、关闭行为、IPC 命令
-- `memopaws-canvas`：截图管理
+- `crates/core`（`memopaws-core`）：路径迁移、锚点写入等
+- `crates/config`（`memopaws-config`）：配置读写、历史记录
+- `crates/keys`（`memopaws-keys`）：密钥库加解密
+- `crates/memo`（`memopaws-memo`）：备忘录存储与搜索
+- `crates/ocr`（`memopaws-ocr`）：图像工具函数
+- `crates/clipboard`（`memopaws-clipboard`）：剪贴板历史与图片存储
+- `crates/tauri`（`memopaws-tauri`）：热键映射、关闭行为、IPC 命令
+- `crates/canvas`（`memopaws-canvas`）：截图管理
 
 ### 前端 E2E 测试
 
@@ -85,14 +89,14 @@ node frontend/e2e/test-memo-preview-contracts.cjs
 node frontend/e2e/test-recognize-capture-contracts.cjs
 node frontend/e2e/test-window-acl-and-sidebar.cjs
 node frontend/e2e/test-floating-removal-contracts.cjs
-node frontend/e2e/test-tauri-app.cjs
-node frontend/e2e/test-tauri-driver.cjs
+node frontend/e2e/shot-handles.cjs
+npm --prefix frontend run test:tauri
 ```
 
 > 注意：
 >
-> - E2E 测试需要前端开发服务器运行在 `http://localhost:1420`，可使用 mock 模式模拟 Tauri API。
-> - `test-tauri-app.cjs` 与 `test-tauri-driver.cjs` 需要正在运行的应用及 CDP 调试端口，在普通开发环境属于预期失败（存量基线）。
+> - Mock E2E 测试需要前端开发服务器运行在 `http://localhost:1420`。
+> - `npm --prefix frontend run test:tauri` 会先构建当前 release binary，再用临时数据目录和 WebView2 profile 启动 MemoPaws，并通过 CDP 运行两个原生测试。
 
 ### 前端构建验证
 
@@ -108,11 +112,26 @@ npm --prefix frontend run build
 
 ### 完整测试流程
 
-```bash
+```powershell
+$env:RUST_MIN_STACK='67108864'
+$env:CARGO_BUILD_JOBS='2'
 cargo test --workspace
 npm --prefix frontend run build
 node frontend/e2e/test-pages.cjs
+node frontend/e2e/test-navigation.cjs
+node frontend/e2e/test-capture-overlay.cjs
+node frontend/e2e/test-clipboard-layout.cjs
+node frontend/e2e/test-key-interaction-refinement.cjs
+node frontend/e2e/test-final-review-fixes.cjs
+node frontend/e2e/test-memo-preview-contracts.cjs
+node frontend/e2e/test-recognize-capture-contracts.cjs
+node frontend/e2e/test-window-acl-and-sidebar.cjs
+node frontend/e2e/test-floating-removal-contracts.cjs
+node frontend/e2e/shot-handles.cjs
+npm --prefix frontend run test:tauri
 ```
+
+运行 mock E2E 前需在另一个终端保持 `npm --prefix frontend run dev`；原生测试会自行构建并启动当前 release binary。
 
 ## 代码规范
 

@@ -1,12 +1,13 @@
 {
   "name": "memo-paws",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test:tauri": "set RUST_MIN_STACK=67108864&& set CARGO_BUILD_JOBS=2&& cargo build --release --manifest-path ../Cargo.toml -p memopaws-tauri&& node e2e/test-tauri-app.cjs&& node e2e/test-tauri-driver.cjs",
     "tauri": "tauri"
   },
   "dependencies": {

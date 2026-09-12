@@ -1,12 +1,15 @@
 // Playwright E2E test: Tauri app native runtime over CDP.
 
 const { chromium } = require('playwright');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const SCREENSHOTS_DIR = path.join(__dirname, 'screenshots', 'tauri');
+const TEST_HOME = path.join(__dirname, '.tauri-test-home-app');
+const WEBVIEW_DATA = path.join(TEST_HOME, 'webview-app');
 const CDP_URL = process.env.TAURI_CDP_URL || 'http://localhost:9222';
+const CDP_PORT = new URL(CDP_URL).port || '9222';
 const DESTINATIONS = {
   '识别': '.recognize-page',
   '备忘录': '.memo-page',
@@ -37,10 +40,23 @@ function findTauriExe() {
 
 async function runTests() {
   fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+  fs.mkdirSync(TEST_HOME, { recursive: true });
 
   const tauriExe = findTauriExe();
   console.log('Tauri executable:', tauriExe);
-  const tauriProcess = spawn(tauriExe, [], { stdio: 'pipe', detached: false });
+  const tauriProcess = spawn(tauriExe, [], {
+    stdio: 'pipe',
+    detached: false,
+    env: {
+      ...process.env,
+      HOME: TEST_HOME,
+      USERPROFILE: TEST_HOME,
+      MEMOPAWS_HOME: TEST_HOME,
+      WEBVIEW2_USER_DATA_FOLDER: WEBVIEW_DATA,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
+    },
+  });
   let browser;
 
   try {
@@ -109,7 +125,23 @@ async function runTests() {
     try {
       if (browser) await browser.close();
     } finally {
-      if (!tauriProcess.killed) tauriProcess.kill();
+      if (!tauriProcess.killed) {
+        if (process.platform === 'win32') {
+          spawnSync('taskkill', ['/pid', String(tauriProcess.pid), '/t', '/f']);
+        } else {
+          tauriProcess.kill();
+        }
+      }
+      if (tauriProcess.exitCode === null) await new Promise(resolve => tauriProcess.once('exit', resolve));
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          fs.rmSync(TEST_HOME, { recursive: true, force: true });
+          break;
+        } catch (error) {
+          if (!['EPERM', 'ENOTEMPTY', 'EBUSY'].includes(error.code) || attempt === 9) throw error;
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
     }
   }
 }

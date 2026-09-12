@@ -25,6 +25,9 @@ pub struct MigrationPreview {
 }
 
 fn home_dir() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("MEMOPAWS_HOME") {
+        return Ok(PathBuf::from(path));
+    }
     dirs::home_dir().map(Into::into).ok_or(Error::HomeDir)
 }
 
@@ -322,7 +325,10 @@ fn ensure_tree_layout(data_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct TempDirs {
         root: PathBuf,
@@ -355,6 +361,18 @@ mod tests {
         fs::create_dir_all(source.join(CONFIG_DIR_NAME).join("memo")).unwrap();
         fs::write(source.join(CONFIG_DIR_NAME).join("memo/item.txt"), "source").unwrap();
         source.join(CONFIG_DIR_NAME)
+    }
+
+    #[test]
+    fn explicit_home_override_isolated_data_paths() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dirs = TempDirs::new();
+        std::env::set_var("MEMOPAWS_HOME", &dirs.root);
+
+        assert_eq!(data_dir().unwrap(), dirs.root.join(CONFIG_DIR_NAME));
+        assert_eq!(anchor_file().unwrap(), dirs.root.join(ANCHOR_FILE_NAME));
+
+        std::env::remove_var("MEMOPAWS_HOME");
     }
 
     #[test]

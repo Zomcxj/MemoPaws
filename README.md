@@ -20,15 +20,16 @@
 ## 快速开始
 
 ```bash
-cargo build --workspace
 npm --prefix frontend install
-cargo tauri dev
+npm --prefix frontend exec -- tauri dev
 ```
 
 开发命令会启动前端开发服务器并打开 Tauri 窗口。生产构建使用：
 
-```bash
-RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2 npm --prefix frontend exec -- tauri build --bundles nsis
+```powershell
+$env:RUST_MIN_STACK='67108864'
+$env:CARGO_BUILD_JOBS='2'
+npm --prefix frontend exec -- tauri build --bundles nsis
 ```
 
 Windows 上必须设置这两个环境变量（默认大栈与全量并行会打爆提交内存），详见[贡献指南](docs/CONTRIBUTING.md)。
@@ -37,7 +38,8 @@ Windows 上必须设置这两个环境变量（默认大栈与全量并行会打
 
 - [用户指南](docs/USER_GUIDE.md)：功能、快捷键、数据目录和配置
 - [贡献指南](docs/CONTRIBUTING.md)：开发、测试、构建和提交规范
+- [版本发布](https://github.com/Zomcxj/MemoPaws/releases)：Windows 安装包与发布说明
 
 ## 许可
 
-具体许可信息请查看仓库根目录的 `LICENSE` 文件。
+本项目采用 [MIT License](LICENSE)。

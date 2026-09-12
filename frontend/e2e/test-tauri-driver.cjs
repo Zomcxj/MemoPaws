@@ -5,7 +5,10 @@ const fs = require('fs');
 const path = require('path');
 
 const SCREENSHOTS_DIR = path.join(__dirname, 'screenshots', 'tauri');
-const CDP_URL = process.env.TAURI_CDP_URL || 'http://localhost:9222';
+const TEST_HOME = path.join(__dirname, '.tauri-test-home-driver');
+const WEBVIEW_DATA = path.join(TEST_HOME, 'webview-driver');
+const CDP_URL = process.env.TAURI_CDP_URL || 'http://localhost:9223';
+const CDP_PORT = new URL(CDP_URL).port || '9223';
 
 // Find the Tauri executable
 function findTauriExe() {
@@ -25,25 +28,34 @@ async function runTests() {
   if (!fs.existsSync(SCREENSHOTS_DIR)) {
     fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
   }
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+  fs.mkdirSync(TEST_HOME, { recursive: true });
 
   const tauriExe = findTauriExe();
   console.log('Tauri executable:', tauriExe);
 
-  // An external launcher must expose the configured native CDP endpoint.
   const tauriProcess = require('child_process').spawn(tauriExe, [], {
     stdio: 'pipe',
+    env: {
+      ...process.env,
+      HOME: TEST_HOME,
+      USERPROFILE: TEST_HOME,
+      MEMOPAWS_HOME: TEST_HOME,
+      WEBVIEW2_USER_DATA_FOLDER: WEBVIEW_DATA,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
+    },
   });
 
   let browser;
   try {
-    console.log(`Launching Tauri app; waiting for external CDP at ${CDP_URL}...`);
+    console.log(`Launching Tauri app; waiting for native CDP at ${CDP_URL}...`);
     await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for app to start
 
     // A blank Chromium page is not a native-app test, so CDP is mandatory.
     try {
       browser = await chromium.connectOverCDP(CDP_URL);
     } catch (err) {
-      throw new Error(`Native Tauri/CDP runtime unavailable on ${CDP_URL}; ensure an external launcher exposes CDP there. Native execution was not run: ${err.message}`);
+      throw new Error(`Native Tauri/CDP runtime unavailable on ${CDP_URL}; native execution was not run: ${err.message}`);
     }
     console.log('Connected to native Tauri app via CDP');
 
@@ -147,7 +159,23 @@ async function runTests() {
     try {
       if (browser) await browser.close();
     } finally {
-      if (!tauriProcess.killed) tauriProcess.kill();
+      if (!tauriProcess.killed) {
+        if (process.platform === 'win32') {
+          require('child_process').spawnSync('taskkill', ['/pid', String(tauriProcess.pid), '/t', '/f']);
+        } else {
+          tauriProcess.kill();
+        }
+      }
+      if (tauriProcess.exitCode === null) await new Promise(resolve => tauriProcess.once('exit', resolve));
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          fs.rmSync(TEST_HOME, { recursive: true, force: true });
+          break;
+        } catch (error) {
+          if (!['EPERM', 'ENOTEMPTY', 'EBUSY'].includes(error.code) || attempt === 9) throw error;
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
     }
   }
 }
