@@ -154,18 +154,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "argon2"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
-dependencies = [
- "base64ct",
- "blake2",
- "cpufeatures 0.2.17",
- "password-hash",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -488,15 +476,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7eff00be299a18769011411c9def0d827e8f2d7bf0c3dbf53633147a8867fd1f"
 dependencies = [
  "no_std_io2",
-]
-
-[[package]]
-name = "blake2"
-version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
-dependencies = [
- "digest",
 ]
 
 [[package]]
@@ -2978,7 +2957,6 @@ dependencies = [
  "memopaws-core",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -2991,7 +2969,6 @@ dependencies = [
  "memopaws-core",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -3020,12 +2997,10 @@ name = "memopaws-keys"
 version = "0.0.1"
 dependencies = [
  "aes-gcm",
- "argon2",
  "base64 0.22.1",
  "hex",
  "memopaws-core",
  "rand 0.8.7",
- "rand_core 0.6.4",
  "scrypt",
  "serde",
  "serde_json",
@@ -3045,7 +3020,7 @@ dependencies = [
  "serde_json",
  "strsim",
  "syntect",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

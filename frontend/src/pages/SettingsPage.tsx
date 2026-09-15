@@ -138,11 +138,11 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) 
         let mode: "merge" | "overwrite" | null = conflict ? await chooseMigrationMode() : "merge";
         if (!mode) return;
         setNotice(lang === "en" ? "Migrating data…" : "正在迁移数据…");
-        const result = await call<{ restart_required?: boolean; requires_restart?: boolean }>(
+        const result = await call<{ restart_required?: boolean }>(
           "migrate_data_dir",
           { data_dir: nextDir, path: nextDir, mode },
         );
-        if (result?.restart_required || result?.requires_restart) {
+        if (result?.restart_required) {
           setInitialDataDir(nextDir);
           setNotice(t.restart);
           setDirty(false);

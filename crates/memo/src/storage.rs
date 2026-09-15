@@ -111,6 +111,10 @@ pub fn parse_frontmatter(text: &str) -> Result<(Frontmatter, String)> {
             _ => {}
         }
     }
+    // Two strips, not a repeat: `split_once("\n---")` leaves the newline that
+    // ends the closing delimiter *and* the blank line `build_frontmatter` writes
+    // after it (`"---\n\n"`). Dropping either one leaves the body indented by a
+    // stray newline.
     let content = content.strip_prefix("\r\n").or_else(|| content.strip_prefix('\n')).unwrap_or(content);
     let content = content.strip_prefix("\r\n").or_else(|| content.strip_prefix('\n')).unwrap_or(content);
     Ok((metadata, content.trim_end_matches(['\r', '\n']).to_string()))
