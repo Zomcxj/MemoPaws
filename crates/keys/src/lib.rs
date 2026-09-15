@@ -271,9 +271,13 @@ impl KeyVault {
         let mut rng = rand::thread_rng();
         let id = loop { let value = rng.gen_range(1..=MAX_SAFE_INTEGER); if self.entries.iter().all(|e| e.id != value) { break value; } };
         let entry = VaultEntry { id, name: std::mem::take(&mut input.name), entry_type: std::mem::take(&mut input.entry_type), value: Some(Zeroizing::new(std::mem::take(&mut input.value))), enc_value: None, url: std::mem::take(&mut input.url), url_anthropic: std::mem::take(&mut input.url_anthropic), note: std::mem::take(&mut input.note), order, created: now_string() };
+        // `save()` only touches `value`/`enc_value`, neither of which `KeyEntry`
+        // exposes, so the view is taken before the write to avoid re-finding the
+        // entry afterwards.
+        let view = KeyEntry::from(&entry);
         self.entries.push(entry);
         if let Err(error) = self.save() { self.restore(snapshot); return Err(error); }
-        Ok(KeyEntry::from(self.entries.last().unwrap()))
+        Ok(view)
     }
 
     pub fn update(&mut self, id: u64, mut input: KeyEntryInput) -> Result<KeyEntry> {
@@ -282,8 +286,9 @@ impl KeyVault {
         let snapshot = self.snapshot();
         let entry = self.entries.iter_mut().find(|e| e.id == id).ok_or_else(|| KeyVaultError::new("key entry not found"))?;
         entry.name = std::mem::take(&mut input.name); entry.entry_type = std::mem::take(&mut input.entry_type); entry.value = Some(Zeroizing::new(std::mem::take(&mut input.value))); entry.url = std::mem::take(&mut input.url); entry.url_anthropic = std::mem::take(&mut input.url_anthropic); entry.note = std::mem::take(&mut input.note);
+        let view = KeyEntry::from(&*entry);
         if let Err(error) = self.save() { self.restore(snapshot); return Err(error); }
-        Ok(KeyEntry::from(self.entries.iter().find(|e| e.id == id).unwrap()))
+        Ok(view)
     }
 
     pub fn delete(&mut self, id: u64) -> Result<()> {
@@ -301,7 +306,10 @@ impl KeyVault {
         let mut requested = ids.to_vec(); current.sort_unstable(); requested.sort_unstable();
         if current != requested { return Err(KeyVaultError::new("reorder IDs must exactly match the group")); }
         let snapshot = self.snapshot();
-        for (order, id) in ids.iter().enumerate() { self.entries.iter_mut().find(|entry| entry.id == *id).unwrap().order = order as i64; }
+        // `current == requested` above proves every id resolves, so a lookup table
+        // replaces the per-id linear scan (and its unwrap) with one pass.
+        let positions: std::collections::HashMap<u64, i64> = ids.iter().enumerate().map(|(order, id)| (*id, order as i64)).collect();
+        for entry in &mut self.entries { if let Some(order) = positions.get(&entry.id) { entry.order = *order; } }
         if let Err(error) = self.save() { self.restore(snapshot); return Err(error); }
         Ok(())
     }
@@ -349,9 +357,17 @@ impl KeyVault {
             };
             saved.push(serde_json::json!({"id":entry.id,"name":entry.name,"type":entry.entry_type,"value":value,"enc_value":enc_value,"url":entry.url,"url_anthropic":entry.url_anthropic,"note":entry.note,"order":entry.order,"created":entry.created}));
         }
-        for item in &mut saved { if item["value"].is_null() { item.as_object_mut().unwrap().remove("value"); } if item["enc_value"].is_null() { item.as_object_mut().unwrap().remove("enc_value"); } }
+        // `json!({...})` above always yields objects; filter_map keeps that fact
+        // local instead of asserting it with an unwrap.
+        for item in saved.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+            if item.get("value").is_some_and(serde_json::Value::is_null) { item.remove("value"); }
+            if item.get("enc_value").is_some_and(serde_json::Value::is_null) { item.remove("enc_value"); }
+        }
         let mut root = serde_json::json!({"version":if self.has_master() { self.version } else { 2 },"master_hash":self.master_hash,"entries":saved});
-        if self.has_master() && self.version == 3 { root["kdf"] = serde_json::to_value(&self.kdf).unwrap(); root["verifier"] = serde_json::Value::String(self.verifier.clone()); }
+        if self.has_master() && self.version == 3 {
+            root["kdf"] = serde_json::to_value(&self.kdf).map_err(|e| KeyVaultError::new(e.to_string()))?;
+            root["verifier"] = serde_json::Value::String(self.verifier.clone());
+        }
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         let mut temporary = NamedTempFile::new_in(parent).map_err(|e| KeyVaultError::new(e.to_string()))?;
         serde_json::to_writer_pretty(&mut temporary, &root).map_err(|e| KeyVaultError::new(e.to_string()))?;

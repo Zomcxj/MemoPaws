@@ -43,7 +43,7 @@ fn corrupted_history_file_errors_without_destroying_the_file() {
 }
 
 #[test]
-fn add_success_truncates_long_text_and_delete_out_of_range_is_a_noop() {
+fn add_success_truncates_every_long_field_and_delete_out_of_range_is_a_noop() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("history.json");
     let mut manager = HistoryManager::with_path(&path, 100).unwrap();
@@ -52,9 +52,17 @@ fn add_success_truncates_long_text_and_delete_out_of_range_is_a_noop() {
     let long_ocr = "y".repeat(6000);
     let long_translate = "z".repeat(6000);
     manager.add_success("ocr", &long_text, Some(&long_ocr), Some(&long_translate)).unwrap();
-    assert_eq!(manager.records()[0].text.len(), 5000);
-    assert_eq!(manager.records()[0].ocr_text.as_ref().unwrap().len(), 6000);
-    assert_eq!(manager.records()[0].translate_text.as_ref().unwrap().len(), 6000);
+    assert_eq!(manager.records()[0].text.chars().count(), 5000);
+    assert_eq!(manager.records()[0].ocr_text.as_ref().unwrap().chars().count(), 5000);
+    assert_eq!(manager.records()[0].translate_text.as_ref().unwrap().chars().count(), 5000);
+
+    // Truncation counts characters, not bytes, so multi-byte text is never split mid-codepoint.
+    let long_multibyte = "译".repeat(6000);
+    manager.add_success("translate", &long_multibyte, Some(&long_multibyte), Some(&long_multibyte)).unwrap();
+    assert_eq!(manager.records()[0].text.chars().count(), 5000);
+    assert_eq!(manager.records()[0].ocr_text.as_ref().unwrap().chars().count(), 5000);
+    assert_eq!(manager.records()[0].translate_text.as_ref().unwrap().chars().count(), 5000);
+    manager.delete_record(0).unwrap();
 
     manager.delete_record(99).unwrap();
     manager.delete_record(0).unwrap();

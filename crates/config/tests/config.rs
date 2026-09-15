@@ -38,7 +38,7 @@ fn round_trip_preserves_all_user_fields() {
         shortcuts: Some(
             [
                 ("capture".into(), "Ctrl+Shift+A".into()),
-                ("toggle_clipboard".into(), "".into()),
+                ("toggle_clipboard".into(), "Ctrl+Alt+V".into()),
             ]
             .into_iter()
             .collect(),

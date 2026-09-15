@@ -5,13 +5,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 use memopaws_config::config::AppConfig;
 
-pub const DEFAULT_SHORTCUTS: &[(&str, &str)] = &[
-    ("capture", "Alt+X"),
-    ("canvas_fit", "Ctrl+F"),
-    ("new_memo", "Ctrl+N"),
-    ("global_search", "Ctrl+Shift+F"),
-    ("toggle_clipboard", "Ctrl+Shift+V"),
-];
+/// Single source of truth lives in `memopaws_config::config` so the persisted
+/// default and the registration table cannot drift apart.
+pub use memopaws_config::config::DEFAULT_SHORTCUTS;
 
 #[derive(Default)]
 pub struct ShortcutActions(Mutex<HashMap<Shortcut, String>>);
