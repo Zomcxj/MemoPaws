@@ -1,5 +1,5 @@
 use image::GenericImageView;
-use memopaws_ocr::{image_util::{crop_png, grayscale_png, mosaic_png, otsu_binary_png, prepare_image, MAX_INPUT_BYTES}, OcrError};
+use memopaws_ocr::{image_util::{crop_png, grayscale_png, otsu_binary_png, prepare_image, MAX_INPUT_BYTES}, OcrError};
 
 #[test]
 fn image_is_detected_resized_and_encoded_as_png_data_uri() {

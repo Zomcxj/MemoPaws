@@ -78,7 +78,10 @@ impl CaptureManager {
         let path = self.captures_dir.join("captures.json");
         if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
         let raw = serde_json::to_string_pretty(&self.records).map_err(|e| e.to_string())?;
-        fs::write(&path, raw).map_err(|e| e.to_string())
+        // Atomic like every other on-disk record (config, history, key vault):
+        // a crash mid-write would otherwise leave a truncated captures.json,
+        // which `load()` silently reads back as an empty list.
+        memopaws_core::write_file_atomic(&path, raw.as_bytes()).map_err(|e| e.to_string())
     }
 }
 

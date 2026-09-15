@@ -44,6 +44,13 @@ fn default_shortcuts() -> HashMap<String, String> {
         .collect()
 }
 
+/// Default AI model. Must stay multimodal: image recognition is the core
+/// feature, and a text-only model silently breaks it.
+pub const DEFAULT_MODEL: &str = "glm-4v-flash";
+
+/// Text-only model shipped as the default before v0.0.1; migrated on load.
+const LEGACY_TEXT_ONLY_MODEL: &str = "glm-4-flash";
+
 fn deserialize_text_replacements<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Vec<TextReplacement>, D::Error>
@@ -76,7 +83,7 @@ impl Default for AppConfig {
             close_behavior: Some("tray".into()),
             api_key: None,
             api_url: Some("https://open.bigmodel.cn/api/paas/v4/chat/completions".into()),
-            api_model: Some("glm-4v-flash".into()),
+            api_model: Some(DEFAULT_MODEL.into()),
             clipboard_max_items: Some(50),
             history_max_items: Some(100),
             shortcuts: Some(default_shortcuts()),
@@ -106,8 +113,8 @@ impl AppConfig {
             let raw = fs::read_to_string(&path)?;
             let mut cfg: AppConfig = serde_json::from_str(&raw)?;
             // 旧默认模型 glm-4-flash 不支持图片识别，迁移到多模态默认值
-            if cfg.api_model.as_deref() == Some("glm-4-flash") {
-                cfg.api_model = Some("glm-4v-flash".into());
+            if cfg.api_model.as_deref() == Some(LEGACY_TEXT_ONLY_MODEL) {
+                cfg.api_model = Some(DEFAULT_MODEL.into());
             }
             cfg.repair_blank_toggle_clipboard();
             Ok(cfg)

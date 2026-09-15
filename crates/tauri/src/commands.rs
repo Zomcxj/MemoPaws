@@ -247,7 +247,7 @@ pub fn get_config(vault: tauri::State<'_, KeyVaultState>) -> Result<serde_json::
     let has_vault_key = lock_recover!(vault)
         .list()
         .iter()
-        .any(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm");
+        .any(is_settings_key);
     memopaws_config::config::AppConfig::load()
         .map(|c| {
             safe_config_value(
@@ -426,7 +426,7 @@ pub async fn save_config(
         let model = config
             .get("api_model")
             .and_then(|value| value.as_str())
-            .unwrap_or("glm-4v-flash");
+            .unwrap_or(memopaws_config::config::DEFAULT_MODEL);
         save_settings_key(
             &vault,
             key,
@@ -524,6 +524,54 @@ fn apply_config_patch(
     Ok(())
 }
 
+/// Name of the single vault entry that backs the Settings page API key.
+const SETTINGS_KEY_NAME: &str = "settings_api_key";
+
+/// Matches the one vault entry the Settings page reads and writes.
+fn is_settings_key(entry: &KeyEntry) -> bool {
+    entry.name == SETTINGS_KEY_NAME && entry.entry_type == "llm"
+}
+
+/// Falls back to the default model when the caller supplied a blank one.
+fn settings_note(model: &str) -> String {
+    if model.trim().is_empty() {
+        memopaws_config::config::DEFAULT_MODEL.to_string()
+    } else {
+        model.trim().to_string()
+    }
+}
+
+/// Writes the Settings API key into the vault, replacing the existing entry.
+///
+/// Shared by `save_settings_key` (value typed into Settings) and
+/// `promote_key_to_settings` (value copied from another vault entry); both need
+/// the same "exactly one `settings_api_key` LLM entry" invariant.
+fn upsert_settings_key(
+    vault: &mut KeyVault,
+    value: &str,
+    url: &str,
+    note: &str,
+) -> Result<(), String> {
+    let input = || KeyEntryInput {
+        name: SETTINGS_KEY_NAME.into(),
+        entry_type: "llm".into(),
+        value: value.to_owned(),
+        url: url.to_owned(),
+        url_anthropic: String::new(),
+        note: note.to_owned(),
+    };
+    let existing = vault
+        .list()
+        .into_iter()
+        .find(is_settings_key);
+    match existing {
+        Some(entry) => vault.update(entry.id, input()),
+        None => vault.add(input()),
+    }
+    .map_err(|_| "API key could not be stored securely".to_string())?;
+    Ok(())
+}
+
 fn save_settings_key(
     state: &tauri::State<'_, KeyVaultState>,
     key: &str,
@@ -531,33 +579,7 @@ fn save_settings_key(
     model: &str,
 ) -> Result<(), String> {
     let mut vault = lock_recover!(state);
-    let note = if model.trim().is_empty() {
-        "glm-4v-flash".to_string()
-    } else {
-        model.trim().to_string()
-    };
-    let input = || KeyEntryInput {
-        name: "settings_api_key".into(),
-        entry_type: "llm".into(),
-        value: key.to_owned(),
-        url: url.to_owned(),
-        url_anthropic: String::new(),
-        note: note.clone(),
-    };
-    let existing = vault
-        .list()
-        .into_iter()
-        .find(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm");
-    if let Some(entry) = existing {
-        vault
-            .update(entry.id, input())
-            .map_err(|_| "API key could not be stored securely".to_string())?;
-    } else {
-        vault
-            .add(input())
-            .map_err(|_| "API key could not be stored securely".to_string())?;
-    }
-    Ok(())
+    upsert_settings_key(&mut vault, key, url, &settings_note(model))
 }
 
 #[tauri::command]
@@ -613,7 +635,6 @@ fn migration_mode(value: &str) -> Result<memopaws_core::paths::MigrationMode, St
 #[derive(Debug, serde::Serialize)]
 pub struct MigrationResult {
     pub path: Option<String>,
-    pub requires_restart: bool,
     pub restart_required: bool,
 }
 
@@ -634,13 +655,11 @@ pub async fn migrate_data_dir(
         if let Some(new_path) = &result {
             return Ok(MigrationResult {
                 path: Some(new_path.to_string_lossy().into_owned()),
-                requires_restart: true,
                 restart_required: true,
             });
         }
         Ok(MigrationResult {
             path: None,
-            requires_restart: false,
             restart_required: false,
         })
     })
@@ -917,9 +936,7 @@ fn ai_client(
                     .find(|entry| entry.id == id)
                     .ok_or_else(|| "key entry not found".to_string())?,
             ),
-            None => entries
-                .into_iter()
-                .find(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm"),
+            None => entries.into_iter().find(is_settings_key),
         };
         match entry {
             Some(entry) => {
@@ -959,7 +976,7 @@ fn settings_client_from(
     let model = model
         .filter(|model| !model.trim().is_empty())
         .or_else(|| config.api_model.clone())
-        .unwrap_or_else(|| "glm-4v-flash".to_string());
+        .unwrap_or_else(|| memopaws_config::config::DEFAULT_MODEL.to_string());
     Ok(Client::new(ApiConfig::new(
         config.api_url.clone().unwrap_or_default(),
         model,
@@ -979,34 +996,7 @@ fn promote_key_to_settings(vault: &mut KeyVault, entry_id: u64) -> Result<(), St
     let value = vault
         .get_value(entry.id)
         .map_err(|error| error.to_string())?;
-    let url = entry.url.clone();
-    let note = if entry.note.trim().is_empty() {
-        "glm-4v-flash".to_string()
-    } else {
-        entry.note.trim().to_string()
-    };
-    let input = || KeyEntryInput {
-        name: "settings_api_key".into(),
-        entry_type: "llm".into(),
-        value: value.clone(),
-        url: url.clone(),
-        url_anthropic: String::new(),
-        note: note.clone(),
-    };
-    let existing = vault
-        .list()
-        .into_iter()
-        .find(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm");
-    if let Some(entry) = existing {
-        vault
-            .update(entry.id, input())
-            .map_err(|_| "API key could not be stored securely".to_string())?;
-    } else {
-        vault
-            .add(input())
-            .map_err(|_| "API key could not be stored securely".to_string())?;
-    }
-    Ok(())
+    upsert_settings_key(vault, &value, &entry.url, &settings_note(&entry.note))
 }
 
 #[tauri::command]
@@ -1042,7 +1032,7 @@ fn resolve_ai_config(
     key: Zeroizing<String>,
     requested_model: Option<String>,
 ) -> Result<ApiConfig, String> {
-    let model = if entry.name == "settings_api_key" {
+    let model = if entry.name == SETTINGS_KEY_NAME {
         (!entry.note.trim().is_empty() && entry.note != "Settings API key")
             .then_some(entry.note)
             .or(requested_model
@@ -1052,7 +1042,7 @@ fn resolve_ai_config(
                     .ok()
                     .and_then(|config| config.api_model)
             })
-            .unwrap_or_else(|| "glm-4v-flash".to_string())
+            .unwrap_or_else(|| memopaws_config::config::DEFAULT_MODEL.to_string())
     } else {
         entry.note
     };
@@ -1207,13 +1197,7 @@ async fn run_key_probe(
     };
     let elapsed = started.elapsed().as_millis();
     match response {
-        Ok(response) if response.status().as_u16() == 200 => {
-            Ok(serde_json::json!({"status_code": 200, "elapsed_ms": elapsed}))
-        }
-        Ok(response) => Ok(api_error_result(
-            &format!("HTTP {}", response.status().as_u16()),
-            elapsed,
-        )),
+        Ok(response) => Ok(key_probe_status_result(response.status().as_u16(), elapsed)),
         Err(error) => Ok(api_error_result(&error.to_string(), elapsed)),
     }
 }
@@ -1286,7 +1270,7 @@ pub async fn test_api_connection(
                 .ok_or_else(|| "key entry not found".to_string())?,
             None => entries
                 .into_iter()
-                .find(|entry| entry.name == "settings_api_key" && entry.entry_type == "llm")
+                .find(is_settings_key)
                 .ok_or_else(|| "API key is required".to_string())?,
         };
         if entry.entry_type != "llm" {
