@@ -24,6 +24,26 @@ pub struct TextReplacement {
     pub replacement: String,
 }
 
+/// Single source of truth for the default global shortcuts.
+///
+/// `AppConfig::default()` builds its `shortcuts` map from this table and
+/// `memopaws_tauri::hotkeys` re-exports it, so a default can never drift
+/// between the persisted config and the registration path.
+pub const DEFAULT_SHORTCUTS: &[(&str, &str)] = &[
+    ("capture", "Alt+X"),
+    ("canvas_fit", "Ctrl+F"),
+    ("new_memo", "Ctrl+N"),
+    ("global_search", "Ctrl+Shift+F"),
+    ("toggle_clipboard", "Ctrl+Shift+V"),
+];
+
+fn default_shortcuts() -> HashMap<String, String> {
+    DEFAULT_SHORTCUTS
+        .iter()
+        .map(|(action, key)| ((*action).to_string(), (*key).to_string()))
+        .collect()
+}
+
 fn deserialize_text_replacements<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Vec<TextReplacement>, D::Error>
@@ -59,17 +79,7 @@ impl Default for AppConfig {
             api_model: Some("glm-4v-flash".into()),
             clipboard_max_items: Some(50),
             history_max_items: Some(100),
-            shortcuts: Some(
-                [
-                    ("capture".into(), "Alt+X".into()),
-                    ("canvas_fit".into(), "Ctrl+F".into()),
-                    ("new_memo".into(), "Ctrl+N".into()),
-                    ("global_search".into(), "Ctrl+Shift+F".into()),
-                    ("toggle_clipboard".into(), "".into()),
-                ]
-                .into_iter()
-                .collect(),
-            ),
+            shortcuts: Some(default_shortcuts()),
             text_replacements: Vec::new(),
         }
     }
@@ -99,11 +109,31 @@ impl AppConfig {
             if cfg.api_model.as_deref() == Some("glm-4-flash") {
                 cfg.api_model = Some("glm-4v-flash".into());
             }
+            cfg.repair_blank_toggle_clipboard();
             Ok(cfg)
         } else {
             let cfg = Self::default();
             cfg.save_to(path)?;
             Ok(cfg)
+        }
+    }
+
+    /// Restores `toggle_clipboard` for configs written by the buggy default.
+    ///
+    /// Until v0.0.1 `AppConfig::default()` stored `toggle_clipboard: ""` while
+    /// the registration table used `Ctrl+Shift+V`. Because `load_from` persists
+    /// the default on first run and `register_from_config` lets the saved value
+    /// win, the shortcut was never actually registered. The settings UI cannot
+    /// produce an empty binding (`recordShortcut` requires a modifier plus a
+    /// named key, `resetShortcut` writes the default), so a blank value here is
+    /// always that bug rather than a deliberate opt-out and is safe to repair.
+    fn repair_blank_toggle_clipboard(&mut self) {
+        let Some(shortcuts) = self.shortcuts.as_mut() else { return };
+        if !shortcuts.get("toggle_clipboard").is_some_and(|key| key.trim().is_empty()) {
+            return;
+        }
+        if let Some((_, default)) = DEFAULT_SHORTCUTS.iter().find(|(action, _)| *action == "toggle_clipboard") {
+            shortcuts.insert("toggle_clipboard".into(), (*default).to_string());
         }
     }
 
@@ -131,5 +161,39 @@ mod tests {
 
         let null: AppConfig = serde_json::from_str(r#"{"text_replacements": null}"#).unwrap();
         assert!(null.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn default_toggle_clipboard_matches_the_registration_table() {
+        let shortcuts = AppConfig::default().shortcuts.unwrap();
+        for (action, key) in super::DEFAULT_SHORTCUTS {
+            assert_eq!(shortcuts.get(*action).map(String::as_str), Some(*key));
+        }
+        assert_eq!(shortcuts.get("toggle_clipboard").map(String::as_str), Some("Ctrl+Shift+V"));
+    }
+
+    #[test]
+    fn blank_toggle_clipboard_written_by_the_old_default_is_repaired_on_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("setting.json");
+        std::fs::write(&path, r#"{"theme":"dark","language":"zh","close_behavior":"tray","api_key":null,"api_url":"u","api_model":"glm-4v-flash","clipboard_max_items":50,"history_max_items":100,"shortcuts":{"capture":"Alt+X","toggle_clipboard":""}}"#).unwrap();
+
+        let loaded = AppConfig::load_from(&path).unwrap();
+        let shortcuts = loaded.shortcuts.unwrap();
+
+        assert_eq!(shortcuts.get("toggle_clipboard").map(String::as_str), Some("Ctrl+Shift+V"));
+        assert_eq!(shortcuts.get("capture").map(String::as_str), Some("Alt+X"));
+    }
+
+    #[test]
+    fn deliberate_bindings_and_other_blank_actions_are_left_alone() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("setting.json");
+        std::fs::write(&path, r#"{"theme":"dark","language":"zh","close_behavior":"tray","api_key":null,"api_url":"u","api_model":"glm-4v-flash","clipboard_max_items":50,"history_max_items":100,"shortcuts":{"capture":"","toggle_clipboard":"Alt+V"}}"#).unwrap();
+
+        let shortcuts = AppConfig::load_from(&path).unwrap().shortcuts.unwrap();
+
+        assert_eq!(shortcuts.get("toggle_clipboard").map(String::as_str), Some("Alt+V"));
+        assert_eq!(shortcuts.get("capture").map(String::as_str), Some(""));
     }
 }

@@ -68,7 +68,7 @@ impl HistoryManager {
     }
 
     pub fn add_success(&mut self, typ: impl Into<String>, text: impl Into<String>, ocr_text: Option<&str>, translate_text: Option<&str>) -> Result<()> {
-        self.records.insert(0, HistoryRecord { time: now_str(), typ: typ.into(), text: text.into().chars().take(5000).collect(), ocr_text: ocr_text.map(str::to_owned), translate_text: translate_text.map(str::to_owned), extra: serde_json::Map::new() });
+        self.records.insert(0, HistoryRecord { time: now_str(), typ: typ.into(), text: truncate_field(&text.into()), ocr_text: ocr_text.map(truncate_field), translate_text: translate_text.map(truncate_field), extra: serde_json::Map::new() });
         self.records.truncate(self.max_items);
         self.save()
     }
@@ -77,6 +77,15 @@ impl HistoryManager {
     pub fn clear(&mut self) -> Result<()> { self.records.clear(); self.save() }
     pub fn delete_record(&mut self, index: usize) -> Result<()> { if index < self.records.len() { self.records.remove(index); self.save()?; } Ok(()) }
 }
+
+/// Upper bound on every stored history text field.
+///
+/// Applies uniformly to `text`, `ocr_text` and `translate_text`: a single OCR run
+/// on a dense screenshot can emit far more than this, and history is a browsing
+/// aid rather than an archive, so unbounded fields only bloat `history.json`.
+const MAX_FIELD_CHARS: usize = 5000;
+
+fn truncate_field(text: &str) -> String { text.chars().take(MAX_FIELD_CHARS).collect() }
 
 fn now_str() -> String { SystemTime::now().duration_since(UNIX_EPOCH).map(|time| time.as_secs().to_string()).unwrap_or_default() }
 
