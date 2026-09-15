@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:tauri": "set RUST_MIN_STACK=67108864&& set CARGO_BUILD_JOBS=2&& cargo build --release --manifest-path ../Cargo.toml -p memopaws-tauri&& node e2e/test-tauri-app.cjs&& node e2e/test-tauri-driver.cjs",
+    "test:tauri": "set RUST_MIN_STACK=67108864&& set CARGO_BUILD_JOBS=2&& cargo build --release --manifest-path ../Cargo.toml -p memopaws-tauri&& node e2e/test-tauri-native.cjs --label=app --port=9222&& node e2e/test-tauri-native.cjs --label=driver --port=9223",
     "tauri": "tauri"
   },
   "dependencies": {
