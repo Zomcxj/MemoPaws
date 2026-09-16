@@ -322,3 +322,50 @@ fn safe_destination(destination: &str) -> bool {
     }
     !value.split(['/', '?', '#']).next().unwrap_or("").contains(':')
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{RenderTheme, render_markdown};
+
+    /// The preview is injected with `dangerouslySetInnerHTML`, so the rendered
+    /// markup must never carry its own JavaScript: the copy button is a marker
+    /// the frontend delegates from, not an inline handler.
+    #[test]
+    fn code_blocks_expose_a_copy_marker_and_no_inline_javascript() {
+        let html = render_markdown("```rust\nfn main() {}\n```", RenderTheme::Dark);
+
+        assert!(html.contains("data-memo-code-copy"), "copy marker missing: {html}");
+        assert!(html.contains("memo-code-language"), "language label missing");
+        assert!(!html.to_ascii_lowercase().contains("onclick"), "inline handler leaked");
+    }
+
+    #[test]
+    fn raw_html_is_escaped_rather_than_embedded() {
+        let html = render_markdown("<script>alert(1)</script>", RenderTheme::Dark);
+
+        assert!(!html.contains("<script>"), "raw script tag survived: {html}");
+        assert!(html.contains("&lt;script&gt;"), "script tag was not escaped");
+    }
+
+    /// An unsafe link is skipped whole: the `skipped` stack swallows the events
+    /// inside it, so the label disappears along with the href. Losing the text is
+    /// the intended trade -- a rendered label with no destination would read as a
+    /// broken link rather than a blocked one.
+    #[test]
+    fn unsafe_link_destinations_are_dropped_with_their_label() {
+        let html = render_markdown("[click](javascript:alert(1))", RenderTheme::Dark);
+
+        assert!(!html.contains("javascript:"), "javascript: destination survived: {html}");
+        assert!(!html.contains("click"), "the skipped link label leaked: {html}");
+
+        let safe = render_markdown("[click](https://example.com)", RenderTheme::Dark);
+        assert!(safe.contains("href=\"https://example.com\""), "safe link was dropped: {safe}");
+        assert!(safe.contains("click"), "safe link label missing");
+    }
+
+    #[test]
+    fn both_themes_render_their_own_marker_class() {
+        assert!(render_markdown("hi", RenderTheme::Dark).contains("memo-markdown dark"));
+        assert!(render_markdown("hi", RenderTheme::Light).contains("memo-markdown light"));
+    }
+}

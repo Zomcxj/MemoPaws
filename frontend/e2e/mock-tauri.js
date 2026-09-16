@@ -17,8 +17,12 @@
       { id: 1, name: "Test LLM Key", type: "llm", url: "https://api.openai.com/v1", url_anthropic: "", note: "Test key", order: 0, created: "1700000000" },
       { id: 2, name: "Another Key", type: "llm", url: "https://api.anthropic.com", url_anthropic: "", note: "", order: 1, created: "1700000001" }
     ],
+    // Two LLM keys so reordering has somewhere to move, plus the internal
+    // settings key, which KeysPage must hide from the list.
     list: [
-      { id: 1, name: "Test LLM Key", type: "llm", url: "https://api.openai.com/v1", url_anthropic: "", note: "Test key", order: 0, created: "1700000000" }
+      { id: 1, name: "Test LLM Key", type: "llm", url: "https://api.openai.com/v1", url_anthropic: "", note: "Test key", order: 0, created: "1700000000" },
+      { id: 2, name: "Second LLM Key", type: "llm", url: "https://api.anthropic.com", url_anthropic: "", note: "", order: 1, created: "1700000001" },
+      { id: 3, name: "settings_api_key", type: "llm", url: "https://api.openai.com/v1", url_anthropic: "", note: "", order: 2, created: "1700000002" }
     ],
     memo_list: [
       { id: 1, title: "Test Memo", content: "# Hello World\n\nThis is a test memo.", tags: ["test"], created: "2024-01-01T00:00:00Z", updated: "2024-01-01T00:00:00Z" },
@@ -33,8 +37,10 @@
       { index: 1, name: "Secondary", x: 1280, y: 0, width: 1600, height: 900, is_primary: false }
     ],
     clipboard_list: [
-      { id: 1, time: "1700000000", content_type: "text", text: "Clipboard text", image_path: null },
-      { id: 2, time: "1700000001", content_type: "image", text: null, image_path: "1.png" }
+      // Multi-line on purpose: the list summary must show only the first line.
+      { id: 1, time: "1700000000", content_type: "text", text: "Clipboard text\nSECOND LINE MUST NOT SHOW", image_path: null },
+      // Long name on purpose: the list summary must show only the ellipsized filename.
+      { id: 2, time: "1700000001", content_type: "image", text: null, image_path: "C:\\some\\deep\\folder\\a-very-long-clipboard-image-filename-that-must-be-ellipsized.png" }
     ],
        get_config: {
         language: "zh", close_behavior: "tray",
@@ -43,7 +49,13 @@
        shortcuts: { capture: "Alt+X", canvas_fit: "Ctrl+F", new_memo: "Ctrl+N", global_search: "Ctrl+Shift+F" }
     },
     status: { has_master: true, unlocked: true, load_failed: false, version: 3 },
-    memo_render: "<h1>Hello World</h1><p>This is a test memo.</p>",
+    // Mirrors the real renderer's fenced-code markup (crates/memo/src/renderer.rs):
+    // a copy button carrying only a data marker, never an inline onclick.
+    memo_render: "<h1>Hello World</h1><p>This is a test memo.</p>"
+      + "<div class=\"memo-code-block\"><div class=\"memo-code-toolbar\">"
+      + "<span class=\"memo-code-language\">rust</span>"
+      + "<button type=\"button\" class=\"memo-code-copy\" data-memo-code-copy aria-label=\"Copy code\">Copy</button>"
+      + "</div><pre class=\"memo-code\"><code>fn main() {}</code></pre></div>",
     memo_search: [],
     memo_get: { id: 1, title: "Test Memo", content: "# Hello World\n\nThis is a test memo.", tags: ["test"], created: "2024-01-01T00:00:00Z", updated: "2024-01-01T00:00:00Z" },
     capture_list: [],

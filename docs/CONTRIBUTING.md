@@ -79,24 +79,20 @@ cargo test --workspace
 E2E 测试基于 Playwright，测试文件位于 `frontend/e2e/`：
 
 ```bash
+node frontend/e2e/test-static-contracts.cjs
 node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
 node frontend/e2e/test-capture-overlay.cjs
-node frontend/e2e/test-clipboard-layout.cjs
-node frontend/e2e/test-key-interaction-refinement.cjs
-node frontend/e2e/test-final-review-fixes.cjs
-node frontend/e2e/test-memo-preview-contracts.cjs
-node frontend/e2e/test-recognize-capture-contracts.cjs
-node frontend/e2e/test-window-acl-and-sidebar.cjs
-node frontend/e2e/test-floating-removal-contracts.cjs
+node frontend/e2e/test-interaction-behaviour.cjs
 node frontend/e2e/shot-handles.cjs
 npm --prefix frontend run test:tauri
 ```
 
 > 注意：
 >
-> - Mock E2E 测试需要前端开发服务器运行在 `http://localhost:1420`。
-> - `npm --prefix frontend run test:tauri` 会先构建当前 release binary，再用临时数据目录和 WebView2 profile 启动 MemoPaws，并通过 CDP 运行两个原生测试。
+> - `test-static-contracts.cjs` 只读文件，无需开发服务器，可单独运行。
+> - 其余 mock E2E 测试需要前端开发服务器运行在 `http://localhost:1420`。
+> - `npm --prefix frontend run test:tauri` 会先构建当前 release binary，再用临时数据目录和 WebView2 profile 启动 MemoPaws，并通过 CDP 把同一套原生测试跑两遍（`--label=app --port=9222` 与 `--label=driver --port=9223`）。
 
 ### 前端构建验证
 
@@ -117,16 +113,11 @@ $env:RUST_MIN_STACK='67108864'
 $env:CARGO_BUILD_JOBS='2'
 cargo test --workspace
 npm --prefix frontend run build
+node frontend/e2e/test-static-contracts.cjs
 node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
 node frontend/e2e/test-capture-overlay.cjs
-node frontend/e2e/test-clipboard-layout.cjs
-node frontend/e2e/test-key-interaction-refinement.cjs
-node frontend/e2e/test-final-review-fixes.cjs
-node frontend/e2e/test-memo-preview-contracts.cjs
-node frontend/e2e/test-recognize-capture-contracts.cjs
-node frontend/e2e/test-window-acl-and-sidebar.cjs
-node frontend/e2e/test-floating-removal-contracts.cjs
+node frontend/e2e/test-interaction-behaviour.cjs
 node frontend/e2e/shot-handles.cjs
 npm --prefix frontend run test:tauri
 ```
