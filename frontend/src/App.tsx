@@ -18,7 +18,7 @@ export default function App() {
   const [memoDirty, setMemoDirty] = useState(false);
   const [language, setLanguage] = useState<Lang>("zh");
   const [searchOpen, setSearchOpen] = useState(false);
-  const { theme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
     let active = true;
@@ -89,7 +89,7 @@ export default function App() {
   const renderPage = () => {
     switch (currentPage) {
       case "recognize": return <RecognizePage language={language} />;
-      case "memo": return <MemoPage language={language} onDirtyChange={setMemoDirty} />;
+      case "memo": return <MemoPage language={language} onDirtyChange={setMemoDirty} renderTheme={resolvedTheme} />;
       case "keys": return <KeysPage language={language} />;
       case "clipboard": return <ClipboardPage language={language} />;
       case "settings": return <SettingsPage theme={theme} onThemeChange={setTheme} onLanguageChange={changeLanguage} />;

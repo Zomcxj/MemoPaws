@@ -96,13 +96,14 @@ async function runTests() {
     throw new Error('Unexpected Sidebar theme button found');
   }
   const themeGroup = page.locator('.settings-segmented[role="group"][aria-label="主题模式"]');
-  if (await themeGroup.count() !== 1 || await themeGroup.locator('button').count() !== 2) {
-    throw new Error('Expected exactly one Settings theme control with two buttons');
+  if (await themeGroup.count() !== 1 || await themeGroup.locator('button').count() !== 3) {
+    throw new Error('Expected exactly one Settings theme control with three buttons');
   }
   const lightThemeButton = themeGroup.locator('button').filter({ hasText: '亮色' });
   const darkThemeButton = themeGroup.locator('button').filter({ hasText: '暗色' });
-  if (await lightThemeButton.count() !== 1 || await darkThemeButton.count() !== 1) {
-    throw new Error('Expected exactly one 亮色 button and one 暗色 button in Settings');
+  const autoThemeButton = themeGroup.locator('button').filter({ hasText: '跟随系统' });
+  if (await lightThemeButton.count() !== 1 || await darkThemeButton.count() !== 1 || await autoThemeButton.count() !== 1) {
+    throw new Error('Expected 亮色/暗色/跟随系统 buttons in Settings');
   }
   await lightThemeButton.click();
   await page.waitForTimeout(500);
@@ -132,6 +133,7 @@ async function runTests() {
   for (const text of ['Theme', 'Language', 'API Configuration', 'Clipboard Settings', 'History', 'Storage Directory', 'Keyboard Shortcuts', 'Close Behavior']) {
     if (await settings.getByText(text, { exact: true }).count() < 1) throw new Error(`Missing translated settings text: ${text}`);
   }
+  if (await settings.getByRole('button', { name: 'System' }).count() !== 1) throw new Error('Missing translated auto theme option');
   if (await settings.getByText('test-api-key-12345', { exact: false }).count() !== 0) throw new Error('API key rendered in settings');
   await settings.getByRole('button', { name: '中文' }).click();
 
