@@ -105,6 +105,12 @@ async function runTests() {
   if (await lightThemeButton.count() !== 1 || await darkThemeButton.count() !== 1 || await autoThemeButton.count() !== 1) {
     throw new Error('Expected 亮色/暗色/跟随系统 buttons in Settings');
   }
+  const clippedThemeButtons = await themeGroup.locator('button').evaluateAll((els) =>
+    els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => `${el.textContent}(${el.scrollWidth}>${el.clientWidth})`)
+  );
+  if (clippedThemeButtons.length) {
+    throw new Error(`Settings theme buttons clipped: ${clippedThemeButtons.join(', ')}`);
+  }
   await lightThemeButton.click();
   await page.waitForTimeout(500);
   if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'light' ||
