@@ -84,6 +84,7 @@ node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
 node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-interaction-behaviour.cjs
+node frontend/e2e/test-design-tokens.cjs
 node frontend/e2e/shot-handles.cjs
 npm --prefix frontend run test:tauri
 ```
@@ -118,6 +119,7 @@ node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
 node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-interaction-behaviour.cjs
+node frontend/e2e/test-design-tokens.cjs
 node frontend/e2e/shot-handles.cjs
 npm --prefix frontend run test:tauri
 ```

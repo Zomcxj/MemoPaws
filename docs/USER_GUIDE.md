@@ -43,7 +43,7 @@ MemoPaws 提供以下功能：
 
 配置文件为数据目录下的 `setting.json`，常用字段如下：
 
-- `theme`：主题，支持 `dark` 和 `light`
+- `theme`：主题，支持 `dark`、`light` 和 `auto`（跟随系统）
 - `language`：界面语言
 - `close_behavior`：关闭行为，支持 `exit` 和 `tray`
 - `api_url`、`api_model`：AI 服务地址与模型（默认模型 `glm-4v-flash`）
