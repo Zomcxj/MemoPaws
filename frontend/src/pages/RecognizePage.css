@@ -130,7 +130,7 @@
   min-width: 96px;
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 600;
   font-size: 13px;
   border-radius: 8px;
@@ -199,6 +199,7 @@
   animation: result-glow 1.8s ease-in-out infinite;
 }
 
+/* 豁免：截图选区功能色，与 CaptureOverlay 保持一致。 */
 @keyframes result-glow {
   0%, 100% {
     border-color: var(--border-subtle);
@@ -324,7 +325,7 @@
   align-self: flex-start;
   margin: 0 8px 8px;
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
 }
 
 .image-canvas-wrap {
@@ -614,6 +615,7 @@
   }
 }
 
+/* 豁免：防旧帧闪现的过渡遮罩，固定深色以匹配截图覆盖层。 */
 /* 截图确认后恢复窗口期间的纯色过渡遮罩，防止旧截图帧闪现 */
 .capture-cover {
   position: fixed;

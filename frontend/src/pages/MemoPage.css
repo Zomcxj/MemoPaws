@@ -301,7 +301,7 @@
   border-radius: 8px;
   padding: 6px 14px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;

@@ -55,7 +55,7 @@ assert.match(clipboardCss, /\.clipboard-items\.grid \.clipboard-image-open,\s*\.
 assert.match(clipboardCss, /\.clipboard-image-name\s*\{[^}]*width:\s*100%[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap[^}]*\}/s,
   "long image filenames must be ellipsized");
 assert.match(clipboardCss, /\.clipboard-edit-dialog\s*\{[^}]*max-height:\s*min\(620px, 92vh\)[^}]*\}/s);
-assert.match(keysCss, /\.key-latency\.is-testing\s*\{[^}]*color:\s*#3d9a5f[^}]*\}/s);
+assert.match(keysCss, /\.key-latency\.is-testing\s*\{[^}]*color:\s*var\(--success\)[^}]*\}/s);
 assert.match(keysCss, /\.keys-dialog,\s*\.keys-popover\s*\{[^}]*max-height:\s*min\(620px, 92vh\)[^}]*\}/s);
 assert.match(keysPage, /const dragThreshold = entry\.type === "llm" \? 8 : 18;/,
   "LLM dragging must wait for an 8px threshold and secret dragging for an 18px threshold");

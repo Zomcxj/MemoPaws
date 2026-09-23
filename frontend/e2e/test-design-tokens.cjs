@@ -78,6 +78,21 @@ async function runTests() {
   if (activeSeg !== 'rgb(38, 38, 36)') throw new Error(`Expected active segment color rgb(38, 38, 36) (--accent-contrast dark), got ${activeSeg}`);
   console.log('  ✓ shared component tokens applied');
 
+  // Page accent-button text must use --accent-contrast in both themes (.settings-save is on Settings).
+  for (const [theme, expected] of [['light', 'rgb(28, 27, 26)'], ['dark', 'rgb(38, 38, 36)']]) {
+    await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+    const btn = await page.locator('.settings-save').first().evaluate((el) => getComputedStyle(el).color);
+    if (btn !== expected) throw new Error(`Expected .settings-save color ${expected} in ${theme}, got ${btn}`);
+  }
+  // No non-exempt hardcoded colors remain (shadows and over-media surfaces are exempt).
+  const nonExempt = execSync(
+    `grep -nE '#fff\\b|#3d9a5f|#c9a227|#2ecc71|rgb\\(0 0 0 / 45%\\)|rgba\\(5, 10, 25, 0\\.5\\)|rgba\\(20, 19, 17, 0\\.42\\)' ` +
+    `frontend/src/pages/*.css frontend/src/components/GlobalSearch.css frontend/src/components/SegmentedControl.css || true`,
+    { cwd: path.join(__dirname, '..', '..'), encoding: 'utf-8', shell: 'bash' }
+  ).trim();
+  if (nonExempt) throw new Error(`Unexpected hardcoded colors remain:\n${nonExempt}`);
+  console.log('  ✓ page colors migrated');
+
   await browser.close();
   console.log('\nAll design token tests passed!');
 }
