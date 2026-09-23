@@ -65,6 +65,19 @@ async function runTests() {
   }
   console.log('  ✓ theme transition rule present');
 
+  // Shared component token contract (computed values must be unchanged by tokenization).
+  // .seg-control only exists on pages with a SegmentedControl, so navigate to Settings first.
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  await page.locator('.sidebar-item').filter({ hasText: '设置' }).click();
+  await page.waitForTimeout(300);
+  const seg = await page.locator('.seg-control').first().evaluate((el) => getComputedStyle(el).borderRadius);
+  if (seg !== '8px') throw new Error(`Expected .seg-control border-radius 8px, got ${seg}`);
+  const sidebarItem = await page.locator('.sidebar-item').first().evaluate((el) => getComputedStyle(el).fontSize);
+  if (sidebarItem !== '13px') throw new Error(`Expected .sidebar-item font-size 13px, got ${sidebarItem}`);
+  const activeSeg = await page.locator('.seg-control button.active').first().evaluate((el) => getComputedStyle(el).color);
+  if (activeSeg !== 'rgb(38, 38, 36)') throw new Error(`Expected active segment color rgb(38, 38, 36) (--accent-contrast dark), got ${activeSeg}`);
+  console.log('  ✓ shared component tokens applied');
+
   await browser.close();
   console.log('\nAll design token tests passed!');
 }
