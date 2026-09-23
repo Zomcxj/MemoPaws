@@ -1,3 +1,21 @@
+:root {
+  /* 间距：值与名字一致（--space-8 = 8px） */
+  --space-2: 2px;   --space-3: 3px;   --space-4: 4px;   --space-5: 5px;
+  --space-6: 6px;   --space-7: 7px;   --space-8: 8px;   --space-9: 9px;
+  --space-10: 10px; --space-12: 12px; --space-13: 13px; --space-14: 14px;
+  --space-16: 16px; --space-18: 18px; --space-20: 20px; --space-24: 24px;
+  --space-28: 28px; --space-32: 32px; --space-36: 36px;
+
+  /* 圆角 */
+  --radius-3: 3px;  --radius-4: 4px;  --radius-6: 6px;  --radius-7: 7px;  --radius-8: 8px;
+  --radius-10: 10px; --radius-12: 12px; --radius-14: 14px; --radius-full: 999px;
+
+  /* 字号与字重 */
+  --font-size-11: 11px; --font-size-12: 12px; --font-size-13: 13px; --font-size-14: 14px;
+  --font-size-15: 15px; --font-size-16: 16px; --font-size-18: 18px; --font-size-22: 22px;
+  --font-weight-500: 500; --font-weight-600: 600;
+}
+
 :root,
 [data-theme="light"] {
   --bg-primary: #FAF8F6;
@@ -9,9 +27,13 @@
   --surface: #E8E5E0;
   --text-primary: #1C1B1A;
   --text-secondary: #6B6560;
-  --text-muted: #9A9590;
+  --text-muted: #75706A; /* was #9A9590, AA 4.67:1 */
   --accent: #D97757;
   --accent-hover: #C56646;
+  --accent-contrast: #1C1B1A;
+  --success: #2E7D4F;
+  --warning: #8A6A00;
+  --scrim: rgba(0, 0, 0, 0.45);
   --border-subtle: #E0DCD8;
   --border: #C9C5BD;
   --error: #BA1A1A;
@@ -31,9 +53,13 @@
   --text-muted: #B7B5A9;
   --accent: #D97757;
   --accent-hover: #E08D6F;
+  --accent-contrast: #262624;
+  --success: #6FCF97;
+  --warning: #E5C149;
+  --scrim: rgba(0, 0, 0, 0.55);
   --border-subtle: #3E3E38;
   --border: #52514A;
-  --error: #EF4444;
+  --error: #F87171; /* was #EF4444, AA 5.42:1 */
   --scroll-handle: #52514A;
 }
 
@@ -107,4 +133,12 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* 主题切换期间的临时过渡；由 useTheme 挂载并在 250ms 后移除，避免常驻通配过渡的性能开销 */
+.theme-transitioning,
+.theme-transitioning *,
+.theme-transitioning *::before,
+.theme-transitioning *::after {
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease, box-shadow 200ms ease, fill 200ms ease, stroke 200ms ease !important;
 }
