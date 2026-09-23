@@ -7,7 +7,7 @@
   height: 34px;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--bg-neutral-button);
   box-sizing: border-box;
   isolation: isolate;
@@ -22,7 +22,7 @@
   top: 0;
   left: 0;
   bottom: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--accent);
   pointer-events: none;
   z-index: 0;
@@ -44,22 +44,22 @@
   margin: 0;
   border: 0 !important;
   border-radius: 0 !important;
-  padding: 0 8px !important;
+  padding: 0 var(--space-8) !important;
   background: transparent !important;
   box-shadow: none !important;
   color: var(--text-secondary);
   white-space: nowrap;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-500);
   line-height: 1;
 }
 
 .seg-control > button[data-seg].active,
 .seg-control > button.active {
   background: transparent !important;
-  color: #fff !important;
-  font-weight: 600;
+  color: var(--accent-contrast) !important;
+  font-weight: var(--font-weight-600);
 }
 
 .seg-control > button:disabled {
@@ -73,7 +73,7 @@
 .memo-page .seg-control > button {
   border: 0 !important;
   border-radius: 0 !important;
-  padding: 0 8px !important;
+  padding: 0 var(--space-8) !important;
   background: transparent !important;
   box-shadow: none !important;
 }
