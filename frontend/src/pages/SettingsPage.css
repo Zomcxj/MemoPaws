@@ -313,6 +313,10 @@
   color: var(--accent);
 }
 
+.settings-segmented {
+  min-width: max-content;
+}
+
 @media (max-width: 620px) {
   .settings-page { padding-inline: var(--space-8); }
   .settings-field,

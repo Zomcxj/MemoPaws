@@ -111,6 +111,17 @@ async function runTests() {
   if (clippedThemeButtons.length) {
     throw new Error(`Settings theme buttons clipped: ${clippedThemeButtons.join(', ')}`);
   }
+  // Narrow viewport must not re-clip via flex compression.
+  await page.setViewportSize({ width: 415, height: 900 });
+  await page.waitForTimeout(200);
+  const narrowClipped = await themeGroup.locator('button').evaluateAll((els) =>
+    els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => `${el.textContent}(${el.scrollWidth}>${el.clientWidth})`)
+  );
+  if (narrowClipped.length) {
+    throw new Error(`Settings theme buttons clipped at 415px viewport: ${narrowClipped.join(', ')}`);
+  }
+  await page.setViewportSize({ width: 1460, height: 960 });
+  await page.waitForTimeout(200);
   await lightThemeButton.click();
   await page.waitForTimeout(500);
   if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'light' ||
