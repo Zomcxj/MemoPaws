@@ -3,9 +3,9 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(220px, 300px) 1fr;
-  gap: 8px;
+  gap: var(--space-8);
   overflow: hidden;
-  padding: 8px 12px 12px;
+  padding: var(--space-8) var(--space-12) var(--space-12);
   background: var(--bg-primary);
   box-sizing: border-box;
   border: none;
@@ -16,15 +16,15 @@
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-12);
   background: var(--bg-panel);
 }
 
 .memo-rail {
   display: flex;
   flex-direction: column;
-  padding: 8px;
-  gap: 6px;
+  padding: var(--space-8);
+  gap: var(--space-6);
 }
 
 .memo-rail-header {
@@ -34,22 +34,22 @@
 .memo-rail-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .memo-rail-buttons button {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: var(--space-5);
   height: 28px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--bg-neutral-button);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
-  padding: 4px 12px;
+  font-size: var(--font-size-13);
+  padding: var(--space-4) var(--space-12);
 }
 
 .memo-rail-buttons .danger {
@@ -63,12 +63,12 @@
 .memo-search {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-7);
   margin: 0;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--bg-input);
   color: var(--text-muted);
 }
@@ -80,14 +80,14 @@
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--font-size-12);
 }
 
 .memo-count {
   order: 3;
-  padding: 2px 4px;
+  padding: var(--space-2) var(--space-4);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-11);
 }
 
 .memo-list {
@@ -97,16 +97,16 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .memo-list-item {
   width: 100%;
   display: grid;
-  gap: 2px;
-  padding: 8px;
+  gap: var(--space-2);
+  padding: var(--space-8);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   text-align: left;
   background: transparent;
   color: var(--text-primary);
@@ -130,21 +130,21 @@
 }
 
 .memo-list-item strong {
-  font-size: 13px;
+  font-size: var(--font-size-13);
 }
 
 .memo-list-item span {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-12);
 }
 
 .memo-list-item small {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-11);
 }
 
 .memo-state {
-  padding: 36px 18px;
+  padding: var(--space-36) var(--space-18);
   color: var(--text-secondary);
   text-align: center;
   line-height: 1.6;
@@ -158,8 +158,8 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  padding: 12px;
-  gap: 8px;
+  padding: var(--space-12);
+  gap: var(--space-8);
 }
 
 .memo-mode.seg-control,
@@ -169,17 +169,17 @@
 
 .memo-error button {
   border: 0;
-  border-radius: 8px;
-  padding: 4px 10px;
+  border-radius: var(--radius-8);
+  padding: var(--space-4) var(--space-10);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-13);
 }
 
 .memo-editor-head {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
   padding: 0;
 }
 
@@ -190,20 +190,20 @@
   outline: 0;
   background: transparent;
   color: var(--accent);
-  font-size: 18px;
+  font-size: var(--font-size-18);
   font-weight: 700;
-  padding: 6px 4px;
+  padding: var(--space-6) var(--space-4);
 }
 
 .memo-tags-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .memo-tags-row > span {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-11);
   white-space: nowrap;
 }
 
@@ -212,25 +212,25 @@
   min-width: 0;
   height: 24px;
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   outline: 0;
   background: var(--bg-input);
   color: var(--text-primary);
-  padding: 0 6px;
-  font-size: 11px;
+  padding: 0 var(--space-6);
+  font-size: var(--font-size-11);
 }
 
 .memo-editor-head > span {
   color: var(--text-muted);
-  font-size: 11px;
-  padding: 0 4px;
+  font-size: var(--font-size-11);
+  padding: 0 var(--space-4);
 }
 
 .memo-content {
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 4px;
+  gap: var(--space-4);
   background: transparent;
 }
 
@@ -241,9 +241,9 @@
   flex: 1;
   width: auto;
   margin: 0;
-  padding: 8px;
+  padding: var(--space-8);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   outline: 0;
   resize: none;
   overflow: auto;
@@ -278,33 +278,33 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-10);
   min-height: 34px;
   padding: 0;
   border-top: none;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-11);
 }
 
 .memo-footer-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .memo-save {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-5);
   height: 32px;
   border: 0;
-  border-radius: 8px;
-  padding: 6px 14px;
+  border-radius: var(--radius-8);
+  padding: var(--space-6) var(--space-14);
   background: var(--accent);
   color: var(--accent-contrast);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-500);
 }
 
 .memo-save img {
@@ -326,11 +326,11 @@
   transform: translateX(-50%);
   max-width: 80%;
   display: flex;
-  gap: 16px;
+  gap: var(--space-16);
   align-items: center;
-  padding: 10px 14px;
+  padding: var(--space-10) var(--space-14);
   border: 1px solid var(--error);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--bg-panel);
   color: var(--error);
 }
@@ -350,7 +350,7 @@
 }
 
 .memo-blank h2 {
-  margin-bottom: 7px;
+  margin-bottom: var(--space-7);
   color: var(--text-primary);
 }
 

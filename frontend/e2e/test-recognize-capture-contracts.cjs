@@ -112,7 +112,7 @@ assert.match(overlaySource, /RESULT_WINDOW_GAP = 16/);
 assert.match(overlaySource, /ocrText/);
 assert.match(overlaySource, /translation/);
 assert.ok(!overlaySource.includes("capture-overlay-bar"), "the capsule action bar must be removed");
-assert.match(overlayCss, /\.capture-overlay-action \{[\s\S]*?width: 28px[\s\S]*?height: 28px[\s\S]*?border-radius: 3px/);
+assert.match(overlayCss, /\.capture-overlay-action \{[\s\S]*?width: 28px[\s\S]*?height: 28px[\s\S]*?border-radius: var\(--radius-3\)/);
 assert.match(overlayCss, /\.capture-overlay-action--label \{[\s\S]*?width: auto[\s\S]*?min-width: 48px/, "localized screenshot actions must have room for full labels");
 assert.match(overlayCss, /min-width: 450px/);
 assert.match(overlayCss, /min-height: 533px/);

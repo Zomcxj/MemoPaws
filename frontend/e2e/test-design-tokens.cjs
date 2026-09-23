@@ -93,6 +93,14 @@ async function runTests() {
   if (nonExempt) throw new Error(`Unexpected hardcoded colors remain:\n${nonExempt}`);
   console.log('  ✓ page colors migrated');
 
+  // Page styles must reference scale tokens (no raw px in spacing/radius/type declarations).
+  const raw = execSync(
+    `grep -nE '(padding|margin|gap|border-radius|font-size)[^;]*: *[0-9]+px' frontend/src/pages/*.css frontend/src/components/CaptureOverlay.css || true`,
+    { cwd: path.join(__dirname, '..', '..'), encoding: 'utf-8', shell: 'bash' }
+  ).trim();
+  if (raw) throw new Error(`Raw px spacing/radius/type remain in pages:\n${raw}`);
+  console.log('  ✓ page scale tokens applied');
+
   await browser.close();
   console.log('\nAll design token tests passed!');
 }
