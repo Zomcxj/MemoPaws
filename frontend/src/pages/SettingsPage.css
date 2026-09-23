@@ -3,8 +3,8 @@
   min-height: 0;
   overflow: auto;
   display: grid;
-  gap: 16px;
-  padding: 8px 12px 32px;
+  gap: var(--space-16);
+  padding: var(--space-8) var(--space-12) var(--space-32);
   color: var(--text-primary);
   box-sizing: border-box;
   align-content: start;
@@ -12,8 +12,8 @@
 
 .settings-page button {
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 9px 13px;
+  border-radius: var(--radius-8);
+  padding: var(--space-9) var(--space-13);
   background: var(--bg-neutral-button);
   color: var(--text-primary);
   cursor: pointer;
@@ -34,10 +34,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: var(--space-12);
+  padding: var(--space-10) var(--space-14);
   border: 1px solid var(--accent);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   color: var(--accent);
   background: var(--bg-panel);
 }
@@ -49,17 +49,17 @@
 
 .settings-group {
   display: grid;
-  gap: 10px;
-  padding: 16px;
+  gap: var(--space-10);
+  padding: var(--space-16);
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-12);
   background: var(--bg-panel);
 }
 
 .settings-group h2 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--font-size-16);
+  font-weight: var(--font-weight-600);
   line-height: 24px;
 }
 
@@ -67,7 +67,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: var(--space-14);
   min-width: 0;
 }
 
@@ -75,7 +75,7 @@
   display: grid;
   grid-template-columns: 90px minmax(0, 1fr);
   align-items: center;
-  gap: 0 12px;
+  gap: 0 var(--space-12);
   min-width: 0;
   width: 100%;
 }
@@ -88,7 +88,7 @@
 .settings-field > span,
 .settings-shortcut > span {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-13);
   white-space: nowrap;
 }
 
@@ -100,7 +100,7 @@
 .settings-field small,
 .settings-hint {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-12);
   line-height: 1.4;
 }
 
@@ -115,19 +115,19 @@
   width: 100%;
   height: 42px;
   box-sizing: border-box;
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   outline: none;
   background: var(--bg-input);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--font-size-13);
 }
 
 .settings-field input[type="number"] {
   width: 60px;
   height: 28px;
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   justify-self: start;
 }
 
@@ -143,20 +143,20 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
 }
 
 .settings-actions button {
   border: none;
-  border-radius: 8px;
-  padding: 4px 12px;
+  border-radius: var(--radius-8);
+  padding: var(--space-4) var(--space-12);
   min-width: 80px;
   height: 32px;
   background: var(--accent);
   color: var(--accent-contrast);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
 }
 
 .settings-actions button:hover {
@@ -166,11 +166,11 @@
 .settings-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .settings-api-status {
-  font-size: 12px;
+  font-size: var(--font-size-12);
   color: var(--error);
 }
 
@@ -184,7 +184,7 @@
 
 .settings-directory {
   display: flex;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
   width: 100%;
 }
@@ -192,23 +192,23 @@
 .settings-directory input {
   flex: 1 1 auto;
   height: 28px;
-  font-size: 12px;
-  border-radius: 6px;
+  font-size: var(--font-size-12);
+  border-radius: var(--radius-6);
 }
 
 .settings-directory button {
   flex: 0 0 88px;
   height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
-  font-size: 11px;
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-6);
+  font-size: var(--font-size-11);
   color: var(--text-secondary);
 }
 
 .settings-shortcut {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
 }
 
@@ -221,17 +221,17 @@
   flex: 0 0 160px;
   width: 160px;
   height: 28px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 6px;
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-600);
+  border-radius: var(--radius-6);
 }
 
 .settings-shortcut button {
   flex: 0 0 auto;
   height: 28px;
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: 6px;
+  padding: var(--space-4) var(--space-10);
+  font-size: var(--font-size-11);
+  border-radius: var(--radius-6);
   color: var(--text-secondary);
 }
 
@@ -243,7 +243,7 @@
   display: grid;
   grid-template-columns: minmax(120px, .35fr) minmax(0, 1fr) auto;
   align-items: start;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .settings-replacement-form input,
@@ -252,12 +252,12 @@
   box-sizing: border-box;
   width: 100%;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: var(--radius-8);
+  padding: var(--space-8) var(--space-10);
   background: var(--bg-input);
   color: var(--text-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-13);
 }
 
 .settings-replacement-form textarea {
@@ -274,30 +274,30 @@
 .settings-replacement-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   flex-wrap: wrap;
 }
 
 .settings-replacement-actions button {
   min-height: 32px;
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: var(--space-6) var(--space-10);
+  font-size: var(--font-size-12);
 }
 
 .settings-replacement-list {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .settings-replacement-row {
   display: grid;
   grid-template-columns: minmax(80px, .3fr) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--bg-input);
 }
 
@@ -306,7 +306,7 @@
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-12);
 }
 
 .settings-replacement-row code {
@@ -314,7 +314,7 @@
 }
 
 @media (max-width: 620px) {
-  .settings-page { padding-inline: 8px; }
+  .settings-page { padding-inline: var(--space-8); }
   .settings-field,
   .settings-field.is-inline {
     grid-template-columns: 1fr;

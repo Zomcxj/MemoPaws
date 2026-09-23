@@ -23,11 +23,11 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 2;
-  padding: 6px 12px;
-  border-radius: 8px;
+  padding: var(--space-6) var(--space-12);
+  border-radius: var(--radius-8);
   background: rgba(0, 0, 0, 0.7);
   color: #fff;
-  font-size: 12px;
+  font-size: var(--font-size-12);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -96,11 +96,11 @@
   z-index: 3;
   transform: translateY(-100%);
   margin-top: -6px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: var(--space-2) var(--space-6);
+  border-radius: var(--radius-4);
   background: rgba(0, 0, 0, 0.75);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--font-size-11);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -108,7 +108,7 @@
 /* Flipped below the selection when the tag would clip the viewport top. */
 .capture-overlay-size.is-below {
   transform: none;
-  margin-top: 6px;
+  margin-top: var(--space-6);
 }
 
 .capture-overlay-magnifier {
@@ -117,7 +117,7 @@
   display: grid;
   gap: 0;
   border: 1px solid rgba(255, 255, 255, 0.55);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   overflow: hidden;
   background: rgba(0, 0, 0, 0.75);
   pointer-events: none;
@@ -131,10 +131,10 @@
 .capture-overlay-color {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-6);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--font-size-11);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -143,7 +143,7 @@
   width: 12px;
   height: 12px;
   border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 3px;
+  border-radius: var(--radius-3);
   flex-shrink: 0;
 }
 
@@ -165,7 +165,7 @@
   z-index: 5;
   display: flex;
   max-width: calc(100vw - 8px);
-  gap: 6px;
+  gap: var(--space-6);
   flex-wrap: wrap;
   background: transparent;
 }
@@ -182,7 +182,7 @@
   overflow: hidden;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.45);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: rgba(20, 20, 20, 0.94);
   color: #fff;
   box-shadow: 0 0 24px rgba(77, 163, 255, 0.35);
@@ -208,12 +208,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
   min-height: 30px;
   box-sizing: border-box;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-600);
   color: rgba(255, 255, 255, 0.75);
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   cursor: move;
@@ -225,14 +225,14 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px 0;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-12) 0;
 }
 
 .capture-result-section h3 {
   margin: 0;
   color: rgba(255, 255, 255, 0.75);
-  font-size: 12px;
+  font-size: var(--font-size-12);
 }
 
 .capture-result-section textarea {
@@ -242,23 +242,23 @@
   box-sizing: border-box;
   resize: none;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
-  padding: 8px;
+  border-radius: var(--radius-3);
+  padding: var(--space-8);
   background: rgba(0, 0, 0, 0.2);
   color: #fff;
   font: 12px/1.6 inherit;
 }
 
 .capture-result-error {
-  margin: 8px 12px 0;
+  margin: var(--space-8) var(--space-12) 0;
   color: #ff9b9b;
-  font-size: 12px;
+  font-size: var(--font-size-12);
 }
 
 .capture-result-actions {
   display: flex;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: var(--space-6);
+  padding: var(--space-10) var(--space-12);
 }
 
 .capture-overlay-action {
@@ -266,7 +266,7 @@
   height: 28px;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, .55);
-  border-radius: 3px;
+  border-radius: var(--radius-3);
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
   cursor: pointer;
@@ -276,7 +276,7 @@
 .capture-overlay-action--label {
   width: auto;
   min-width: 48px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   white-space: nowrap;
 }
 
