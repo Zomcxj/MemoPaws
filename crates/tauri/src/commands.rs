@@ -204,8 +204,8 @@ pub fn list_displays() -> Result<Vec<DisplayInfo>, String> {
 
 fn validate_theme(theme: &str) -> Result<&str, String> {
     match theme {
-        "dark" | "light" => Ok(theme),
-        _ => Err("theme must be dark or light".to_string()),
+        "dark" | "light" | "auto" => Ok(theme),
+        _ => Err("theme must be dark, light or auto".to_string()),
     }
 }
 
@@ -221,6 +221,7 @@ fn get_theme_from(path: &std::path::Path) -> Result<String, String> {
     Ok(match theme.as_deref() {
         Some("light") => "light".to_string(),
         Some("dark") => "dark".to_string(),
+        Some("auto") => "auto".to_string(),
         _ => "dark".to_string(),
     })
 }
@@ -267,7 +268,7 @@ fn set_theme_at(path: &std::path::Path, theme: &str) -> Result<(), String> {
 }
 
 fn normalize_theme(config: &mut memopaws_config::config::AppConfig) {
-    if !matches!(config.theme.as_deref(), Some("dark") | Some("light")) {
+    if !matches!(config.theme.as_deref(), Some("dark") | Some("light") | Some("auto")) {
         config.theme = Some("dark".to_string());
     }
 }
@@ -1678,6 +1679,57 @@ mod tests {
     }
 
     #[test]
+    fn validate_theme_accepts_auto_and_rejects_other_modes() {
+        assert_eq!(super::validate_theme("auto").unwrap(), "auto");
+        assert!(super::validate_theme("system").is_err());
+        assert!(super::validate_theme("AUTO").is_err());
+    }
+
+    #[test]
+    fn get_theme_from_preserves_auto_and_falls_back_to_dark() {
+        let dir = std::env::temp_dir().join(format!(
+            "memopaws-theme-auto-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let auto_path = dir.join("auto.json");
+        std::fs::write(&auto_path, r#"{"theme":"auto"}"#).unwrap();
+        assert_eq!(super::get_theme_from(&auto_path).unwrap(), "auto");
+
+        let unknown_path = dir.join("unknown.json");
+        std::fs::write(&unknown_path, r#"{"theme":"blue"}"#).unwrap();
+        assert_eq!(super::get_theme_from(&unknown_path).unwrap(), "dark");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn normalize_theme_keeps_auto_and_resets_unknown() {
+        let dir = std::env::temp_dir().join(format!(
+            "memopaws-theme-normalize-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let auto_path = dir.join("auto.json");
+        std::fs::write(&auto_path, r#"{"theme":"auto"}"#).unwrap();
+        let mut auto_config =
+            memopaws_config::config::AppConfig::load_from(&auto_path).unwrap();
+        super::normalize_theme(&mut auto_config);
+        assert_eq!(auto_config.theme.as_deref(), Some("auto"));
+
+        let unknown_path = dir.join("unknown.json");
+        std::fs::write(&unknown_path, r#"{"theme":"blue"}"#).unwrap();
+        let mut unknown_config =
+            memopaws_config::config::AppConfig::load_from(&unknown_path).unwrap();
+        super::normalize_theme(&mut unknown_config);
+        assert_eq!(unknown_config.theme.as_deref(), Some("dark"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn public_set_theme_validation_rejects_before_config_load_or_save() {
         // Boundary: this pure request validation is the first operation in set_theme;
         // invalid input cannot resolve, load, or save the real config path.
@@ -1691,7 +1743,7 @@ mod tests {
         );
         assert_eq!(
             super::validate_set_theme_request("blue".to_string()).unwrap_err(),
-            "theme must be dark or light"
+            "theme must be dark, light or auto"
         );
     }
 
