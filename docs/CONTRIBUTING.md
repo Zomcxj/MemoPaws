@@ -85,6 +85,7 @@ node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-clipboard-layout.cjs
 node frontend/e2e/test-key-interaction-refinement.cjs
 node frontend/e2e/test-final-review-fixes.cjs
+node frontend/e2e/test-design-tokens.cjs
 node frontend/e2e/test-memo-preview-contracts.cjs
 node frontend/e2e/test-recognize-capture-contracts.cjs
 node frontend/e2e/test-window-acl-and-sidebar.cjs
@@ -123,6 +124,7 @@ node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-clipboard-layout.cjs
 node frontend/e2e/test-key-interaction-refinement.cjs
 node frontend/e2e/test-final-review-fixes.cjs
+node frontend/e2e/test-design-tokens.cjs
 node frontend/e2e/test-memo-preview-contracts.cjs
 node frontend/e2e/test-recognize-capture-contracts.cjs
 node frontend/e2e/test-window-acl-and-sidebar.cjs
