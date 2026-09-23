@@ -27,7 +27,7 @@
 .settings-save {
   border-color: var(--accent) !important;
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
 }
 
 .settings-message {
@@ -154,7 +154,7 @@
   min-width: 80px;
   height: 32px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 13px;
   font-weight: 600;
 }
@@ -175,7 +175,7 @@
 }
 
 .settings-api-status.is-success {
-  color: #2ecc71;
+  color: var(--success);
 }
 
 .settings-api-status.is-pending {

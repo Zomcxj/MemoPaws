@@ -1,3 +1,4 @@
+/* 豁免：本文件为媒体上层（over-media）表面，遮罩/选框/手柄/结果面板需与主题无关地保持高对比；仅圆角/间距/字号消费 token。 */
 .capture-overlay {
   position: fixed;
   inset: 0;

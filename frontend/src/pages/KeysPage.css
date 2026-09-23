@@ -29,7 +29,7 @@
 .keys-page button.primary {
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 600;
 }
 
@@ -194,8 +194,8 @@
   justify-self: end;
 }
 
-.key-latency.is-good { color: #3d9a5f; }
-.key-latency.is-mid { color: #c9a227; }
+.key-latency.is-good { color: var(--success); }
+.key-latency.is-mid { color: var(--warning); }
 .key-latency.is-bad { color: var(--error); }
 
 .key-badges {
@@ -293,7 +293,7 @@
   width: 100%;
   margin-top: 12px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
 }
 
@@ -304,7 +304,7 @@
 }
 
 .key-latency.is-testing {
-  color: #3d9a5f;
+  color: var(--success);
   font-family: "Cascadia Code", Consolas, monospace;
   letter-spacing: .08em;
 }
@@ -316,7 +316,7 @@
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgba(5, 10, 25, 0.5);
+  background: var(--scrim);
 }
 
 .keys-dialog,
