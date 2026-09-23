@@ -322,7 +322,7 @@
   .settings-field > span {
     width: auto;
   }
-  .settings-segmented { width: 162px; }
+  .settings-segmented { width: 242px; }
   .settings-shortcut { flex-wrap: wrap; }
   .settings-shortcut > span { flex-basis: 100%; width: auto; }
   .settings-shortcut input { flex: 1 1 auto; width: auto; }
