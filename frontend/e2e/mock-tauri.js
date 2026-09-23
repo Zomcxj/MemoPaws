@@ -4,7 +4,7 @@
 (function() {
   const MOCK_THEME_KEY = "memopaws-mock-backend-theme";
   const storedTheme = sessionStorage.getItem(MOCK_THEME_KEY);
-  let backendTheme = storedTheme === "light" || storedTheme === "dark" ? storedTheme : "dark";
+  let backendTheme = storedTheme === "light" || storedTheme === "dark" || storedTheme === "auto" ? storedTheme : "dark";
   const themeCalls = [];
   const commandCalls = [];
   const windowCalls = [];
@@ -59,7 +59,7 @@
         } else if (command === "set_theme") {
           const nextTheme = args && args.theme;
           themeCalls.push(nextTheme);
-          if (nextTheme === "light" || nextTheme === "dark") {
+          if (nextTheme === "light" || nextTheme === "dark" || nextTheme === "auto") {
             backendTheme = nextTheme;
             sessionStorage.setItem(MOCK_THEME_KEY, backendTheme);
           }

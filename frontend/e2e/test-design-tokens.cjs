@@ -101,6 +101,29 @@ async function runTests() {
   if (raw) throw new Error(`Raw px spacing/radius/type remain in pages:\n${raw}`);
   console.log('  ✓ page scale tokens applied');
 
+  // Auto mode follows the OS color scheme and reacts to live changes.
+  await page.evaluate(() => sessionStorage.setItem('memopaws-mock-backend-theme', 'auto'));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(500);
+  if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'dark') {
+    throw new Error('Expected auto mode to resolve to dark under dark color scheme');
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.waitForTimeout(300);
+  if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'light') {
+    throw new Error('Expected auto mode to follow live color scheme change to light');
+  }
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(300);
+  if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'dark') {
+    throw new Error('Expected auto mode to follow live color scheme change back to dark');
+  }
+  if (await page.evaluate(() => localStorage.getItem('memopaws-theme')) !== 'auto') {
+    throw new Error('Expected localStorage to persist auto mode');
+  }
+  console.log('  ✓ auto theme mode follows system scheme');
+
   await browser.close();
   console.log('\nAll design token tests passed!');
 }
