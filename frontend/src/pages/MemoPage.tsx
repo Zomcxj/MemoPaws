@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { SegmentedControl } from "../components/SegmentedControl";
 import type { Lang } from "../i18n/lang";
-import { useTheme } from "../hooks/useTheme";
+import type { Theme } from "../hooks/useTheme";
 import "./MemoPage.css";
 
 interface Memo {
@@ -121,11 +121,11 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 interface MemoPageProps {
   language?: Lang;
   onDirtyChange?: (dirty: boolean) => void;
+  renderTheme: Theme;
 }
 
-export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
+export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPageProps) {
   const t = copy[language];
-  const { theme } = useTheme();
   const [memos, setMemos] = useState<Memo[]>([]);
   const [selected, setSelected] = useState<Memo | null>(null);
   const [query, setQuery] = useState("");
@@ -196,7 +196,7 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
     // Keep previous HTML while re-rendering to avoid flash (Python debounce behavior).
     if (!preview) setPreviewLoading(true);
     const timer = window.setTimeout(() => {
-      const cacheKey = JSON.stringify({ content: selected.content, theme, scale: previewScale });
+      const cacheKey = JSON.stringify({ content: selected.content, theme: renderTheme, scale: previewScale });
       const cached = previewCache.current.get(cacheKey);
       if (cached !== undefined) {
         if (active && token === renderToken.current) {
@@ -205,7 +205,7 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
         }
         return;
       }
-      invoke<string>("memo_render", { content: selected.content, theme })
+      invoke<string>("memo_render", { content: selected.content, theme: renderTheme })
         .then((html) => {
           previewCache.current.set(cacheKey, html);
           if (previewCache.current.size > PREVIEW_CACHE_MAX) {
@@ -225,7 +225,7 @@ export function MemoPage({ language = "zh", onDirtyChange }: MemoPageProps) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [mode, selected?.content, selected?.id, previewScale, theme]);
+  }, [mode, selected?.content, selected?.id, previewScale, renderTheme]);
 
   const visibleMemos: SearchResult[] = query.trim()
     ? (searchResults ?? [])

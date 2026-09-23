@@ -112,7 +112,7 @@ async function runTests() {
     console.log(`Screenshot: ${num}-${name}.png`);
   }
 
-  // Settings owns the only theme control: exactly two mutually exclusive buttons.
+  // Settings owns the only theme control: exactly three mutually exclusive buttons.
   const settingsBtn = page.locator('.sidebar-item:has-text("设置")');
   if (await settingsBtn.count() !== 1) {
     throw new Error(`Expected exactly one Settings navigation button, found ${await settingsBtn.count()}`);
@@ -124,8 +124,8 @@ async function runTests() {
     throw new Error(`Expected exactly one Settings theme control, found ${await themeGroup.count()}`);
   }
   const themeButtons = themeGroup.locator('button');
-  if (await themeButtons.count() !== 2) {
-    throw new Error(`Expected exactly two Settings theme buttons, found ${await themeButtons.count()}`);
+  if (await themeButtons.count() !== 3) {
+    throw new Error(`Expected exactly three Settings theme buttons, found ${await themeButtons.count()}`);
   }
   const lightThemeBtn = themeButtons.filter({ hasText: '亮色' });
   const darkThemeBtn = themeButtons.filter({ hasText: '暗色' });

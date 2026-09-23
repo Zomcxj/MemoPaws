@@ -20,8 +20,8 @@ assert.match(memoPage, /event\.preventDefault\(\)/,
   "Ctrl+wheel must prevent the preview page from scrolling");
 assert.match(memoPage, /selected\.content[\s\S]*theme[\s\S]*previewScale/,
   "preview cache keys must include content, theme, and scale");
-assert.match(memoPage, /const \{ theme \} = useTheme\(\)/, "memo preview must derive application theme reactively");
-assert.match(memoPage, /\[mode, selected\?\.content, selected\?\.id, previewScale, theme\]/, "theme changes must rerun preview rendering");
+assert.match(memoPage, /renderTheme/, "memo preview must derive application theme reactively");
+assert.match(memoPage, /\[mode, selected\?\.content, selected\?\.id, previewScale, renderTheme\]/, "theme changes must rerun preview rendering");
 assert.match(memoPage, /new Map<string, string>\(\)/,
   "rendered preview HTML must be cached in memory");
 assert.match(memoPage, /PREVIEW_CACHE_MAX\s*=\s*50/,

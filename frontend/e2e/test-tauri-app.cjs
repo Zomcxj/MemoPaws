@@ -102,12 +102,13 @@ async function runTests() {
     await assertCanonicalPage('设置');
 
     const themeGroup = page.locator('.settings-segmented[role="group"]');
-    if (await themeGroup.count() !== 1 || await themeGroup.locator('button').count() !== 2) {
-      throw new Error('Expected exactly one Settings theme control with two buttons');
+    if (await themeGroup.count() !== 1 || await themeGroup.locator('button').count() !== 3) {
+      throw new Error('Expected exactly one Settings theme control with three buttons');
     }
     const light = themeGroup.locator('button').filter({ hasText: '亮色' });
     const dark = themeGroup.locator('button').filter({ hasText: '暗色' });
-    if (await light.count() !== 1 || await dark.count() !== 1) throw new Error('Settings theme buttons 亮色 and 暗色 are required');
+    const auto = themeGroup.locator('button').filter({ hasText: '跟随系统' });
+    if (await light.count() !== 1 || await dark.count() !== 1 || await auto.count() !== 1) throw new Error('Settings theme buttons 亮色, 暗色 and 跟随系统 are required');
     if (await page.locator('.sidebar-footer .sidebar-item').count() !== 0) throw new Error('Expected no Sidebar theme button');
 
     await light.click();
