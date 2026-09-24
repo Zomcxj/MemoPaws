@@ -92,6 +92,7 @@ async function runTests() {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+    // A blank Chromium page is not a native-app test, so CDP is mandatory.
     if (!browser) {
       throw new Error(`Native Tauri/CDP runtime unavailable on ${CDP_URL}; no UI actions were run: ${lastCdpError.message}`);
     }
@@ -123,7 +124,7 @@ async function runTests() {
       await page.screenshot({ path: path.join(SCREENSHOTS_DIR, `${String(i + 2).padStart(2, '0')}-${name}.png`), fullPage: false });
     }
 
-    // Settings owns the only theme control: exactly two mutually exclusive buttons.
+    // Settings owns the only theme control: exactly three mutually exclusive buttons.
     const settingsButton = page.locator('.sidebar-item').filter({ hasText: '设置' });
     if (await settingsButton.count() !== 1) throw new Error('Expected exactly one Settings navigation button');
     await settingsButton.click();

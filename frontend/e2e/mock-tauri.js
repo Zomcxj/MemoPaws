@@ -95,6 +95,9 @@
           resolve(Boolean(args && args.path && String(args.path).includes("conflict")));
         } else if (command === "migrate_data_dir") {
           runtimeUpdates.push({ command: command, mode: args && args.mode }); resolve({ migrated: true, restart_required: true });
+        } else if (command === "memo_render") {
+          // Echo the requested theme so tests can observe which theme rendered.
+          resolve("<p class=\"memo-render-theme\">" + String(args && args.theme) + "</p>" + MOCK_DATA.memo_render);
         } else if (command in MOCK_DATA) {
           resolve(MOCK_DATA[command]);
         } else if (command === "memo_create") {

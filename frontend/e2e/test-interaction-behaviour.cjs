@@ -157,6 +157,15 @@ async function speedTestChecks(browser) {
 async function memoChecks(browser) {
   const { context, page } = await open(browser, '备忘录');
   try {
+    // Preview rendering must follow the resolved theme, so select auto mode
+    // before opening the memo and flip the OS scheme while the preview is up.
+    await page.locator('.sidebar-item:has-text("设置")').click();
+    await page.waitForTimeout(300);
+    await page.locator('.settings-segmented button:has-text("跟随系统")').click();
+    await page.waitForTimeout(300);
+    await page.locator('.sidebar-item:has-text("备忘录")').click();
+    await page.waitForTimeout(400);
+
     await page.locator('.memo-page').getByText('Test Memo').first().click();
     await page.waitForTimeout(300);
     // The default view mode is edit; the preview is only mounted in preview/split.
@@ -167,6 +176,17 @@ async function memoChecks(browser) {
       console.log('  memo preview not mounted in this mode, skipped');
       return;
     }
+
+    // Preview rendering must follow the resolved theme: in auto mode a live OS
+    // scheme change has to re-render the preview with the new theme.
+    const readRenderedTheme = () => page.locator('.memo-preview .memo-render-theme').first().textContent();
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.waitForTimeout(400);
+    assert.equal(await readRenderedTheme(), 'light', 'auto mode must render the preview with the light theme');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForTimeout(400);
+    assert.equal(await readRenderedTheme(), 'dark', 'auto mode must re-render the preview with the dark theme');
+    console.log('  memo preview follows the resolved theme: ok');
 
     // Ctrl+wheel zooms the preview and stays inside the supported range.
     const readScale = () => preview.evaluate(el =>
