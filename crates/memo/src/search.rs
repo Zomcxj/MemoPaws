@@ -3,6 +3,13 @@ use serde::Serialize;
 
 use crate::model::Memo;
 
+/// Minimum Levenshtein similarity for a fuzzy word match.
+const FUZZY_THRESHOLD: f64 = 0.8;
+
+/// Keywords shorter than this skip fuzzy matching, where a single edit would
+/// otherwise match almost anything.
+const FUZZY_MIN_CHARS: usize = 4;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct MemoSearchResult {
     pub memo: Memo,
@@ -24,7 +31,7 @@ fn match_memo(memo: &Memo, keyword: &str) -> Option<MemoSearchResult> {
             return Some(MemoSearchResult { memo: memo.clone(), line_number: matching_line(memo, keyword) });
         }
     }
-    if keyword.chars().count() >= 4 && fields.flat_map(words).any(|word| strsim::normalized_levenshtein(keyword, &word) >= 0.8) {
+    if keyword.chars().count() >= FUZZY_MIN_CHARS && fields.flat_map(words).any(|word| strsim::normalized_levenshtein(keyword, &word) >= FUZZY_THRESHOLD) {
         return Some(MemoSearchResult { memo: memo.clone(), line_number: matching_line(memo, keyword) });
     }
     None
@@ -51,6 +58,6 @@ fn field_matches(field: &str, keyword: &str) -> bool {
     let lowered = field.to_lowercase();
     lowered.contains(keyword)
         || pinyin_initials(field).contains(keyword)
-        || (keyword.chars().count() >= 4
-            && words(&lowered).any(|word| strsim::normalized_levenshtein(keyword, &word) >= 0.8))
+        || (keyword.chars().count() >= FUZZY_MIN_CHARS
+            && words(&lowered).any(|word| strsim::normalized_levenshtein(keyword, &word) >= FUZZY_THRESHOLD))
 }

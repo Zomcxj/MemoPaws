@@ -1,6 +1,6 @@
 [package]
 name = "memopaws-memo"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 
 [dependencies]
@@ -12,5 +12,8 @@ syntect = "5"
 pinyin = "0.10"
 strsim = "0.11"
 
+# Pinned to match `memopaws-tauri`: 0.60 turned the Win32 handle types into
+# non-nullable newtypes, which the keyboard hook there depends on. Only
+# `MoveFileExW` and its flags are used here, and those are identical in 0.59.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }

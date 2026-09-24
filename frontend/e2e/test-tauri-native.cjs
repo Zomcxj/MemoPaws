@@ -1,15 +1,34 @@
-// Playwright E2E test: Tauri app native runtime over CDP.
+// Playwright E2E test: the built Tauri app driven over its native WebView2 CDP.
+//
+// Parameterised so several instances can run without colliding. Each run needs
+// its own CDP port, MEMOPAWS_HOME and WebView2 user-data folder, otherwise the
+// second app attaches to the first one's debugger and profile:
+//
+//   node e2e/test-tauri-native.cjs                      # defaults (label "app", port 9222)
+//   node e2e/test-tauri-native.cjs --label=driver --port=9223
+//
+// `MEMOPAWS_HOME` is what keeps the real `%USERPROFILE%\.memopaws` untouched;
+// `dirs::home_dir()` reads the Win32 known-folder API, so overriding
+// HOME/USERPROFILE alone is not enough.
 
 const { chromium } = require('playwright');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const SCREENSHOTS_DIR = path.join(__dirname, 'screenshots', 'tauri');
-const TEST_HOME = path.join(__dirname, '.tauri-test-home-app');
-const WEBVIEW_DATA = path.join(TEST_HOME, 'webview-app');
-const CDP_URL = process.env.TAURI_CDP_URL || 'http://localhost:9222';
-const CDP_PORT = new URL(CDP_URL).port || '9222';
+function argValue(name, fallback) {
+  const prefix = `--${name}=`;
+  const hit = process.argv.slice(2).find(arg => arg.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : fallback;
+}
+
+const LABEL = argValue('label', process.env.TAURI_TEST_LABEL || 'app');
+const CDP_PORT = argValue('port', process.env.TAURI_CDP_PORT || '9222');
+const CDP_URL = process.env.TAURI_CDP_URL || `http://localhost:${CDP_PORT}`;
+const SCREENSHOTS_DIR = path.join(__dirname, 'screenshots', `tauri-${LABEL}`);
+const TEST_HOME = path.join(__dirname, `.tauri-test-home-${LABEL}`);
+const WEBVIEW_DATA = path.join(TEST_HOME, `webview-${LABEL}`);
+
 const DESTINATIONS = {
   '识别': '.recognize-page',
   '备忘录': '.memo-page',
@@ -26,14 +45,14 @@ const PAGES = [
 ];
 
 function findTauriExe() {
-  const possiblePaths = [
+  const candidates = [
     path.join(__dirname, '..', '..', 'target', 'release', 'memopaws.exe'),
     path.join(__dirname, '..', '..', 'target', 'debug', 'memopaws.exe'),
     path.join(__dirname, '..', '..', 'crates', 'tauri', 'target', 'release', 'memopaws.exe'),
     path.join(__dirname, '..', '..', 'crates', 'tauri', 'target', 'debug', 'memopaws.exe'),
   ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
   }
   throw new Error('Native Tauri runtime unavailable: executable not found. Run cargo build -p memopaws-tauri --release');
 }
@@ -44,7 +63,7 @@ async function runTests() {
   fs.mkdirSync(TEST_HOME, { recursive: true });
 
   const tauriExe = findTauriExe();
-  console.log('Tauri executable:', tauriExe);
+  console.log(`[${LABEL}] Tauri executable:`, tauriExe);
   const tauriProcess = spawn(tauriExe, [], {
     stdio: 'pipe',
     detached: false,
@@ -62,7 +81,7 @@ async function runTests() {
   let browser;
 
   try {
-    console.log(`Launching Tauri app; waiting for native CDP at ${CDP_URL}...`);
+    console.log(`[${LABEL}] Launching Tauri app; waiting for native CDP at ${CDP_URL}...`);
     const cdpDeadline = Date.now() + 60000;
     let lastCdpError;
     while (!browser && Date.now() < cdpDeadline) {
@@ -73,6 +92,7 @@ async function runTests() {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+    // A blank Chromium page is not a native-app test, so CDP is mandatory.
     if (!browser) {
       throw new Error(`Native Tauri/CDP runtime unavailable on ${CDP_URL}; no UI actions were run: ${lastCdpError.message}`);
     }
@@ -104,6 +124,7 @@ async function runTests() {
       await page.screenshot({ path: path.join(SCREENSHOTS_DIR, `${String(i + 2).padStart(2, '0')}-${name}.png`), fullPage: false });
     }
 
+    // Settings owns the only theme control: exactly three mutually exclusive buttons.
     const settingsButton = page.locator('.sidebar-item').filter({ hasText: '设置' });
     if (await settingsButton.count() !== 1) throw new Error('Expected exactly one Settings navigation button');
     await settingsButton.click();
@@ -125,18 +146,22 @@ async function runTests() {
     if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'light' || await light.getAttribute('aria-pressed') !== 'true' || await dark.getAttribute('aria-pressed') !== 'false') {
       throw new Error('Light theme dataset/aria assertions failed');
     }
+    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, '07-theme-light.png'), fullPage: false });
+
     await dark.click();
     await page.waitForTimeout(500);
     if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'dark' || await dark.getAttribute('aria-pressed') !== 'true' || await light.getAttribute('aria-pressed') !== 'false') {
       throw new Error('Dark theme dataset/aria assertions failed');
     }
-    console.log('\nTauri app tests completed!');
+    console.log(`[${LABEL}] Native Tauri tests completed!`);
   } finally {
     try {
       if (browser) await browser.close();
     } finally {
       if (!tauriProcess.killed) {
         if (process.platform === 'win32') {
+          // /t /f kills the WebView2 child processes too, which otherwise keep
+          // the user-data folder locked and make the rmSync below fail.
           spawnSync('taskkill', ['/pid', String(tauriProcess.pid), '/t', '/f']);
         } else {
           tauriProcess.kill();
@@ -157,6 +182,6 @@ async function runTests() {
 }
 
 runTests().catch(err => {
-  console.error('Test failed:', err);
+  console.error(`[${LABEL}] Test failed:`, err);
   process.exit(1);
 });
