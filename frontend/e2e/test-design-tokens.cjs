@@ -65,6 +65,40 @@ async function runTests() {
   }
   console.log('  ✓ theme transition rule present');
 
+  // Theme switch must not kill the segmented-control indicator slide (regression:
+  // .theme-transitioning * !important replaced its transform transition).
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  await page.locator('.sidebar-item').filter({ hasText: '设置' }).click();
+  await page.waitForTimeout(300);
+  const themeGroup = page.locator('.settings-segmented');
+  await themeGroup.locator('button').filter({ hasText: '亮色' }).click();
+  const slideProbe = await page.evaluate(async () => {
+    const indicator = document.querySelector('.settings-segmented .seg-indicator');
+    const readX = () => {
+      const transform = getComputedStyle(indicator).transform;
+      const match = transform && transform !== 'none' ? transform.match(/matrix(?:3d)?\(([^)]+)\)/) : null;
+      if (!match) return null;
+      const parts = match[1].split(',').map(Number);
+      return transform.startsWith('matrix3d') ? parts[12] : parts[4];
+    };
+    const transitionProperty = getComputedStyle(indicator).transitionProperty;
+    const themeTransitioning = document.documentElement.classList.contains('theme-transitioning');
+    const distinct = new Set();
+    for (let i = 0; i < 12; i++) {
+      const value = readX();
+      if (value !== null) distinct.add(Math.round(value));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    return { distinct: [...distinct], transitionProperty, themeTransitioning };
+  });
+  if (!slideProbe.transitionProperty.includes('transform')) {
+    throw new Error(`Theme switch killed indicator transform transition: ${JSON.stringify(slideProbe)}`);
+  }
+  if (slideProbe.distinct.length < 3) {
+    throw new Error(`Expected intermediate indicator frames during theme switch, saw x=${JSON.stringify(slideProbe.distinct)}`);
+  }
+  console.log('  ✓ indicator slide survives theme switch');
+
   // Shared component token contract (computed values must be unchanged by tokenization).
   // .seg-control only exists on pages with a SegmentedControl, so navigate to Settings first.
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
