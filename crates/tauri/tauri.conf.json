@@ -1,6 +1,6 @@
 {
   "productName": "MemoPaws",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "identifier": "com.memopaws.rust",
   "build": {
     "beforeDevCommand": "npm --prefix ../frontend run dev",

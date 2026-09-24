@@ -2951,7 +2951,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-canvas"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "image",
  "memopaws-core",
@@ -2961,7 +2961,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-clipboard"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "arboard",
  "clipboard-win",
@@ -2973,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-config"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "memopaws-core",
  "serde",
@@ -2983,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "dirs 5.0.1",
  "serde",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-keys"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -3011,7 +3011,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-memo"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "memopaws-core",
  "pinyin",
@@ -3025,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-ocr"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -3041,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "memopaws-tauri"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "arboard",
  "base64 0.22.1",

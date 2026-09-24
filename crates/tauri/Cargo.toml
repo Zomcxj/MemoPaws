@@ -1,14 +1,14 @@
 [package]
 name = "memopaws-tauri"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 
 [package.metadata.tauri]
 bundle = { active = false }
 
 [package.metadata.tauri.winres]
-file-version = "0.0.2.0"
-product-version = "0.0.2.0"
+file-version = "0.0.3.0"
+product-version = "0.0.3.0"
 
 [lib]
 name = "memopaws_tauri"
