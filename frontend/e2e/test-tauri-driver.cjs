@@ -51,20 +51,26 @@ async function runTests() {
   let browser;
   try {
     console.log(`Launching Tauri app; waiting for native CDP at ${CDP_URL}...`);
-    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for app to start
-
+    const cdpDeadline = Date.now() + 60000;
+    let lastCdpError;
+    while (!browser && Date.now() < cdpDeadline) {
+      try {
+        browser = await chromium.connectOverCDP(CDP_URL);
+      } catch (err) {
+        lastCdpError = err;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
     // A blank Chromium page is not a native-app test, so CDP is mandatory.
-    try {
-      browser = await chromium.connectOverCDP(CDP_URL);
-    } catch (err) {
-      throw new Error(`Native Tauri/CDP runtime unavailable on ${CDP_URL}; native execution was not run: ${err.message}`);
+    if (!browser) {
+      throw new Error(`Native Tauri/CDP runtime unavailable on ${CDP_URL}; native execution was not run: ${lastCdpError.message}`);
     }
     console.log('Connected to native Tauri app via CDP');
 
     const context = browser.contexts()[0] || await browser.newContext({ viewport: { width: 1460, height: 960 } });
     const page = context.pages()[0] || await context.newPage();
 
-  await page.waitForTimeout(2000);
+  await page.waitForSelector('.recognize-page', { timeout: 60000 });
 
   const destinations = {
     '识别': '.recognize-page',
