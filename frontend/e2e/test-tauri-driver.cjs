@@ -42,6 +42,7 @@ async function runTests() {
       // WebView2 153 refuses to open the CDP port when USERPROFILE is redirected,
       // so native tests must not override it; MEMOPAWS_HOME keeps data isolated.
       MEMOPAWS_HOME: TEST_HOME,
+      MEMOPAWS_E2E_HIDDEN: '1',
       WEBVIEW2_USER_DATA_FOLDER: WEBVIEW_DATA,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
     },

@@ -99,6 +99,7 @@ npm --prefix frontend run test:tauri
 > - Mock E2E 测试需要前端开发服务器运行在 `http://localhost:1420`。
 > - `npm --prefix frontend run test:tauri` 会先构建当前 release binary，再用临时数据目录和 WebView2 profile 启动 MemoPaws，并通过 CDP 运行两个原生测试。
 > - 原生 e2e 不得重定向 `USERPROFILE`（WebView2 153 在该条件下不监听 CDP 端口）；测试数据隔离由 `MEMOPAWS_HOME` 与 `WEBVIEW2_USER_DATA_FOLDER` 保证。
+> - 原生 e2e 通过 `MEMOPAWS_E2E_HIDDEN=1` 保持窗口隐藏（仅测试脚本设置，正常运行不受影响）。
 
 ### 前端构建验证
 

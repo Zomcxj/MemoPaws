@@ -1331,8 +1331,15 @@ pub fn set_close_behavior(value: String, app: tauri::AppHandle) -> Result<(), St
     Ok(())
 }
 
+fn e2e_hidden_mode() -> bool {
+    std::env::var_os("MEMOPAWS_E2E_HIDDEN").is_some_and(|value| value == "1")
+}
+
 #[tauri::command]
 pub fn show_main_window_when_ready(app: tauri::AppHandle) -> Result<(), String> {
+    if e2e_hidden_mode() {
+        return Ok(());
+    }
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
@@ -2496,5 +2503,21 @@ mod tests {
         let reloaded = KeyVault::load(&path).unwrap();
         assert_eq!(reloaded.list().len(), 1);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn e2e_hidden_mode_reads_env_flag() {
+        let key = "MEMOPAWS_E2E_HIDDEN";
+        let previous = std::env::var_os(key);
+        std::env::remove_var(key);
+        assert!(!super::e2e_hidden_mode());
+        std::env::set_var(key, "1");
+        assert!(super::e2e_hidden_mode());
+        std::env::set_var(key, "0");
+        assert!(!super::e2e_hidden_mode());
+        match previous {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
     }
 }
