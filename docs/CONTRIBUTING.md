@@ -157,6 +157,19 @@ npm --prefix frontend run test:tauri
 - `test`：测试
 - `chore`：工具或配置变更
 
+#### pre-commit 门禁
+
+仓库配置了本地 pre-commit 钩子（`.githooks/pre-commit`），每次 `git commit` 会自动运行：
+
+1. `cargo test --workspace`
+2. `node frontend/e2e/test-static-contracts.cjs`
+
+首次克隆后执行一次 `cp .githooks/pre-commit .git/hooks/pre-commit` 启用（本仓库已默认安装）。需要跳过时用 `git commit --no-verify`（仅限赶时间且已手动跑过测试的场景）。
+
+#### 持续集成
+
+推送与 PR 触发 GitHub Actions（`.github/workflows/ci.yml`）：前端构建 → Rust 全量测试 → 静态契约，跑在 Windows runner 上。
+
 ## 目录约定
 
 ```
@@ -164,6 +177,23 @@ crates/<name>/
 ├── src/lib.rs          # crate 入口
 ├── Cargo.toml
 └── tests/              # 集成测试（可选）
+
+crates/tauri/src/
+├── lib.rs              # Tauri 装配（插件、事件、invoke_handler）
+├── commands/           # 全部 IPC 命令，按业务域拆分的子模块
+│   ├── mod.rs          # 状态类型 + lock_recover! 宏 + pub use 聚合
+│   ├── config.rs       # 主题/配置/窗口行为
+│   ├── memo.rs         # 备忘录
+│   ├── keys.rs         # 密钥库
+│   ├── ocr.rs          # AI 识别/翻译/连接测试
+│   ├── clipboard.rs    # 剪贴板与全局搜索
+│   ├── capture.rs      # 截图与图像处理
+│   ├── history.rs      # 历史记录
+│   ├── textrep.rs      # 文本替换
+│   └── storage.rs      # 数据目录与迁移
+├── hotkeys.rs          # 全局快捷键
+├── tray.rs             # 系统托盘
+└── text_replacer*.rs   # 键盘钩子与替换状态机
 
 frontend/src/
 ├── pages/              # 页面组件

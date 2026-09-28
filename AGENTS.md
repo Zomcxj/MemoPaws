@@ -13,5 +13,5 @@
 - **数据目录**：`%USERPROFILE%\.memopaws\`（setting.json 配置、keys.json 加密密钥库）；API Key 永不入 setting.json
 - **测试隔离**：仅原生 E2E 子进程可设置 `MEMOPAWS_HOME` 指向临时目录；正常运行不设置时仍使用 `%USERPROFILE%\.memopaws\`
 - **构建命令**：必须 `RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2`（大栈/全量并行会打爆 Windows 提交内存）
-- **Git 规范**：变更通过全部测试（Rust + e2e）后直接提交本地，不推送远程
+- **Git 规范**：变更通过全部测试（Rust + e2e）后直接提交本地，不推送远程（用户明确要求时除外）。已装 pre-commit 钩子（`.githooks/pre-commit`），提交时自动跑 `cargo test --workspace` + 静态契约，勿用 `--no-verify` 绕过，除非已手动验证
 - 遵循全局AGENTS.md

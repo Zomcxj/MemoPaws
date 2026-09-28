@@ -100,7 +100,7 @@ pub fn run() {
         .setup(|app| {
             memopaws_core::init();
             app.manage(hotkeys::ShortcutActions::default());
-            let path = memopaws_core::paths::keys_dir().map_err(|error| error.to_string())?;
+            let path = memopaws_core::paths::keys_path().map_err(|error| error.to_string())?;
             let vault = memopaws_keys::KeyVault::load(path)
                 .unwrap_or_else(|error| error.into_locked_vault());
             app.manage(Mutex::new(vault));

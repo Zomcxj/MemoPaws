@@ -1,0 +1,16 @@
+#!/bin/sh
+# MemoPaws pre-commit gate.
+# Runs the Rust test suite plus the static frontend contract checks before
+# every commit so broken changes never land locally.
+#
+# Skip once with:  git commit --no-verify
+
+set -e
+
+echo "[pre-commit] cargo test --workspace"
+RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2 cargo test --workspace
+
+echo "[pre-commit] static frontend contracts"
+node frontend/e2e/test-static-contracts.cjs
+
+echo "[pre-commit] all checks passed"
