@@ -44,12 +44,25 @@ const floatingSymbols = {
   "src/pages/SettingsPage.tsx": /show_floating_widget|set_floating_widget_visible|floating:/,
   "e2e/mock-tauri.js": /show_floating_widget|set_floating_widget_visible/,
   "../crates/config/src/config.rs": /show_floating_widget/,
-  "../crates/tauri/src/commands.rs": /show_floating_widget|set_floating_widget_visible|floating-widget-visibility-changed/,
   "../crates/tauri/src/lib.rs": /show_floating_widget|set_floating_widget_visible/,
 };
 
 for (const [file, symbols] of Object.entries(floatingSymbols)) {
   assert.doesNotMatch(read(...file.split("/")), symbols, `${file} must not reference the removed floating widget`);
+}
+
+// Tauri commands live in a directory since the commands.rs split; the guard
+// covers every module in it.
+const commandsDir = path.join(root, "..", "crates", "tauri", "src", "commands");
+const floatingCommandSymbols =
+  /show_floating_widget|set_floating_widget_visible|floating-widget-visibility-changed/;
+for (const name of fs.readdirSync(commandsDir)) {
+  if (!name.endsWith(".rs")) continue;
+  assert.doesNotMatch(
+    fs.readFileSync(path.join(commandsDir, name), "utf8"),
+    floatingCommandSymbols,
+    `commands/${name} must not reference the removed floating widget`,
+  );
 }
 
 assert.ok(

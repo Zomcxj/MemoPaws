@@ -116,8 +116,6 @@ pub fn ensure_data_dir() -> Result<PathBuf> {
     fs::create_dir_all(&dir)?;
     let memos = dir.join("memo");
     fs::create_dir_all(&memos)?;
-    let keys = dir.join("keys");
-    fs::create_dir_all(&keys)?;
     let images = dir.join("clipboard_images");
     fs::create_dir_all(&images)?;
     let captures = dir.join("captures");
@@ -133,7 +131,7 @@ pub fn memos_dir() -> Result<PathBuf> {
     data_dir().map(|d| d.join("memo"))
 }
 
-pub fn keys_dir() -> Result<PathBuf> {
+pub fn keys_path() -> Result<PathBuf> {
     data_dir().map(|d| d.join("keys.json"))
 }
 
@@ -316,7 +314,7 @@ fn write_anchor(anchor: &Path, base: &Path) -> Result<()> {
 /// Ensure the migrated tree has every directory the app expects, so a source tree
 /// missing a folder does not leave the target unusable before the next launch.
 fn ensure_tree_layout(data_dir: &Path) -> Result<()> {
-    for child in ["memo", "keys", "clipboard_images", "captures"] {
+    for child in ["memo", "clipboard_images", "captures"] {
         fs::create_dir_all(data_dir.join(child))?;
     }
     Ok(())
@@ -514,7 +512,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        for child in ["memo", "keys", "clipboard_images", "captures"] {
+        for child in ["memo", "clipboard_images", "captures"] {
             assert!(
                 migrated.join(child).is_dir(),
                 "missing {child} after migration"
