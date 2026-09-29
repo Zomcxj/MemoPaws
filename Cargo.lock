@@ -3045,7 +3045,6 @@ version = "0.0.3"
 dependencies = [
  "arboard",
  "base64 0.22.1",
- "dirs 5.0.1",
  "image",
  "memopaws-canvas",
  "memopaws-clipboard",
