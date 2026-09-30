@@ -31,6 +31,7 @@ mod memo;
 mod ocr;
 mod storage;
 mod textrep;
+mod update;
 
 pub use capture::*;
 pub use clipboard::*;
@@ -41,3 +42,4 @@ pub use memo::*;
 pub use ocr::*;
 pub use storage::*;
 pub use textrep::*;
+pub use update::*;
