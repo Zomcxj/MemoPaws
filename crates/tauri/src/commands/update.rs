@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::path::{Path, PathBuf};
 
 pub(crate) const RELEASE_API: &str =
     "https://api.github.com/repos/Zomcxj/MemoPaws/releases/latest";
@@ -45,6 +46,32 @@ pub(crate) fn compare_versions(current: &str, latest: &str) -> Ordering {
 pub(crate) fn safe_download_url(url: &str) -> bool {
     url.starts_with("https://github.com/")
         || url.starts_with("https://objects.githubusercontent.com/")
+}
+
+/// 替换正在运行的 exe：Windows 允许改名运行中的文件，先把当前 exe 改名为
+/// `.bak` 再把新 exe 写到原路径。复制失败时回滚，避免应用变成不可运行。
+pub(crate) fn replace_executable(current_exe: &Path, downloaded: &Path) -> std::io::Result<PathBuf> {
+    let backup = backup_path(current_exe);
+    std::fs::rename(current_exe, &backup)?;
+    match std::fs::copy(downloaded, current_exe) {
+        Ok(_) => Ok(backup),
+        Err(error) => {
+            let _ = std::fs::rename(&backup, current_exe);
+            Err(error)
+        }
+    }
+}
+
+/// 上次更新遗留的 .bak 必须在启动时清掉，否则磁盘上永远留一份旧程序。
+pub(crate) fn remove_stale_backup(current_exe: &Path) {
+    let backup = backup_path(current_exe);
+    if backup.exists() {
+        let _ = std::fs::remove_file(backup);
+    }
+}
+
+fn backup_path(current_exe: &Path) -> PathBuf {
+    current_exe.with_extension("exe.bak")
 }
 
 pub(crate) fn parse_latest_release(body: &str) -> Option<LatestRelease> {
@@ -144,5 +171,63 @@ mod tests {
         assert!(safe_download_url("https://github.com/@evil.test/"));
         // GitHub 永不返回大写 URL，大小写敏感是刻意的 fail-closed
         assert!(!safe_download_url("HTTPS://GITHUB.COM/a"));
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "memopaws-update-test-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn replace_executable_swaps_in_the_downloaded_binary() {
+        use super::replace_executable;
+
+        let dir = temp_dir("replace");
+        let current = dir.join("memopaws.exe");
+        let downloaded = dir.join("new.exe");
+        std::fs::write(&current, b"old").unwrap();
+        std::fs::write(&downloaded, b"new").unwrap();
+
+        let backup = replace_executable(&current, &downloaded).unwrap();
+        assert_eq!(backup, dir.join("memopaws.exe.bak"));
+        assert_eq!(std::fs::read(&current).unwrap(), b"new");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"old");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replace_executable_restores_the_old_binary_when_the_copy_fails() {
+        use super::replace_executable;
+
+        let dir = temp_dir("rollback");
+        let current = dir.join("memopaws.exe");
+        std::fs::write(&current, b"old").unwrap();
+
+        let error = replace_executable(&current, &dir.join("missing.exe")).unwrap_err();
+        assert!(error.kind() == std::io::ErrorKind::NotFound);
+        assert_eq!(std::fs::read(&current).unwrap(), b"old", "复制失败必须把旧 exe 放回原位");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remove_stale_backup_deletes_a_previous_backup() {
+        use super::remove_stale_backup;
+
+        let dir = temp_dir("cleanup");
+        let current = dir.join("memopaws.exe");
+        std::fs::write(&current, b"new").unwrap();
+        std::fs::write(dir.join("memopaws.exe.bak"), b"old").unwrap();
+
+        remove_stale_backup(&current);
+        assert!(!dir.join("memopaws.exe.bak").exists());
+        assert!(current.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
