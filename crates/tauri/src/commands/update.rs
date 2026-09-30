@@ -49,20 +49,49 @@ pub(crate) fn safe_download_url(url: &str) -> bool {
 }
 
 /// 替换正在运行的 exe：Windows 允许改名运行中的文件，先把当前 exe 改名为
-/// `.bak` 再把新 exe 写到原路径。复制失败时回滚，避免应用变成不可运行。
+/// `.bak` 再把新 exe 写到原路径。复制失败或写入字节数与源文件不符时回滚，
+/// 避免应用变成不可运行。
 pub(crate) fn replace_executable(current_exe: &Path, downloaded: &Path) -> std::io::Result<PathBuf> {
     let backup = backup_path(current_exe);
     std::fs::rename(current_exe, &backup)?;
-    match std::fs::copy(downloaded, current_exe) {
-        Ok(_) => Ok(backup),
-        Err(error) => {
-            let _ = std::fs::rename(&backup, current_exe);
-            Err(error)
+    let installed = std::fs::copy(downloaded, current_exe).and_then(|copied| {
+        let expected = std::fs::metadata(downloaded)?.len();
+        if copied == expected {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("复制字节数不符：写入 {copied} 字节，源文件 {expected} 字节"),
+            ))
         }
+    });
+    match installed {
+        Ok(()) => Ok(backup),
+        Err(error) => Err(rollback(&backup, current_exe, error)),
+    }
+}
+
+/// 把 `.bak` 改名回原位，回滚本身也失败时两个错误一起带出去。没有 logging 依赖，
+/// 错误字符串是唯一通道：丢掉回滚错误会让调用方把"半个新 exe 挡在原位、旧程序躺在
+/// `.bak` 里"误报成下载失败，用户重试多少次都是坏的。
+fn rollback(backup: &Path, current_exe: &Path, error: std::io::Error) -> std::io::Error {
+    match std::fs::rename(backup, current_exe) {
+        Ok(()) => error,
+        Err(rollback_error) => std::io::Error::new(
+            error.kind(),
+            format!(
+                "替换失败且回滚失败，旧程序在 {}：{rollback_error}",
+                backup.display()
+            ),
+        ),
     }
 }
 
 /// 上次更新遗留的 .bak 必须在启动时清掉，否则磁盘上永远留一份旧程序。
+///
+/// 只能在**下一个进程**里调用：`.bak` 是上一个进程正在运行的映像，进程存活期间
+/// Windows 拒绝删除它（实测 AccessDenied），而下面的 `let _ =` 会让这个失败永久
+/// 静默，磁盘上就永远留一份旧程序。
 pub(crate) fn remove_stale_backup(current_exe: &Path) {
     let backup = backup_path(current_exe);
     if backup.exists() {
@@ -213,6 +242,8 @@ mod tests {
         let error = replace_executable(&current, &dir.join("missing.exe")).unwrap_err();
         assert!(error.kind() == std::io::ErrorKind::NotFound);
         assert_eq!(std::fs::read(&current).unwrap(), b"old", "复制失败必须把旧 exe 放回原位");
+        // 回滚走的是 rename 而非 copy：备份名必须被搬空，不能留下第二份旧程序。
+        assert!(!dir.join("memopaws.exe.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
