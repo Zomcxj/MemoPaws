@@ -20,8 +20,9 @@ use commands::{
     memo_create, memo_delete, memo_get, memo_list, memo_render, memo_search, memo_update,
     migrate_data_dir, remove_master, reorder, restart_app, save_config, set_clipboard_max_items,
     set_close_behavior, set_history_max_items, set_language, set_master, set_settings_key,
-    set_theme, show_main_window_when_ready, status, test_api_connection, text_replacement_create,
-    text_replacement_delete, text_replacement_list, text_replacement_update, unlock, update,
+    set_theme, show_main_window_when_ready, spawn_update_poller, status, test_api_connection,
+    text_replacement_create, text_replacement_delete, text_replacement_list,
+    text_replacement_update, unlock, update,
 };
 use commands::{KeyVaultState, TextReplacerState};
 use tray::setup_tray;
@@ -108,6 +109,7 @@ pub fn run() {
                 .load()
                 .map_err(|error| error.to_string())?;
             app.manage(Mutex::new(history));
+            commands::spawn_update_poller(app.handle().clone());
             let clipboard =
                 memopaws_clipboard::ClipboardManager::load().map_err(|error| error.to_string())?;
             app.manage(Mutex::new(clipboard));

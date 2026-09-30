@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
+use tauri::Emitter;
+
 pub(crate) const RELEASE_API: &str =
     "https://api.github.com/repos/Zomcxj/MemoPaws/releases/latest";
 pub(crate) const USER_AGENT: &str = concat!("MemoPaws/", env!("CARGO_PKG_VERSION"));
@@ -128,6 +130,69 @@ pub(crate) fn parse_latest_release(body: &str) -> Option<LatestRelease> {
         installer,
         offline,
     })
+}
+
+pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
+pub(crate) const FIRST_CHECK_DELAY: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// 直连优先，失败再走系统代理。开发者环境里 GitHub 常需代理，
+/// 但直连成功时不应多绕一跳。reqwest 默认自动读取环境变量与 Windows
+/// 注册表中的系统代理（system-proxy feature），所以代理 client 就是默认构造。
+fn client(proxy: bool) -> Option<reqwest::blocking::Client> {
+    let builder = reqwest::blocking::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(20));
+    let builder = if proxy { builder } else { builder.no_proxy() };
+    builder.build().ok()
+}
+
+fn fetch_response(url: &str) -> Option<reqwest::blocking::Response> {
+    for proxy in [false, true] {
+        let Some(client) = client(proxy) else { continue };
+        if let Ok(response) = client
+            .get(url)
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+        {
+            return Some(response);
+        }
+    }
+    None
+}
+
+fn fetch_latest_release() -> Option<LatestRelease> {
+    parse_latest_release(&fetch_response(RELEASE_API)?.text().ok()?)
+}
+
+/// 后台轮询：新版本比当前版本新时向窗口推一次事件。窗口关到托盘时前端不运行，
+/// 所以轮询必须在后端。
+pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        if let Ok(current_exe) = std::env::current_exe() {
+            remove_stale_backup(&current_exe);
+        }
+        std::thread::sleep(FIRST_CHECK_DELAY);
+        let mut notified: Option<String> = None;
+        loop {
+            if let Some(release) = fetch_latest_release() {
+                let current_version = app.package_info().version.to_string();
+                if compare_versions(&current_version, &release.version) == Ordering::Less
+                    && notified.as_deref() != Some(release.version.as_str())
+                {
+                    notified = Some(release.version.clone());
+                    let _ = app.emit(
+                        "update-available",
+                        serde_json::json!({
+                            "version": release.version,
+                            "currentVersion": current_version,
+                        }),
+                    );
+                }
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    });
 }
 
 #[cfg(test)]
