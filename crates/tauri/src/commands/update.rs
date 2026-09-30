@@ -149,14 +149,16 @@ fn client(proxy: bool) -> Option<reqwest::blocking::Client> {
 fn fetch_response(url: &str) -> Option<reqwest::blocking::Response> {
     for proxy in [false, true] {
         let Some(client) = client(proxy) else { continue };
-        if let Ok(response) = client
+        let Ok(response) = client
             .get(url)
             .header("Accept", "application/vnd.github+json")
             .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-        {
-            return Some(response);
-        }
+        else {
+            continue;
+        };
+        // 只有传输层失败才值得换出口重试；服务器已经答复（4xx/5xx）时换代理
+        // 只会重复同一个答案并白等一个超时。
+        return response.status().is_success().then_some(response);
     }
     None
 }
