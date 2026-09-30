@@ -14,7 +14,8 @@ pub(crate) struct LatestRelease {
 }
 
 /// 按点分数字段比较版本（"0.0.10" > "0.0.9"），忽略可选的 v 前缀。
-/// 非数字或缺失字段按 0 处理。
+/// 缺失字段按 0 处理；任一段非数字（含预发布后缀、超范围整数）时整串视为无法比较，
+/// 按相等处理——宁可漏报升级也不误报。
 pub(crate) fn compare_versions(current: &str, latest: &str) -> Ordering {
     fn segments(value: &str) -> Option<Vec<u64>> {
         value
@@ -136,5 +137,12 @@ mod tests {
         assert!(!safe_download_url("http://github.com/a"));
         assert!(!safe_download_url("https://github.com.evil.test/a"));
         assert!(!safe_download_url("https://evil.test/github.com/a"));
+        // 尾斜杠挡住 userinfo 绕过与后缀欺骗，删掉尾斜杠这两条会挂。
+        assert!(!safe_download_url("https://github.com@evil.test/a"));
+        assert!(!safe_download_url("https://github.com.evil.test"));
+        // 路径段里的 @ 不是 userinfo，主机确实是 github.com
+        assert!(safe_download_url("https://github.com/@evil.test/"));
+        // GitHub 永不返回大写 URL，大小写敏感是刻意的 fail-closed
+        assert!(!safe_download_url("HTTPS://GITHUB.COM/a"));
     }
 }
