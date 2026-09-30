@@ -109,7 +109,7 @@ pub fn run() {
                 .load()
                 .map_err(|error| error.to_string())?;
             app.manage(Mutex::new(history));
-            commands::spawn_update_poller(app.handle().clone());
+            spawn_update_poller(app.handle().clone());
             let clipboard =
                 memopaws_clipboard::ClipboardManager::load().map_err(|error| error.to_string())?;
             app.manage(Mutex::new(clipboard));
