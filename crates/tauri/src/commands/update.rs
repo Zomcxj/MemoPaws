@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrder};
 
 use tauri::Emitter;
 
@@ -207,14 +208,20 @@ pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
 
 /// 供前端主动拉取：轮询事件可能在监听器注册前就被丢弃，挂载时必须能问一次。
 /// 返回 None 表示检查失败（无网络、被限流、仓库不可访问）或没有新版本，前端静默即可。
-#[tauri::command]
+///
+/// `async` 是必需的：函数体是同步 HTTP（直连失败再走代理，两个 20s 超时），而 Tauri 的
+/// 同步 command 直接跑在 WebView2 的 IPC 协议线程上，也就是 UI 线程——GitHub 不通时
+/// 窗口会无响应约 40s。宏属性把整个函数体丢进 async_runtime，不再占住 UI 线程。
+/// 函数体保持同步 `fn`：里面用的是 reqwest blocking client，改 `async fn` 反而要重写
+/// 整个网络层（blocking client 在 async 上下文里只是阻塞一个 worker，不会 panic）。
+#[tauri::command(async)]
 pub fn latest_release_version(app: tauri::AppHandle) -> Option<String> {
     let release = fetch_latest_release()?;
     let current_version = app.package_info().version.to_string();
     newer_version(&current_version, &release.version)
 }
 
-/// 下载临时目录：每次下载前清空，避免失败残留占磁盘。
+/// 下载临时目录：每次落盘前清空，避免失败残留占磁盘。
 fn download_dir() -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir().join("memopaws-update");
     if dir.exists() {
@@ -224,18 +231,45 @@ fn download_dir() -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
+/// 下载互斥。临时目录是固定路径且落盘前清空，两个下载并发就会互删对方的 setup.exe：
+/// Windows 拒绝删除正在运行的映像，删除失败被吞掉后目录没清，后一个再写同名文件就撞上
+/// 运行中映像报 AccessDenied——用户看到"更新失败"，而第一次其实已经装好了。
+/// 命令层必须自己挡：devtools invoke、快捷键、渲染竞态都能绕过前端的按钮禁用。
+static DOWNLOADING: AtomicBool = AtomicBool::new(false);
+
+/// 抢到互斥才允许开线程。Drop 放行，下载失败/线程 panic 都不会把更新永久锁死。
+struct DownloadGuard;
+
+impl DownloadGuard {
+    fn acquire() -> Option<Self> {
+        DOWNLOADING
+            .compare_exchange(false, true, AtomicOrder::AcqRel, AtomicOrder::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        DOWNLOADING.store(false, AtomicOrder::Release);
+    }
+}
+
 #[tauri::command]
 pub fn download_update(app: tauri::AppHandle, kind: String) -> Result<(), String> {
     match kind.as_str() {
         "installer" | "offline" => {}
         other => return Err(format!("未知的下载类型: {other}")),
     }
+    let Some(guard) = DownloadGuard::acquire() else {
+        return Err("已有更新正在下载，请稍候".to_string());
+    };
     // 下载 8-30MB 不能占住命令线程，交给独立线程，进度用事件回报。
-    std::thread::spawn(move || run_download(app, &kind));
+    std::thread::spawn(move || run_download(app, &kind, guard));
     Ok(())
 }
 
-fn run_download(app: tauri::AppHandle, kind: &str) {
+fn run_download(app: tauri::AppHandle, kind: &str, _guard: DownloadGuard) {
     let result = download_and_apply(&app, kind);
     if let Err(message) = result {
         let _ = app.emit("update-download-error", serde_json::json!({ "message": message }));
@@ -252,13 +286,35 @@ fn download_and_apply(app: &tauri::AppHandle, kind: &str) -> Result<(), String> 
         return Err("下载地址不受信任".to_string());
     }
     let bytes = download_with_progress(app, &url, expected_size)?;
-    let file_name = url.rsplit('/').next().unwrap_or("update.exe");
+    // rsplit 在 URL 以 / 结尾时给出空串而不是 None，空名字会拼成目录本身（"Is a directory"）。
+    let file_name = url
+        .rsplit('/')
+        .find(|part| !part.is_empty())
+        .unwrap_or("update.exe");
     let target = download_dir().map_err(|error| error.to_string())?.join(file_name);
     std::fs::write(&target, &bytes).map_err(|error| error.to_string())?;
     match kind {
         "installer" => run_installer(app, &target),
         _ => apply_offline(app, &target),
     }
+}
+
+/// 进度事件的节流步长。
+const PROGRESS_STEP: u64 = 256 * 1024;
+
+/// 该不该上报进度。抽成纯函数是为了能离线测：网络读循环里的判断没法在测试里驱动。
+///
+/// - `total == 0`（既没有 Content-Length 也没有 API 的 size）一律不上报：`bytes.len() >= 0`
+///   恒真会把节流完全短路，而且 payload 的 `total: 0` 会让前端算出 NaN、永远等不到 100%。
+///   完成信号由末尾的 `update-ready` 承担。
+/// - 其余情况：每满 `PROGRESS_STEP` 报一次，或已读满 `total` 时立即补报，
+///   保证末尾一定有一条 100%。
+fn progress_event(total: u64, received: u64, last_reported: u64) -> Option<(u64, u64)> {
+    if total == 0 {
+        return None;
+    }
+    let stepped = received.saturating_sub(last_reported) >= PROGRESS_STEP;
+    (stepped || received >= total).then_some((received, total))
 }
 
 fn download_with_progress(
@@ -280,14 +336,18 @@ fn download_with_progress(
             break;
         }
         bytes.extend_from_slice(&buffer[..read]);
-        // 每 256KB 报一次进度，末尾必须再报一次保证 UI 收到 100%。
-        if bytes.len() as u64 - last_reported >= 256 * 1024 || bytes.len() as u64 >= total {
-            last_reported = bytes.len() as u64;
+        if let Some((received, total)) = progress_event(total, bytes.len() as u64, last_reported) {
+            last_reported = received;
             let _ = app.emit(
                 "update-download-progress",
-                serde_json::json!({ "received": last_reported, "total": total }),
+                serde_json::json!({ "received": received, "total": total }),
             );
         }
+    }
+    // with_capacity 只封顶预分配，extend_from_slice 是无条件追加：错配的 CDN 端点能在
+    // 20 秒内灌进几百 MB 直到 OOM。总量已知时直接拒收超量数据（不另设上限体系）。
+    if total > 0 && bytes.len() as u64 > total {
+        return Err(format!("下载字节数超出预期: {} / {} 字节", bytes.len(), total));
     }
     if expected_size > 0 && bytes.len() as u64 != expected_size {
         return Err(format!("下载不完整: {} / {} 字节", bytes.len(), expected_size));
@@ -296,54 +356,36 @@ fn download_with_progress(
 }
 
 /// 安装包：NSIS 静默安装（/S）。安装器必须能覆写 memopaws.exe，所以当前进程
-/// 必须在安装器完成前退出——先启动安装器再退出，由安装器接手并（期望）拉起新版。
+/// 必须在安装器完成前退出——先启动安装器再退出。
 /// （app.exit(0) 会结束本进程，因此不能像离线包那样"等安装完再自己启动"。）
-/// 前提未核实：NSIS 的 /S 静默模式是否自动运行已安装的程序；Tauri 文档只确认
-/// /S 支持静默安装。若实测不拉起，装完需用户手动启动一次。
+///
+/// 以下事实取证自本仓库自己生成的安装器脚本 `target/release/nsis/x64/installer.nsi`，
+/// 改动这里之前请先读它，不要靠推测：
+///
+/// 1. 脚本里没有任何拉起主程序的 `Exec`（只有卸载器与 WebView2 的 `ExecWait`），
+///    所以 `/S` 静默装完**不会**自动拉起新版程序。
+/// 2. `installer.nsi:635` 插入的 `CheckIfAppIsRunning` 在静默模式下
+///    （`utils.nsh:40` 的 `IfSilent kill_${UniqueID} 0`）会直接 KillProcess 掉
+///    memopaws.exe，不必等弹窗确认。因此本进程**立即 exit(0) 是正确且更快的**：
+///    早退只是把"被杀"提前，装完结果一样。
+/// 3. 自动拉起新版是待办。真要做时注意卸载项的键是 `...\Uninstall\MemoPaws`
+///    （`installer.nsi:60`，`UNINSTKEY` 用的是 `${PRODUCTNAME}`，不是 BUNDLEID），
+///    且 `installer.nsi:675` 写入的 `InstallLocation` 值自带一对引号
+///    （`"$\"$INSTDIR$\""`），必须先剥掉再拼 `memopaws.exe`，然后轮询等新 exe 出现再 spawn。
 fn run_installer(app: &tauri::AppHandle, setup: &Path) -> Result<(), String> {
     let spawned = std::process::Command::new(setup)
         .arg("/S")
         .spawn()
         .map_err(|error| format!("无法启动安装程序: {error}"));
-    let installed = locate_installed_exe();
     match spawned {
         Ok(_) => {
+            // 见上方第 2 条：安装器自己会杀本进程，这里立即退出即可。
             app.exit(0);
             Ok(())
         }
-        Err(error) => {
-            // 启动失败时不能退出，否则用户连旧版本都用不了。
-            let _ = installed;
-            Err(error.to_string())
-        }
+        // 启动失败时不能退出，否则用户连旧版本都用不了。
+        Err(error) => Err(error.to_string()),
     }
-}
-
-/// 找安装后的 exe：先试 NSIS currentUser 默认目录，再试卸载注册表项。
-fn locate_installed_exe() -> Option<PathBuf> {
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        let candidate = PathBuf::from(&local).join("MemoPaws").join("memopaws.exe");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    // 兜底：读取当前用户卸载项的 InstallLocation。
-    let output = std::process::Command::new("reg")
-        .args([
-            "query",
-            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.memopaws.rust",
-            "/v",
-            "InstallLocation",
-        ])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let location = text
-        .lines()
-        .find_map(|line| line.split("REG_SZ").nth(1))
-        .map(|value| value.trim().to_string())?;
-    let candidate = PathBuf::from(location).join("memopaws.exe");
-    candidate.is_file().then_some(candidate)
 }
 
 /// 离线包：替换 exe 后由前端调用既有 restart_app 完成切换。
@@ -495,6 +537,63 @@ mod tests {
         // 回滚走的是 rename 而非 copy：备份名必须被搬空，不能留下第二份旧程序。
         assert!(!dir.join("memopaws.exe.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 按 64KB 分块喂一遍 progress_event，返回实际上报的 (received, total) 序列。
+    /// 模拟 download_with_progress 的读循环，但不碰网络。
+    fn drain_progress(total: u64, chunk: u64) -> Vec<(u64, u64)> {
+        let mut events = Vec::new();
+        let mut received = 0u64;
+        let mut last_reported = 0u64;
+        while received < total {
+            received += chunk.min(total - received);
+            if let Some(event) = progress_event(total, received, last_reported) {
+                last_reported = received;
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn progress_throttles_an_exact_multiple_installer_to_256kb_steps() {
+        // 8MB 安装包：32 个事件，末次 received == total
+        let events = drain_progress(8 * 1024 * 1024, 64 * 1024);
+        assert_eq!(events.len(), 32, "每 256KB 一次，不得多报");
+        assert_eq!(events.last(), Some(&(8 * 1024 * 1024, 8 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn progress_reports_the_offline_package_remainder_exactly_once() {
+        // 29MB 离线包不是 256KB 整数倍：111 个整步 + 末尾补报 = 112
+        let total = 29_167_616u64;
+        let events = drain_progress(total, 64 * 1024);
+        assert_eq!(events.len(), 112);
+        assert_eq!(events.last(), Some(&(total, total)), "末尾必须报满");
+    }
+
+    #[test]
+    fn progress_reports_a_small_file_exactly_once() {
+        // 100KB 小文件不足一个节流步，只靠 received >= total 报出一次
+        let events = drain_progress(100 * 1024, 64 * 1024);
+        assert_eq!(events, vec![(100 * 1024, 100 * 1024)]);
+    }
+
+    #[test]
+    fn progress_stays_silent_when_the_total_is_unknown() {
+        // total == 0 时前端会算出 NaN，0/0 对 UI 没有信息量
+        assert_eq!(progress_event(0, 0, 0), None);
+        assert_eq!(progress_event(0, 64 * 1024, 0), None);
+        assert_eq!(progress_event(0, u64::MAX, 0), None);
+        assert!(drain_progress(0, 64 * 1024).is_empty());
+    }
+
+    #[test]
+    fn download_guard_blocks_a_second_download_until_the_first_releases_it() {
+        let first = DownloadGuard::acquire().expect("首次下载必须拿到互斥");
+        assert!(DownloadGuard::acquire().is_none(), "并发下载必须被挡在门外");
+        drop(first);
+        assert!(DownloadGuard::acquire().is_some(), "释放后必须能再次下载");
     }
 
     #[test]
