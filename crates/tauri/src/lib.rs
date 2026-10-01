@@ -14,9 +14,9 @@ use commands::{
     add, ai_ocr, ai_translate, capture_delete, capture_get_image, capture_list, capture_screen,
     choose_data_dir, clipboard_clear, clipboard_delete, clipboard_delete_many, clipboard_get_image,
     clipboard_list, clipboard_paste_image, clipboard_set_locked, clipboard_update_text, delete,
-    get_config, get_data_dir, get_storage_dir_conflict, get_theme, get_value, global_search,
-    history_clear, history_delete, history_list, image_crop, image_preprocess,
-    key_list, list, list_displays, lock,
+    download_update, get_config, get_data_dir, get_storage_dir_conflict, get_theme, get_value,
+    global_search, history_clear, history_delete, history_list, image_crop, image_preprocess,
+    key_list, latest_release_version, list, list_displays, lock,
     memo_create, memo_delete, memo_get, memo_list, memo_render, memo_search, memo_update,
     migrate_data_dir, remove_master, reorder, restart_app, save_config, set_clipboard_max_items,
     set_close_behavior, set_history_max_items, set_language, set_master, set_settings_key,
@@ -197,6 +197,8 @@ pub fn run() {
             text_replacement_create,
             text_replacement_update,
             text_replacement_delete,
+            download_update,
+            latest_release_version,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
