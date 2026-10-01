@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tauri::Emitter;
@@ -167,6 +168,13 @@ fn fetch_latest_release() -> Option<LatestRelease> {
     parse_latest_release(&fetch_response(RELEASE_API)?.text().ok()?)
 }
 
+/// latest 比 current 新时返回 latest，否则 None。调用方传进来的 latest 应是已剥掉
+/// v 前缀的版本号（parse_latest_release 的输出），本函数原样返回。
+/// 版本号无法比较时返回 None：宁可漏报也不误报升级。
+pub(crate) fn newer_version(current: &str, latest: &str) -> Option<String> {
+    (compare_versions(current, latest) == Ordering::Less).then(|| latest.to_string())
+}
+
 /// 后台轮询：新版本比当前版本新时向窗口推一次事件。窗口关到托盘时前端不运行，
 /// 所以轮询必须在后端。
 pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
@@ -179,22 +187,174 @@ pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
         loop {
             if let Some(release) = fetch_latest_release() {
                 let current_version = app.package_info().version.to_string();
-                if compare_versions(&current_version, &release.version) == Ordering::Less
-                    && notified.as_deref() != Some(release.version.as_str())
-                {
-                    notified = Some(release.version.clone());
-                    let _ = app.emit(
-                        "update-available",
-                        serde_json::json!({
-                            "version": release.version,
-                            "currentVersion": current_version,
-                        }),
-                    );
+                if let Some(version) = newer_version(&current_version, &release.version) {
+                    if notified.as_deref() != Some(version.as_str()) {
+                        notified = Some(version.clone());
+                        let _ = app.emit(
+                            "update-available",
+                            serde_json::json!({
+                                "version": version,
+                                "currentVersion": current_version,
+                            }),
+                        );
+                    }
                 }
             }
             std::thread::sleep(POLL_INTERVAL);
         }
     });
+}
+
+/// 供前端主动拉取：轮询事件可能在监听器注册前就被丢弃，挂载时必须能问一次。
+/// 返回 None 表示检查失败（无网络、被限流、仓库不可访问）或没有新版本，前端静默即可。
+#[tauri::command]
+pub fn latest_release_version(app: tauri::AppHandle) -> Option<String> {
+    let release = fetch_latest_release()?;
+    let current_version = app.package_info().version.to_string();
+    newer_version(&current_version, &release.version)
+}
+
+/// 下载临时目录：每次下载前清空，避免失败残留占磁盘。
+fn download_dir() -> std::io::Result<PathBuf> {
+    let dir = std::env::temp_dir().join("memopaws-update");
+    if dir.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+#[tauri::command]
+pub fn download_update(app: tauri::AppHandle, kind: String) -> Result<(), String> {
+    match kind.as_str() {
+        "installer" | "offline" => {}
+        other => return Err(format!("未知的下载类型: {other}")),
+    }
+    // 下载 8-30MB 不能占住命令线程，交给独立线程，进度用事件回报。
+    std::thread::spawn(move || run_download(app, &kind));
+    Ok(())
+}
+
+fn run_download(app: tauri::AppHandle, kind: &str) {
+    let result = download_and_apply(&app, kind);
+    if let Err(message) = result {
+        let _ = app.emit("update-download-error", serde_json::json!({ "message": message }));
+    }
+}
+
+fn download_and_apply(app: &tauri::AppHandle, kind: &str) -> Result<(), String> {
+    let release = fetch_latest_release().ok_or("无法获取最新版本信息")?;
+    let (url, expected_size) = match kind {
+        "installer" => release.installer.ok_or("该版本没有安装包")?,
+        _ => release.offline.ok_or("该版本没有离线包")?,
+    };
+    if !safe_download_url(&url) {
+        return Err("下载地址不受信任".to_string());
+    }
+    let bytes = download_with_progress(app, &url, expected_size)?;
+    let file_name = url.rsplit('/').next().unwrap_or("update.exe");
+    let target = download_dir().map_err(|error| error.to_string())?.join(file_name);
+    std::fs::write(&target, &bytes).map_err(|error| error.to_string())?;
+    match kind {
+        "installer" => run_installer(app, &target),
+        _ => apply_offline(app, &target),
+    }
+}
+
+fn download_with_progress(
+    app: &tauri::AppHandle,
+    url: &str,
+    expected_size: u64,
+) -> Result<Vec<u8>, String> {
+    // blocking 的 Response 没有 chunk()（那是 async 的 API），它实现的是 std::io::Read。
+    let mut response = fetch_response(url).ok_or("下载请求失败")?;
+    let total = response.content_length().unwrap_or(expected_size);
+    let mut bytes: Vec<u8> = Vec::with_capacity(total.min(64 * 1024 * 1024) as usize);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut last_reported = 0u64;
+    loop {
+        let read = response
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        // 每 256KB 报一次进度，末尾必须再报一次保证 UI 收到 100%。
+        if bytes.len() as u64 - last_reported >= 256 * 1024 || bytes.len() as u64 >= total {
+            last_reported = bytes.len() as u64;
+            let _ = app.emit(
+                "update-download-progress",
+                serde_json::json!({ "received": last_reported, "total": total }),
+            );
+        }
+    }
+    if expected_size > 0 && bytes.len() as u64 != expected_size {
+        return Err(format!("下载不完整: {} / {} 字节", bytes.len(), expected_size));
+    }
+    Ok(bytes)
+}
+
+/// 安装包：NSIS 静默安装（/S）。安装器必须能覆写 memopaws.exe，所以当前进程
+/// 必须在安装器完成前退出——先启动安装器再退出，由安装器接手并（期望）拉起新版。
+/// （app.exit(0) 会结束本进程，因此不能像离线包那样"等安装完再自己启动"。）
+/// 前提未核实：NSIS 的 /S 静默模式是否自动运行已安装的程序；Tauri 文档只确认
+/// /S 支持静默安装。若实测不拉起，装完需用户手动启动一次。
+fn run_installer(app: &tauri::AppHandle, setup: &Path) -> Result<(), String> {
+    let spawned = std::process::Command::new(setup)
+        .arg("/S")
+        .spawn()
+        .map_err(|error| format!("无法启动安装程序: {error}"));
+    let installed = locate_installed_exe();
+    match spawned {
+        Ok(_) => {
+            app.exit(0);
+            Ok(())
+        }
+        Err(error) => {
+            // 启动失败时不能退出，否则用户连旧版本都用不了。
+            let _ = installed;
+            Err(error.to_string())
+        }
+    }
+}
+
+/// 找安装后的 exe：先试 NSIS currentUser 默认目录，再试卸载注册表项。
+fn locate_installed_exe() -> Option<PathBuf> {
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let candidate = PathBuf::from(&local).join("MemoPaws").join("memopaws.exe");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    // 兜底：读取当前用户卸载项的 InstallLocation。
+    let output = std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.memopaws.rust",
+            "/v",
+            "InstallLocation",
+        ])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let location = text
+        .lines()
+        .find_map(|line| line.split("REG_SZ").nth(1))
+        .map(|value| value.trim().to_string())?;
+    let candidate = PathBuf::from(location).join("memopaws.exe");
+    candidate.is_file().then_some(candidate)
+}
+
+/// 离线包：替换 exe 后由前端调用既有 restart_app 完成切换。
+/// 错误文本取 io::Error 的完整 Display——回滚失败时它带着"旧程序在 <路径>"，
+/// 只取 ErrorKind 会让用户看到毫不相干的"磁盘空间不足"。
+fn apply_offline(app: &tauri::AppHandle, downloaded: &Path) -> Result<(), String> {
+    let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    replace_executable(&current_exe, downloaded)
+        .map_err(|error| format!("替换程序文件失败: {error}"))?;
+    let _ = app.emit("update-ready", serde_json::json!({}));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -267,6 +427,29 @@ mod tests {
         assert!(safe_download_url("https://github.com/@evil.test/"));
         // GitHub 永不返回大写 URL，大小写敏感是刻意的 fail-closed
         assert!(!safe_download_url("HTTPS://GITHUB.COM/a"));
+    }
+
+    #[test]
+    fn newer_version_reports_only_a_strictly_newer_release() {
+        // 原样返回入参：真实调用方传的是 parse_latest_release 已剥掉 v 前缀的版本号。
+        assert_eq!(newer_version("0.0.9", "0.0.10"), Some("0.0.10".to_string()));
+        assert_eq!(newer_version("0.0.9", "v0.0.10"), Some("v0.0.10".to_string()));
+        assert_eq!(newer_version("0.0.10", "0.0.10"), None);
+        assert_eq!(newer_version("0.0.10", "0.0.9"), None);
+    }
+
+    #[test]
+    fn newer_version_refuses_to_guess_on_unparsable_versions() {
+        assert_eq!(newer_version("0.0.10", "0.1.x"), None);
+        assert_eq!(newer_version("nightly", "0.0.1"), None);
+    }
+
+    #[test]
+    fn the_two_asset_kinds_are_selected_by_name() {
+        let parsed = parse_latest_release(SAMPLE).expect("sample must parse");
+        assert!(parsed.installer.as_ref().unwrap().0.ends_with("-setup.exe"));
+        assert!(parsed.offline.as_ref().unwrap().0.ends_with("_x64.exe"));
+        assert!(!parsed.offline.as_ref().unwrap().0.contains("-setup"));
     }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
