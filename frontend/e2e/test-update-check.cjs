@@ -212,8 +212,9 @@ async function checkDownloadInvokeReject(browser) {
   }
 }
 
-// 手动"检查更新"按钮：无更新时显示"未发现新版本"；发现新版本时出卡片并点亮角标
-//（onUpdateFound 回写 App state）。mock 值可以在页面加载后动态改，覆盖两次点击。
+// 手动"检查更新"按钮：覆盖三种结局——检查失败（Err → "检查失败"）、确认无更新
+//（Ok(null) → "未发现新版本"）、发现新版本（卡片 + 角标点亮）。mock 值可在页面
+// 加载后动态改，四段点击覆盖全部状态迁移。
 async function checkManualCheck(browser) {
   const { context, page } = await newPage(browser);
   try {
@@ -224,13 +225,24 @@ async function checkManualCheck(browser) {
     const versionHint = page.locator('.settings-actions .settings-hint').filter({ hasText: '当前版本' });
     assert.equal(await versionHint.count(), 1, '软件更新组应显示当前版本号');
     assert.ok((await versionHint.textContent()).includes('0.0.4'), '当前版本应为 0.0.4, got ' + await versionHint.textContent());
+
+    // 1) 检查失败（后端 Err）：必须说"检查失败"，不能谎报"未发现新版本"
+    await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("__error__"));
     await checkButton.click();
     await page.waitForTimeout(200);
-    assert.equal(await page.locator('.settings-update-card').count(), 0, '无更新时点击后不应有卡片');
+    const failedHint = page.locator('.settings-update-error').filter({ hasText: '检查失败' });
+    assert.equal(await failedHint.count(), 1, '检查失败应显示"检查失败"提示');
+    assert.equal(await page.locator('.settings-update-card').count(), 0, '检查失败不应出卡片');
+
+    // 2) 确认无更新：显示"未发现新版本"
+    await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__(null));
+    await checkButton.click();
+    await page.waitForTimeout(200);
     const hint = page.locator('.settings-actions .settings-hint').filter({ hasText: '未发现新版本' });
     assert.equal(await hint.count(), 1, '无更新时应显示"未发现新版本"提示');
+    assert.equal(await failedHint.count(), 0, '失败提示应被新结果替换');
 
-    // 动态注入新版本，再点一次：卡片出现 + 角标点亮（手动链路与自动链路可见性一致）
+    // 3) 发现新版本：卡片出现 + 角标点亮（手动链路与自动链路可见性一致），提示消失
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9"));
     await checkButton.click();
     await page.waitForTimeout(200);
@@ -239,6 +251,13 @@ async function checkManualCheck(browser) {
     assert.ok((await card.textContent()).includes('9.9.9'), '卡片应显示新版本号');
     assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '手动检查发现新版本应点亮角标');
     assert.equal(await hint.count(), 0, '发现新版本后"未发现新版本"提示应消失');
+
+    // 4) 卡片已显示时检查失败：保持安静（不再与卡片矛盾，真机实测踩过）
+    await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("__error__"));
+    await checkButton.click();
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator('.settings-update-card').count(), 1, '检查失败不得清掉已有卡片');
+    assert.equal(await failedHint.count(), 0, '卡片已显示时检查失败应保持安静');
     console.log('  manual check flow: ok');
   } finally {
     await context.close();
