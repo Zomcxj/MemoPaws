@@ -12,6 +12,14 @@
   let apiTestMode = "success-vision";
   let fullscreen = false;
   let visible = true;
+  // 事件桩：eventHandlers 记录每个事件名注册的 handler id（plugin:event|listen 的返回值），
+  // eventCallbacks 记录 transformCallback 分配的 id → 回调，emit 时按 id 取回调用
+  const eventHandlers = {};
+  const eventCallbacks = {};
+  // latest_release_version 的可注入返回值：null 表示无更新（挂载查询路径静默）
+  let latestReleaseVersion = null;
+  // download_update 的结局模式：success（离线包→ready）/ error（→update-download-error）
+  let downloadMode = "success";
   const MOCK_DATA = {
     key_list: [
       { id: 1, name: "Test LLM Key", type: "llm", url: "https://api.openai.com/v1", url_anthropic: "", note: "Test key", order: 0, created: "1700000000" },
@@ -118,6 +126,22 @@
           resolve({ text: "Mock OCR text" });
         } else if (command === "ai_translate") {
           resolve({ text: "Mock translation" });
+        } else if (command === "latest_release_version") {
+          resolve(latestReleaseVersion);
+        } else if (command === "download_update") {
+          // 镜像真实后端：command 立即 resolve，进度与终态通过事件异步派发。
+          // 安装包路径后端直接交给 NSIS 安装器并 exit(0)，没有终态事件；
+          // error 模式不发 ready，供测试驱动失败路径
+          const kind = args && args.kind;
+          const total = 2097152;
+          setTimeout(function () { window.__MOCK_TAURI_EMIT__("update-download-progress", { received: Math.floor(total / 2), total: total }); }, 30);
+          setTimeout(function () { window.__MOCK_TAURI_EMIT__("update-download-progress", { received: total, total: total }); }, 80);
+          if (downloadMode === "error") {
+            setTimeout(function () { window.__MOCK_TAURI_EMIT__("update-download-error", { message: "Mock download failed" }); }, 150);
+          } else if (kind === "offline") {
+            setTimeout(function () { window.__MOCK_TAURI_EMIT__("update-ready", {}); }, 200);
+          }
+          resolve();
         } else if (command === "clipboard_get_image" || command === "capture_get_image") {
           resolve([137, 80, 78, 71]);
         } else {
@@ -139,6 +163,16 @@
        if (command === "plugin:window|is_fullscreen") { windowCalls.push({ command: command }); return Promise.resolve(fullscreen); }
         if (command === "plugin:window|set_fullscreen") { windowCalls.push({ command: command, value: payload && payload.value }); fullscreen = Boolean(payload && payload.value); return Promise.resolve(); }
         if (command === "plugin:window|hide") { windowCalls.push({ command: command }); visible = false; return Promise.resolve(); }
+        // @tauri-apps/api/event 的 listen/unlisten 走这里；handler 是 transformCallback 返回的 id
+        if (command === "plugin:event|listen") {
+          const name = payload && payload.event;
+          const handler = payload && payload.handler;
+          (eventHandlers[name] = eventHandlers[name] || []).push(handler);
+          return Promise.resolve(handler || 0);
+        }
+        if (command === "plugin:event|unlisten") return Promise.resolve();
+        // getVersion()（@tauri-apps/api/app）用真实应用版本回答，更新卡片显示"当前 0.0.3"
+        if (command === "plugin:app|version") return Promise.resolve("0.0.3");
         if (command === "plugin:window|show") { windowCalls.push({ command: command }); visible = true; return Promise.resolve(); }
         if (command === "plugin:window|set_position" || command === "plugin:window|set_size") { windowCalls.push({ command: command, value: payload && payload.value }); return Promise.resolve(); }
        return mockInvoke(command, payload);
@@ -150,6 +184,31 @@
   window.__MOCK_TAURI_RUNTIME_UPDATES__ = runtimeUpdates;
   window.__MOCK_TAURI_SET_API_MODE__ = function(mode) { apiTestMode = mode; };
   window.__MOCK_TAURI_SET_FULLSCREEN__ = function(value) { fullscreen = Boolean(value); };
+
+  // listen() 注册回调前 @tauri-apps/api 会先调 transformCallback 拿 handler id，
+  // 真实环境由 Tauri IPC 注入，浏览器 mock 环境必须自己补
+  window.__TAURI_INTERNALS__.transformCallback = window.__TAURI_INTERNALS__.transformCallback || function (callback) {
+    const id = Math.floor(Math.random() * 1e9);
+    eventCallbacks[id] = callback;
+    return id;
+  };
+  // 测试可编程 emit 钩子：任意事件 + 任意 payload，payload 完全由测试控制
+  window.__MOCK_TAURI_EMIT__ = function (event, payload) {
+    for (const id of eventHandlers[event] || []) {
+      const callback = eventCallbacks[id];
+      if (typeof callback === "function") {
+        try { callback({ event: event, id: id, payload: payload }); } catch (error) { /* 测试桩忽略回调异常 */ }
+      }
+    }
+  };
+  // 快捷方式：模拟后端冷启动轮询发现新版本（payload 固定 9.9.9，避免每个测试重复写）
+  window.__MOCK_EMIT_UPDATE__ = function () {
+    window.__MOCK_TAURI_EMIT__("update-available", { version: "9.9.9", currentVersion: "0.0.3" });
+  };
+  // 注入 latest_release_version 的返回值（挂载查询路径；传 null 恢复"无更新"）
+  window.__MOCK_TAURI_SET_LATEST_VERSION__ = function (value) { latestReleaseVersion = value; };
+  // 切换 download_update 的结局：success（默认）/ error
+  window.__MOCK_TAURI_SET_DOWNLOAD_MODE__ = function (mode) { downloadMode = mode === "error" ? "error" : "success"; };
 
   // Also set __TAURI__ for older compatibility
   window.__TAURI__ = {

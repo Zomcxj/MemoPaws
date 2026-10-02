@@ -1,0 +1,164 @@
+// Playwright E2E: 更新通知全链路——角标 → 卡片（事件/挂载两条路径）→ 下载（离线/安装/失败）→ 重启。
+// Usage: 保持 `npm --prefix frontend run dev` 运行，然后
+//   node frontend/e2e/test-update-check.cjs
+
+const assert = require('node:assert/strict');
+const { chromium } = require('playwright');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const BASE_URL = 'http://localhost:1420';
+const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, 'mock-tauri.js'), 'utf-8');
+
+// initScript 在 mock 加载后、页面脚本前执行，用于预置 latest_release_version / 下载模式
+async function newPage(browser, initScript) {
+  const context = await browser.newContext({ viewport: { width: 1460, height: 960 } });
+  const page = await context.newPage();
+  await page.addInitScript(MOCK_SCRIPT);
+  if (initScript) await page.addInitScript(initScript);
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForLoadState('networkidle');
+  return { context, page };
+}
+
+async function openSettings(page) {
+  await page.locator('.sidebar-item').filter({ hasText: '设置' }).click();
+  await page.waitForTimeout(400);
+}
+
+async function checkBadge(browser) {
+  const { context, page } = await newPage(browser);
+  try {
+    assert.equal(await page.locator('.sidebar-update-dot').count(), 0, '初始状态不应有角标');
+
+    await page.evaluate(() => window.__MOCK_EMIT_UPDATE__());
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '收到 update-available 后设置入口应有角标');
+    console.log('  badge flow: ok');
+  } finally {
+    await context.close();
+  }
+}
+
+// 卡片路径说明：SettingsPage 刻意不监听 update-available（版本只存本页 state，角标走事件链路），
+// 卡片由挂载时的 latest_release_version 查询驱动——所以下面的卡片用例都通过
+// __MOCK_TAURI_SET_LATEST_VERSION__ 预置版本，而不是 emit 事件。
+
+async function checkOfflineFlow(browser) {
+  const { context, page } = await newPage(browser, () => {
+    window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
+  });
+  try {
+    await openSettings(page);
+    const card = page.locator('.settings-update-card');
+    assert.equal(await card.count(), 1, '设置页应出现更新卡片');
+    const text = await card.textContent();
+    assert.ok(text.includes('9.9.9'), '卡片应显示新版本号, got ' + text);
+    assert.ok(text.includes('0.0.3'), '卡片应显示当前版本号, got ' + text);
+
+    await card.getByRole('button', { name: '下载离线包' }).click();
+    await page.waitForTimeout(600);
+
+    const calls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__);
+    const download = calls.find((entry) => entry.command === 'download_update');
+    assert.ok(download, '应调用 download_update');
+    assert.equal(download.args.kind, 'offline', '离线包按钮应传 kind=offline');
+
+    const restart = card.getByRole('button', { name: '重启以完成更新' });
+    assert.equal(await restart.count(), 1, '收到 update-ready 后应显示重启按钮');
+    await restart.click();
+    await page.waitForTimeout(200);
+    const restartCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__);
+    assert.ok(restartCalls.some((entry) => entry.command === 'restart_app'), '重启按钮应调用 restart_app');
+    console.log('  offline flow: ok');
+  } finally {
+    await context.close();
+  }
+}
+
+// 安装包路径：后端下载完交给 NSIS 安装器并 exit(0)，没有终态事件——
+// 即使等过离线包 ready 本会到达的时刻，UI 也必须停留在下载态而不是就绪态
+async function checkInstallerFlow(browser) {
+  const { context, page } = await newPage(browser, () => {
+    window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
+  });
+  try {
+    await openSettings(page);
+    await page.locator('.settings-update-card').getByRole('button', { name: '下载安装包' }).click();
+    await page.waitForTimeout(600);
+    const calls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__);
+    const download = calls.find((entry) => entry.command === 'download_update');
+    assert.ok(download, '应调用 download_update');
+    assert.equal(download.args.kind, 'installer', '安装包按钮应传 kind=installer');
+    const card = page.locator('.settings-update-card');
+    assert.equal(await card.getByRole('button', { name: '重启以完成更新' }).count(), 0, '安装包路径不应出现就绪态');
+    assert.ok((await card.textContent()).includes('下载中'), '安装包下载中应停留在进度态');
+    console.log('  installer flow: ok');
+  } finally {
+    await context.close();
+  }
+}
+
+// 挂载查询路径：update-available 事件可能在监听器注册前被后端丢弃（冷启动 15 秒轮询），
+// 设置页挂载时主动调 latest_release_version 兜底，mock 里通过 initScript 预置返回值
+async function checkCardFromMountQuery(browser) {
+  const { context, page } = await newPage(browser, () => {
+    window.__MOCK_TAURI_SET_LATEST_VERSION__("0.0.4");
+  });
+  try {
+    await openSettings(page);
+    const card = page.locator('.settings-update-card');
+    assert.equal(await card.count(), 1, 'latest_release_version 返回新版本时挂载即应出现卡片');
+    const text = await card.textContent();
+    assert.ok(text.includes('0.0.4'), '卡片应显示挂载查询到的新版本号, got ' + text);
+    assert.ok(text.includes('0.0.3'), '卡片应显示当前版本号, got ' + text);
+    // 挂载查询路径只更新设置页 state，不走角标链路（角标专属 update-available 事件）
+    assert.equal(await page.locator('.sidebar-update-dot').count(), 0, '挂载查询路径不应点亮角标');
+    console.log('  mount query flow: ok');
+  } finally {
+    await context.close();
+  }
+}
+
+// 失败路径：mock 切到 error 模式后 download_update 派发 update-download-error，
+// UI 应显示错误并恢复两个下载按钮（downloadKind 只清掉失败的那个）
+async function checkDownloadError(browser) {
+  const { context, page } = await newPage(browser, () => {
+    window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
+    window.__MOCK_TAURI_SET_DOWNLOAD_MODE__("error");
+  });
+  try {
+    await openSettings(page);
+    const card = page.locator('.settings-update-card');
+    await card.getByRole('button', { name: '下载离线包' }).click();
+    await page.waitForTimeout(600);
+
+    const text = await card.textContent();
+    assert.ok(text.includes('更新失败：Mock download failed'), '应显示错误信息, got ' + text);
+    assert.equal(await card.getByRole('button', { name: '下载安装包' }).count(), 1, '出错后下载安装包按钮应恢复');
+    assert.equal(await card.getByRole('button', { name: '下载离线包' }).count(), 1, '出错后下载离线包按钮应恢复');
+    assert.equal(await card.getByRole('button', { name: '重启以完成更新' }).count(), 0, '失败后不应进入就绪态');
+    console.log('  download error flow: ok');
+  } finally {
+    await context.close();
+  }
+}
+
+async function main() {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    await checkBadge(browser);
+    await checkOfflineFlow(browser);
+    await checkInstallerFlow(browser);
+    await checkCardFromMountQuery(browser);
+    await checkDownloadError(browser);
+    console.log('Update check tests passed.');
+  } finally {
+    await browser.close();
+  }
+}
+
+main().catch((error) => {
+  console.error('Test failed:', error);
+  process.exit(1);
+});
