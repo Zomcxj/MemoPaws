@@ -124,8 +124,9 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) 
     setDownloadProgress(null);
     setDownloadKind(kind);
     void invoke("download_update", { kind }).catch((reason) => {
-      // 后端下载互斥（并发 invoke）等立即失败走这里，不依赖事件
-      setDownloadKind(null);
+      // 后端下载互斥（并发 invoke）等立即失败走这里，不依赖事件；
+      // 只清掉自己的状态，别把别的下载路径正在进行的 UI 态错杀掉
+      setDownloadKind((current) => (current === kind ? null : current));
       setUpdateError(errorText(reason));
     });
   };
