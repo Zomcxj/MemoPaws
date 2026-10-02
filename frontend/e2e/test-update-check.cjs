@@ -106,14 +106,15 @@ async function checkInstallerFlow(browser) {
 // mock 里通过 initScript 预置返回值
 async function checkCardFromMountQuery(browser) {
   const { context, page } = await newPage(browser, () => {
-    window.__MOCK_TAURI_SET_LATEST_VERSION__("0.0.4");
+    // 预置检测到的最新版本 9.9.9（> 当前 0.0.4 → hasUpdate true）
+    window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
   });
   try {
     await openSettings(page);
     const card = page.locator('.settings-update-card');
     assert.equal(await card.count(), 1, 'latest_release_version 返回新版本时挂载即应出现卡片');
     const text = await card.textContent();
-    assert.ok(text.includes('0.0.4'), '卡片应显示挂载查询到的新版本号, got ' + text);
+    assert.ok(text.includes('9.9.9'), '卡片应显示挂载查询到的新版本号, got ' + text);
     assert.ok(text.includes('0.0.4'), '卡片应显示当前版本号, got ' + text);
     // I1 回归：App 挂载查询必须点亮角标——否则事件丢失时角标整场缺失
     assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '挂载查询应点亮角标');
@@ -234,15 +235,24 @@ async function checkManualCheck(browser) {
     assert.equal(await failedHint.count(), 1, '检查失败应显示"检查失败"提示');
     assert.equal(await page.locator('.settings-update-card').count(), 0, '检查失败不应出卡片');
 
-    // 2) 确认无更新：显示"未发现新版本"
+    // 2) 检测到与当前相同的版本：直接显示检测到的版本号（对齐 agent2api 文案）
+    await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("0.0.4"));
+    await checkButton.click();
+    await page.waitForTimeout(200);
+    const hint = page.locator('.settings-actions .settings-hint').filter({ hasText: '已是最新版本' });
+    assert.equal(await hint.count(), 1, '无更新时应显示"已是最新版本（x.y.z）"提示');
+    assert.ok((await hint.textContent()).includes('0.0.4'), '提示应包含检测到的版本号');
+    assert.equal(await failedHint.count(), 0, '失败提示应被新结果替换');
+
+    // 3) 仓库无 release：回退到"未发现新版本"
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__(null));
     await checkButton.click();
     await page.waitForTimeout(200);
-    const hint = page.locator('.settings-actions .settings-hint').filter({ hasText: '未发现新版本' });
-    assert.equal(await hint.count(), 1, '无更新时应显示"未发现新版本"提示');
-    assert.equal(await failedHint.count(), 0, '失败提示应被新结果替换');
+    assert.equal(await hint.count(), 0, '无 release 时不应显示版本号提示');
+    const noReleaseHint = page.locator('.settings-actions .settings-hint').filter({ hasText: '未发现新版本' });
+    assert.equal(await noReleaseHint.count(), 1, '仓库无 release 时应显示"未发现新版本"');
 
-    // 3) 发现新版本：卡片出现 + 角标点亮（手动链路与自动链路可见性一致），提示消失
+    // 4) 发现新版本：卡片出现 + 角标点亮（手动链路与自动链路可见性一致），提示消失
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9"));
     await checkButton.click();
     await page.waitForTimeout(200);
@@ -250,9 +260,10 @@ async function checkManualCheck(browser) {
     assert.equal(await card.count(), 1, '手动检查发现新版本后应出现卡片');
     assert.ok((await card.textContent()).includes('9.9.9'), '卡片应显示新版本号');
     assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '手动检查发现新版本应点亮角标');
-    assert.equal(await hint.count(), 0, '发现新版本后"未发现新版本"提示应消失');
+    assert.equal(await hint.count(), 0, '发现新版本后"已是最新版本"提示应消失');
+    assert.equal(await noReleaseHint.count(), 0, '发现新版本后"未发现新版本"提示应消失');
 
-    // 4) 卡片已显示时检查失败：保持安静（不再与卡片矛盾，真机实测踩过）
+    // 5) 卡片已显示时检查失败：保持安静（不再与卡片矛盾，真机实测踩过）
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("__error__"));
     await checkButton.click();
     await page.waitForTimeout(200);

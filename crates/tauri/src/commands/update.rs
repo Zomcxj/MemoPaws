@@ -219,9 +219,21 @@ pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
     });
 }
 
+/// 手动/挂载查询的检查结果。对齐参考实现（agent2api update-panel）的 UpdateInfo：
+/// 检测到的最新版本号即使不比当前新也原样返回——否则前端没东西可显示
+/// "当前已是最新版本（x.y.z）"，只能说一句空泛的"未发现新版本"。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheck {
+    /// GitHub 仓库的最新 release 版本号；仓库没有 release 时为 None
+    pub latest_version: Option<String>,
+    pub current_version: String,
+    pub has_update: bool,
+}
+
 /// 供前端主动拉取：轮询事件可能在监听器注册前就被丢弃，挂载时必须能问一次。
-/// 返回 `Ok(None)` 才是"没有新版本"；检查失败（无网络、被限流、仓库不可访问）以
-/// `Err` 传出——调用方必须能区分这两种情况，否则手动检查会在卡片已显示新版本时
+/// 返回 `Ok(_)` 才是"查到了"；检查失败（无网络、被限流、仓库不可访问）以 `Err` 传出
+/// ——调用方必须能区分这两种情况，否则手动检查会在卡片已显示新版本时
 /// 谎报"未发现新版本"（真机实测踩过）。
 ///
 /// `async` 是必需的：函数体是同步 HTTP（直连失败再走代理，两个 20s 超时），而 Tauri 的
@@ -230,10 +242,15 @@ pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
 /// 函数体保持同步 `fn`：里面用的是 reqwest blocking client，改 `async fn` 反而要重写
 /// 整个网络层（blocking client 在 async 上下文里只是阻塞一个 worker，不会 panic）。
 #[tauri::command(async)]
-pub fn latest_release_version(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub fn latest_release_version(app: tauri::AppHandle) -> Result<UpdateCheck, String> {
     let release = fetch_latest_release().ok_or_else(|| "检查更新失败，请稍后再试".to_string())?;
     let current_version = app.package_info().version.to_string();
-    Ok(newer_version(&current_version, &release.version))
+    let has_update = newer_version(&current_version, &release.version).is_some();
+    Ok(UpdateCheck {
+        latest_version: Some(release.version),
+        current_version,
+        has_update,
+    })
 }
 
 /// 下载临时目录：每次落盘前清空，避免失败残留占磁盘。
