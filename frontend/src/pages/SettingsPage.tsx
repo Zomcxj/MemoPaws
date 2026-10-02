@@ -18,14 +18,14 @@ interface AppConfig {
 const DEFAULT_SHORTCUTS: ShortcutState = { capture: "Alt+X", canvas_fit: "Ctrl+F", new_memo: "Ctrl+N", global_search: "Ctrl+Shift+F", toggle_clipboard: "Ctrl+Shift+V" };
 const DEFAULT_CONFIG: AppConfig = { theme: "dark", language: "zh", api_url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", api_model: "glm-4v-flash", data_dir: "", close_behavior: "tray", clipboard_max_items: 50, history_max_items: 100, shortcuts: DEFAULT_SHORTCUTS, text_replacements: [] };
 const copy = {
-  zh: { settings: "设置", theme: "主题", themeMode: "主题模式", auto: "跟随系统", dark: "暗色", light: "亮色", language: "语言", interfaceLanguage: "界面语言", chinese: "中文", english: "English", api: "API 配置", key: "API Key", keyPlaceholder: "输入 API Key", savedKey: "已保存的 API Key", url: "API URL", model: "模型", test: "测试连接", cancel: "取消", testing: "测试中...", clipboard: "剪贴板设置", history: "操作历史", maxItems: "最大条数", clipboardTip: "总条数上限；超出时自动删除最旧的非锁定项", historyTip: "超出时自动删除最旧记录", storage: "存储目录", browse: "浏览", storageTip: "留空则使用默认路径，切换后整个 .memopaws 文件夹会移动", shortcuts: "快捷键", close: "关闭行为", closeWhen: "关闭窗口时", minimize: "最小化", save: "保存设置", saving: "保存中...", saved: "已保存", restart: "数据目录已迁移，请重启应用", conflict: "目标目录已存在数据，请选择处理方式", merge: "合并", overwrite: "覆盖", invalidShortcut: "快捷键无效", duplicateShortcut: "快捷键已被其他动作使用", connection: "连接成功", timeout: "网络超时", connect: "无法连接服务器", unauthorized: "API Key Invalid (401)", forbidden: "无权限 (403)", rateLimit: "请求过多 (429)", serviceUnavailable: "服务暂不可用 (503)", notFound: "路径错误 (404)", generic: "请求失败", vision: "多模态模型，支持图片识别", textOnly: "文本模型，不支持图片文字识别", cancelled: "已取消", replacements: "文本自动替换", replacementHint: "输入缩写后按 Tab，替换为对应文本；仅 Windows 生效", abbreviation: "缩写", replacementText: "替换文本", addReplacement: "添加规则", editReplacement: "编辑规则", deleteReplacement: "删除规则", replacementEmpty: "缩写不能为空", replacementSaved: "替换规则已保存", updateAvailable: "发现新版本", updateDetail: "新版本 {v} 可用（当前 {c}）", downloadInstaller: "下载安装包", downloadOffline: "下载离线包", downloading: "下载中 {p}%", downloadingUnknown: "下载中…", preparingInstall: "正在准备安装，应用即将关闭", updateReady: "更新已就绪，重启应用生效", restartToUpdate: "重启以完成更新", updateFailed: "更新失败：{m}" },
-  en: { settings: "Settings", theme: "Theme", themeMode: "Theme Mode", auto: "System", dark: "Dark", light: "Light", language: "Language", interfaceLanguage: "Language", chinese: "中文", english: "English", api: "API Configuration", key: "API Key", keyPlaceholder: "Enter API Key", savedKey: "Saved API Key", url: "API URL", model: "Model", test: "Test Connection", cancel: "Cancel", testing: "Testing...", clipboard: "Clipboard Settings", history: "History", maxItems: "Max Items", clipboardTip: "Max items; oldest unlocked items auto-deleted when exceeded", historyTip: "Oldest records auto-deleted when exceeded", storage: "Storage Directory", browse: "Browse", storageTip: "Leave empty for the default path; the entire .memopaws folder will be moved", shortcuts: "Keyboard Shortcuts", close: "Close Behavior", closeWhen: "When closing the window", minimize: "Minimize", save: "Save Settings", saving: "Saving...", saved: "Saved", restart: "Data directory migrated. Please restart the app.", conflict: "The target directory already contains data. Choose an action.", merge: "Merge", overwrite: "Overwrite", invalidShortcut: "Invalid shortcut", duplicateShortcut: "Shortcut is already used by another action", connection: "Connection successful", timeout: "Network timeout", connect: "Could not connect to server", unauthorized: "Invalid API Key (401)", forbidden: "Forbidden (403)", rateLimit: "Rate limited (429)", serviceUnavailable: "Service unavailable (503)", notFound: "Path error (404)", generic: "Request failed", vision: "Multimodal model, image recognition supported", textOnly: "Text-only model, image recognition unavailable", cancelled: "Cancelled", replacements: "Text Replacement", replacementHint: "Type an abbreviation and press Tab to replace it; Windows only", abbreviation: "Abbreviation", replacementText: "Replacement", addReplacement: "Add rule", editReplacement: "Edit rule", deleteReplacement: "Delete rule", replacementEmpty: "Abbreviation is required", replacementSaved: "Replacement rule saved", updateAvailable: "Update available", updateDetail: "Version {v} is available (current {c})", downloadInstaller: "Download installer", downloadOffline: "Download offline package", downloading: "Downloading {p}%", downloadingUnknown: "Downloading…", preparingInstall: "Preparing to install; the app will close shortly", updateReady: "Update ready; restart the app to apply", restartToUpdate: "Restart to finish update", updateFailed: "Update failed: {m}" },
+  zh: { settings: "设置", theme: "主题", themeMode: "主题模式", auto: "跟随系统", dark: "暗色", light: "亮色", language: "语言", interfaceLanguage: "界面语言", chinese: "中文", english: "English", api: "API 配置", key: "API Key", keyPlaceholder: "输入 API Key", savedKey: "已保存的 API Key", url: "API URL", model: "模型", test: "测试连接", cancel: "取消", testing: "测试中...", clipboard: "剪贴板设置", history: "操作历史", maxItems: "最大条数", clipboardTip: "总条数上限；超出时自动删除最旧的非锁定项", historyTip: "超出时自动删除最旧记录", storage: "存储目录", browse: "浏览", storageTip: "留空则使用默认路径，切换后整个 .memopaws 文件夹会移动", shortcuts: "快捷键", close: "关闭行为", closeWhen: "关闭窗口时", minimize: "最小化", save: "保存设置", saving: "保存中...", saved: "已保存", restart: "数据目录已迁移，请重启应用", conflict: "目标目录已存在数据，请选择处理方式", merge: "合并", overwrite: "覆盖", invalidShortcut: "快捷键无效", duplicateShortcut: "快捷键已被其他动作使用", connection: "连接成功", timeout: "网络超时", connect: "无法连接服务器", unauthorized: "API Key Invalid (401)", forbidden: "无权限 (403)", rateLimit: "请求过多 (429)", serviceUnavailable: "服务暂不可用 (503)", notFound: "路径错误 (404)", generic: "请求失败", vision: "多模态模型，支持图片识别", textOnly: "文本模型，不支持图片文字识别", cancelled: "已取消", replacements: "文本自动替换", replacementHint: "输入缩写后按 Tab，替换为对应文本；仅 Windows 生效", abbreviation: "缩写", replacementText: "替换文本", addReplacement: "添加规则", editReplacement: "编辑规则", deleteReplacement: "删除规则", replacementEmpty: "缩写不能为空", replacementSaved: "替换规则已保存", updateAvailable: "发现新版本", updateDetail: "新版本 {v} 可用（当前 {c}）", downloadInstaller: "下载安装包", downloadOffline: "下载离线包", downloading: "下载中 {p}%", downloadingUnknown: "下载中…", preparingInstall: "正在准备安装，应用即将关闭", updateReady: "更新已就绪，重启应用生效", restartToUpdate: "重启以完成更新", updateFailed: "更新失败：{m}", updateSection: "软件更新", checkUpdate: "检查更新", checkingUpdate: "检查中…", noUpdateFound: "未发现新版本" },
+  en: { settings: "Settings", theme: "Theme", themeMode: "Theme Mode", auto: "System", dark: "Dark", light: "Light", language: "Language", interfaceLanguage: "Language", chinese: "中文", english: "English", api: "API Configuration", key: "API Key", keyPlaceholder: "Enter API Key", savedKey: "Saved API Key", url: "API URL", model: "Model", test: "Test Connection", cancel: "Cancel", testing: "Testing...", clipboard: "Clipboard Settings", history: "History", maxItems: "Max Items", clipboardTip: "Max items; oldest unlocked items auto-deleted when exceeded", historyTip: "Oldest records auto-deleted when exceeded", storage: "Storage Directory", browse: "Browse", storageTip: "Leave empty for the default path; the entire .memopaws folder will be moved", shortcuts: "Keyboard Shortcuts", close: "Close Behavior", closeWhen: "When closing the window", minimize: "Minimize", save: "Save Settings", saving: "Saving...", saved: "Saved", restart: "Data directory migrated. Please restart the app.", conflict: "The target directory already contains data. Choose an action.", merge: "Merge", overwrite: "Overwrite", invalidShortcut: "Invalid shortcut", duplicateShortcut: "Shortcut is already used by another action", connection: "Connection successful", timeout: "Network timeout", connect: "Could not connect to server", unauthorized: "Invalid API Key (401)", forbidden: "Forbidden (403)", rateLimit: "Rate limited (429)", serviceUnavailable: "Service unavailable (503)", notFound: "Path error (404)", generic: "Request failed", vision: "Multimodal model, image recognition supported", textOnly: "Text-only model, image recognition unavailable", cancelled: "Cancelled", replacements: "Text Replacement", replacementHint: "Type an abbreviation and press Tab to replace it; Windows only", abbreviation: "Abbreviation", replacementText: "Replacement", addReplacement: "Add rule", editReplacement: "Edit rule", deleteReplacement: "Delete rule", replacementEmpty: "Abbreviation is required", replacementSaved: "Replacement rule saved", updateAvailable: "Update available", updateDetail: "Version {v} is available (current {c})", downloadInstaller: "Download installer", downloadOffline: "Download offline package", downloading: "Downloading {p}%", downloadingUnknown: "Downloading…", preparingInstall: "Preparing to install; the app will close shortly", updateReady: "Update ready; restart the app to apply", restartToUpdate: "Restart to finish update", updateFailed: "Update failed: {m}", updateSection: "Updates", checkUpdate: "Check for updates", checkingUpdate: "Checking…", noUpdateFound: "No update found" },
 } as const;
 type Texts = (typeof copy)[Lang];
 const shortcutLabels = { capture: ["截图识别", "Capture"], canvas_fit: ["画布自适应", "Canvas Fit"], new_memo: ["新建备忘录", "New Memo"], global_search: ["全局搜索", "Global Search"], toggle_clipboard: ["打开剪切板", "Open Clipboard"] };
 
-interface Props { theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onLanguageChange?: (lang: Lang) => void; }
-export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) {
+interface Props { theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onLanguageChange?: (lang: Lang) => void; onUpdateFound?: (version: string) => void; }
+export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateFound }: Props) {
   const [config, setConfig] = useState<AppConfig>({ ...DEFAULT_CONFIG, theme });
   const [lang, setLang] = useState<Lang>("zh");
   const [apiKey, setApiKey] = useState("");
@@ -39,6 +39,8 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) 
   const [conflict, setConflict] = useState(false);
   const [initialDataDir, setInitialDataDir] = useState("");
   const [updateInfo, setUpdateInfo] = useState<{ version: string; currentVersion: string } | null>(null);
+  // 手动检查更新的状态：checking 期间禁点，upToDate 表示这轮检查没发现新版本
+  const [checkState, setCheckState] = useState<"idle" | "checking" | "upToDate">("idle");
   // downloadKind 非 null 表示正在下载对应类型；done 表示离线包已替换好 exe，等重启生效
   const [downloadKind, setDownloadKind] = useState<"installer" | "offline" | null>(null);
   const [downloadDone, setDownloadDone] = useState(false);
@@ -79,7 +81,8 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) 
 
   // 挂载时主动问一次最新版本：后端轮询事件可能在监听器注册前被丢弃。
   // latest_release_version 每次调用都打一次 GitHub API（未认证 60 次/小时/IP），
-  // 所以只在挂载时调一次，禁止进轮询或渲染路径；返回 None（无网络/限流/无更新）时静默。
+  // 所以自动路径只在挂载时调一次，禁止进轮询或渲染路径；用户手动点"检查更新"是
+  // 显式触发，频率由用户控制。返回 None（无网络/限流/无更新）时静默。
   // 版本只存在本页 state，不回写 App.tsx——角标走 update-available 事件链路，双写会不一致。
   useEffect(() => {
     let active = true;
@@ -95,6 +98,29 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) 
       active = false;
     };
   }, []);
+
+  // 手动检查：用户显式触发，不受挂载查询的"只调一次"约束。
+  // 后端 None 无法区分"无更新"与"检查失败"，所以文案用"未发现新版本"而不是
+  // "已是最新"——两者都诚实地等于"这轮没找到"。
+  const checkForUpdate = () => {
+    if (checkState === "checking") return;
+    setCheckState("checking");
+    Promise.all([
+      invoke<string | null>("latest_release_version"),
+      getVersion().catch(() => ""),
+    ])
+      .then(([latest, current]) => {
+        if (latest) {
+          setUpdateInfo({ version: latest, currentVersion: current });
+          // 回写给 App 点亮角标：手动确认的新版本必须与自动链路可见性一致
+          onUpdateFound?.(latest);
+          setCheckState("idle");
+        } else {
+          setCheckState("upToDate");
+        }
+      })
+      .catch(() => setCheckState("upToDate"));
+  };
 
   // 下载进度与结果事件。注意安装包路径没有终态事件：下载完成后后端直接 app.exit(0)
   // 交给 NSIS 安装器，所以 installer 下载中不等待"完成"，失败时靠 error 事件恢复。
@@ -301,6 +327,7 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange }: Props) 
     <Group title={t.storage}><div className="settings-directory"><input aria-label={t.storage} value={dataDir} placeholder={t.storageTip} onChange={(e) => { setDataDir(e.target.value); setDirty(true); }} /><button type="button" onClick={chooseDirectory}>{t.browse}</button></div><p className="settings-hint">{t.storageTip}</p></Group>
      <Group title={t.shortcuts}>{shortcutKeys.map((key) => <div className="settings-shortcut" key={key}><span>{shortcutLabels[key as keyof typeof shortcutLabels][lang === "en" ? 1 : 0]}</span><input aria-label={`${shortcutLabels[key as keyof typeof shortcutLabels][lang === "en" ? 1 : 0]} shortcut`} value={config.shortcuts[key] || ""} readOnly onKeyDown={(e) => recordShortcut(key, e)} /><button type="button" onClick={() => resetShortcut(key)}>{lang === "en" ? "Reset" : "重置"}</button></div>)}</Group>
      <Group title={t.close}><Row><SegmentedControl value={config.close_behavior} options={[["exit", lang === "zh" ? "退出" : "Exit"], ["tray", lang === "zh" ? "任务栏" : "Tray"]]} onChange={(v) => immediate("close_behavior", v as CloseBehavior)} /></Row></Group>
+     <Group title={t.updateSection}><div className="settings-actions"><button type="button" onClick={checkForUpdate} disabled={checkState === "checking"}>{checkState === "checking" ? t.checkingUpdate : t.checkUpdate}</button>{checkState === "upToDate" ? <span className="settings-hint" role="status">{t.noUpdateFound}</span> : null}</div></Group>
     <div className="settings-footer"><button className="settings-save" disabled={!dirty || saving} onClick={save}>{saving ? t.saving : t.save}</button></div>
   </section>;
 }

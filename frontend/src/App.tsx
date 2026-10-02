@@ -115,7 +115,7 @@ export default function App() {
       case "memo": return <MemoPage language={language} onDirtyChange={setMemoDirty} renderTheme={resolvedTheme} />;
       case "keys": return <KeysPage language={language} />;
       case "clipboard": return <ClipboardPage language={language} />;
-      case "settings": return <SettingsPage theme={theme} onThemeChange={setTheme} onLanguageChange={changeLanguage} />;
+      case "settings": return <SettingsPage theme={theme} onThemeChange={setTheme} onLanguageChange={changeLanguage} onUpdateFound={setLatestVersion} />;
     }
   };
 
