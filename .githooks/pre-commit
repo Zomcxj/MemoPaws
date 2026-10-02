@@ -7,6 +7,12 @@
 
 set -e
 
+# Windows 下 rustc 深递归会打爆默认栈/提交内存，必须与人工跑测试时的口径一致。
+# JOBS=1：系统 commit 内存吃紧时（如 16GB 机器只剩 3GB）JOBS=2 会让两个 rustc
+# 同时编 windows 大 crate 而崩（STATUS_STACK_BUFFER_OVERRUN），单并发更稳。
+export RUST_MIN_STACK=67108864
+export CARGO_BUILD_JOBS=1
+
 echo "[pre-commit] cargo test --workspace"
 RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2 cargo test --workspace
 
