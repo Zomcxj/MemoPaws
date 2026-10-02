@@ -18,6 +18,7 @@ interface SidebarProps {
   currentPage: Page;
   onNavigate: (page: Page) => void;
   language?: Lang;
+  updateAvailable?: boolean;
 }
 
 const labels: Record<Lang, Record<Page, string>> = {
@@ -33,7 +34,7 @@ const navItems = [
   { page: "keys" as Page, icon: "key.svg" },
 ];
 
-export default function Sidebar({ currentPage, onNavigate, language = "zh" }: SidebarProps) {
+export default function Sidebar({ currentPage, onNavigate, language = "zh", updateAvailable }: SidebarProps) {
   const [expanded, setExpanded] = useState(() => !readCollapsed());
   const t = labels[language] || labels.zh;
   const collapseLabel = language === "en" ? (expanded ? "Collapse sidebar" : "Expand sidebar") : (expanded ? "折叠侧边栏" : "展开侧边栏");
@@ -71,6 +72,9 @@ export default function Sidebar({ currentPage, onNavigate, language = "zh" }: Si
               aria-label={label}
               aria-current={currentPage === page ? "page" : undefined}
             >
+              {page === "settings" && updateAvailable ? (
+                <span className="sidebar-update-dot" aria-hidden="true" />
+              ) : null}
               <img src={`/assets/icons/${icon}`} alt="" aria-hidden="true" />
               <span className="sidebar-label">{label}</span>
             </button>
