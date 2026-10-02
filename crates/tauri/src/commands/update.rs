@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering as AtomicOrder};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrder};
 
 use tauri::Emitter;
 
@@ -185,39 +185,20 @@ enum Exit {
 const LOCAL_PROXY_PORTS: [u16; 3] = [7890, 7897, 10809];
 const EXIT_COUNT: usize = 2 + LOCAL_PROXY_PORTS.len();
 
-fn exit_at(index: usize) -> Exit {
-    match index {
-        0 => Exit::Direct,
-        1 => Exit::System,
-        n => Exit::Local(LOCAL_PROXY_PORTS[n - 2]),
-    }
-}
-
-/// 出口轮询的粘滞状态：下次请求从哪个出口起手。初始指向 7890——本应用的存在
-/// 理由就是 GitHub 更新，用户机器上有本地代理是大概率事件，且端口拒绝连接
-/// 是毫秒级失败，先试本地端口没有超时代价；没有代理的用户多花几毫秒直达直连。
-static PREFER_EXIT: AtomicU8 = AtomicU8::new(2);
-
-/// 根据这轮探测结果算下次的起手出口：拿到 2xx 的出口粘住；没有任何 2xx 但有
-/// 出口应答过（传输层通，比如限流 403）就从它起手；全军覆没才轮转到下一家。
-fn next_start(last_start: usize, succeeded: Option<usize>, answered: Option<usize>) -> usize {
-    if let Some(index) = succeeded {
-        return index;
-    }
-    if let Some(index) = answered {
-        return index;
-    }
-    (last_start + 1) % EXIT_COUNT
-}
+/// 固定出口顺序，每次请求都按此尝试：本地代理端口优先（拒绝连接是毫秒级
+/// 失败，几乎零代价），然后直连，最后系统代理（没开系统代理时它与直连等价，
+/// 会白等一个超时，所以殿后）。
+const EXITS: [Exit; EXIT_COUNT] = [
+    Exit::Local(7890),
+    Exit::Local(7897),
+    Exit::Local(10809),
+    Exit::Direct,
+    Exit::System,
+];
 
 fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Response> {
-    let start = PREFER_EXIT.load(AtomicOrder::Relaxed) as usize;
-    let mut succeeded = None;
-    let mut answered = None;
-    let mut found = None;
-    for offset in 0..EXIT_COUNT {
-        let index = (start + offset) % EXIT_COUNT;
-        let Some(client) = client(exit_at(index), total_timeout) else { continue };
+    for exit in EXITS {
+        let Some(client) = client(exit, total_timeout) else { continue };
         let Ok(response) = client
             .get(url)
             .header("Accept", "application/vnd.github+json")
@@ -226,19 +207,12 @@ fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Opti
             continue;
         };
         if response.status().is_success() {
-            succeeded = Some(index);
-            found = Some(response);
-            break;
+            return Some(response);
         }
         // 非 2xx：换下一个出口。不同出口（直连被墙页 / 代理出口限流）会给出
         // 不同答案，"服务器已答复就定案"只对同一出口成立。
-        if answered.is_none() {
-            answered = Some(index);
-        }
     }
-    let next = next_start(start, succeeded, answered);
-    PREFER_EXIT.store(next as u8, AtomicOrder::Relaxed);
-    found
+    None
 }
 
 /// 最近一次成功抓取的 release 与抓取时间。真机实测：卡片刚显示完新版本，
@@ -719,17 +693,6 @@ mod tests {
         assert_eq!(progress_event(0, 64 * 1024, 0, PROGRESS_INTERVAL_MS), None);
         assert_eq!(progress_event(0, u64::MAX, 0, PROGRESS_INTERVAL_MS), None);
         assert!(drain_progress(0, 64 * 1024).is_empty());
-    }
-
-    #[test]
-    fn start_sticks_to_the_exit_that_succeeded() {
-        // 拿到 2xx 的出口就是赢家：上次 7890（index 2）成功，下次还从它起手
-        assert_eq!(next_start(0, Some(2), None), 2);
-        // 没有 2xx 但有出口应答过（如限流 403）：从应答者起手（传输层通）
-        assert_eq!(next_start(0, None, Some(2)), 2);
-        // 全军覆没：轮转到下一家，别总撞同一条死路
-        assert_eq!(next_start(2, None, None), 3);
-        assert_eq!(next_start(EXIT_COUNT - 1, None, None), 0);
     }
 
     #[test]
