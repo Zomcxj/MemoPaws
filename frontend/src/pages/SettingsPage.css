@@ -340,6 +340,7 @@
   flex-direction: column;
   gap: var(--space-8);
   padding: var(--space-12);
+  margin-bottom: var(--space-8);
   border: 1px solid var(--accent);
   border-radius: var(--radius-10);
   background: var(--bg-active);
