@@ -137,9 +137,10 @@ pub(crate) fn parse_latest_release(body: &str) -> Option<LatestRelease> {
 pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
 pub(crate) const FIRST_CHECK_DELAY: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// 直连优先，失败再走系统代理。开发者环境里 GitHub 常需代理，
-/// 但直连成功时不应多绕一跳。reqwest 默认自动读取环境变量与 Windows
-/// 注册表中的系统代理（system-proxy feature），所以代理 client 就是默认构造。
+/// 起手出口由 PREFER_PROXY 粘滞状态决定（见 fetch_response），失败再换另一条。
+/// 开发者环境里 GitHub 常需代理，但直连可用时不应多绕一跳。reqwest 默认自动
+/// 读取环境变量与 Windows 注册表中的系统代理（system-proxy feature），所以代理
+/// client 就是默认构造。
 ///
 /// API 检查与文件下载必须分开设超时：reqwest 的 client 级 `timeout` 覆盖
 /// "从建连到响应体读完"全程，29MB 离线包走 20s 总超时需要 ≥12Mbps，慢速用户的
@@ -161,8 +162,28 @@ fn client(proxy: bool, total_timeout: Option<std::time::Duration>) -> Option<req
     builder.build().ok()
 }
 
+/// 出口轮询的粘滞状态：true = 下次先试系统代理，false = 先试直连。
+static PREFER_PROXY: AtomicBool = AtomicBool::new(false);
+
+/// 根据这次请求的结果算下次的起手式：
+/// - 有应答的出口就是可用出口，粘住它。被墙网络下直连永远超时，固定
+///   "先直连"会让每次请求都白烧一个 20s 超时才轮到代理（真机实测）；
+/// - 两条路都没应答则翻转起点，避免连续撞同一条死路。
+fn next_preference(prefer_proxy: bool, answered: bool, used_proxy: bool) -> bool {
+    if answered {
+        used_proxy
+    } else {
+        !prefer_proxy
+    }
+}
+
 fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Response> {
-    for proxy in [false, true] {
+    let prefer_proxy = PREFER_PROXY.load(AtomicOrder::Relaxed);
+    let order = if prefer_proxy { [true, false] } else { [false, true] };
+    let mut answered = false;
+    let mut used_proxy = false;
+    let mut found = None;
+    for proxy in order {
         let Some(client) = client(proxy, total_timeout) else { continue };
         let Ok(response) = client
             .get(url)
@@ -173,9 +194,13 @@ fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Opti
         };
         // 只有传输层失败才值得换出口重试；服务器已经答复（4xx/5xx）时换代理
         // 只会重复同一个答案并白等一个超时。
-        return response.status().is_success().then_some(response);
+        answered = true;
+        used_proxy = proxy;
+        found = response.status().is_success().then_some(response);
+        break;
     }
-    None
+    PREFER_PROXY.store(next_preference(prefer_proxy, answered, used_proxy), AtomicOrder::Relaxed);
+    found
 }
 
 /// 最近一次成功抓取的 release 与抓取时间。真机实测：卡片刚显示完新版本，
@@ -656,6 +681,16 @@ mod tests {
         assert_eq!(progress_event(0, 64 * 1024, 0, PROGRESS_INTERVAL_MS), None);
         assert_eq!(progress_event(0, u64::MAX, 0, PROGRESS_INTERVAL_MS), None);
         assert!(drain_progress(0, 64 * 1024).is_empty());
+    }
+
+    #[test]
+    fn preference_sticks_to_the_exit_that_answered() {
+        // 有应答的出口就是赢家：上次走代理成功，下次仍然代理起手
+        assert!(next_preference(false, true, true));
+        assert!(!next_preference(true, true, false));
+        // 两条路都没应答：翻转起点，别总撞同一条死路
+        assert!(!next_preference(true, false, true));
+        assert!(next_preference(false, false, false));
     }
 
     #[test]
