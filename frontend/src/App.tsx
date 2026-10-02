@@ -86,6 +86,18 @@ export default function App() {
     };
   }, []);
 
+  // 更新通知：后端轮询发现新版本时 emit update-available，仅记录版本号供角标显示
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<{ version: string; currentVersion: string }>("update-available", (event) => {
+      setLatestVersion(event.payload.version);
+    });
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+
   const renderPage = () => {
     switch (currentPage) {
       case "recognize": return <RecognizePage language={language} />;
@@ -103,6 +115,7 @@ export default function App() {
           currentPage={currentPage}
           onNavigate={navigate}
           language={language}
+          updateAvailable={latestVersion !== null}
         />
         <main className="app-content">{renderPage()}</main>
       </div>

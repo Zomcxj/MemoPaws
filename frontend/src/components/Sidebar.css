@@ -60,6 +60,7 @@
 }
 
 .sidebar-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-10);
@@ -128,4 +129,16 @@
   .sidebar-toggle img {
     transition: none;
   }
+}
+
+/* 设置入口的更新角标：绝对定位右上角，颜色复用主题 --error 变量以适配明暗主题 */
+.sidebar-update-dot {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--error);
+  pointer-events: none;
 }
