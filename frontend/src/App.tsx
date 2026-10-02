@@ -102,9 +102,9 @@ export default function App() {
     // update-available 每进程只 emit 一次（后端 notified 去重）：冷启动 15s 首检若在
     // 监听器注册前发生，事件被丢弃，角标整场缺失。挂载时补一次主动查询闭合角标链路；
     // 返回 null（无更新/检查失败）或 invoke 失败时静默，不打扰无网络的用户。
-    void invoke<string | null>("latest_release_version")
-      .then((version) => {
-        if (version) setLatestVersion(version);
+    void invoke<{ latestVersion: string | null; hasUpdate: boolean }>("latest_release_version")
+      .then((check) => {
+        if (check?.hasUpdate && check.latestVersion) setLatestVersion(check.latestVersion);
       })
       .catch(() => {});
   }, []);
