@@ -19,6 +19,7 @@
   // latest_release_version 的可注入返回值：null 表示无更新（挂载查询路径静默）
   let latestReleaseVersion = null;
   // download_update 的结局模式：success（离线包→ready）/ error（→update-download-error）
+  // / reject（invoke 立即 reject 且不发任何事件，镜像后端下载互斥时的立即失败）
   let downloadMode = "success";
   const MOCK_DATA = {
     key_list: [
@@ -72,7 +73,7 @@
 
    function mockInvoke(command, args) {
      commandCalls.push({ command: command, args: args || null, visible: visible });
-     return new Promise(function(resolve) {
+     return new Promise(function(resolve, reject) {
       setTimeout(function() {
         if (command === "get_theme") {
           resolve(backendTheme);
@@ -129,6 +130,12 @@
         } else if (command === "latest_release_version") {
           resolve(latestReleaseVersion);
         } else if (command === "download_update") {
+          // reject 模式：invoke 立即失败、不发任何事件——UI 必须靠 invoke 的
+          // catch 分支（SettingsPage startDownload）恢复，覆盖 3d58123 的守卫路径
+          if (downloadMode === "reject") {
+            reject(new Error("Mock download rejected"));
+            return;
+          }
           // 镜像真实后端：command 立即 resolve，进度与终态通过事件异步派发。
           // 安装包路径后端直接交给 NSIS 安装器并 exit(0)，没有终态事件；
           // error 模式不发 ready，供测试驱动失败路径
@@ -153,8 +160,8 @@
   }
 
   // Tauri 2 uses __TAURI_INTERNALS__ not __TAURI__
+  // invoke 统一走下面的包装函数（plugin:* 分流 + 兜底转 mockInvoke）
   window.__TAURI_INTERNALS__ = {
-    invoke: mockInvoke,
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
     callbacks: {},
      invoke: function(command, payload) {
@@ -170,7 +177,19 @@
           (eventHandlers[name] = eventHandlers[name] || []).push(handler);
           return Promise.resolve(handler || 0);
         }
-        if (command === "plugin:event|unlisten") return Promise.resolve();
+        if (command === "plugin:event|unlisten") {
+          // @tauri-apps/api/event._unlisten 传 { event, eventId }，eventId 即 listen 时
+          // 注册进 eventHandlers 的 handler id。必须移除，否则页面导航往返后
+          // 一次 emit 会触发所有历史 handler——真实 Tauri 在 unlisten 后不再投递
+          const name = payload && payload.event;
+          const eventId = payload && payload.eventId;
+          const handlers = eventHandlers[name];
+          if (Array.isArray(handlers)) {
+            const index = handlers.indexOf(eventId);
+            if (index !== -1) handlers.splice(index, 1);
+          }
+          return Promise.resolve();
+        }
         // getVersion()（@tauri-apps/api/app）用真实应用版本回答，更新卡片显示"当前 0.0.3"
         if (command === "plugin:app|version") return Promise.resolve("0.0.3");
         if (command === "plugin:window|show") { windowCalls.push({ command: command }); visible = true; return Promise.resolve(); }
@@ -188,16 +207,22 @@
   // listen() 注册回调前 @tauri-apps/api 会先调 transformCallback 拿 handler id，
   // 真实环境由 Tauri IPC 注入，浏览器 mock 环境必须自己补
   window.__TAURI_INTERNALS__.transformCallback = window.__TAURI_INTERNALS__.transformCallback || function (callback) {
+    // 忽略 once 参数：@tauri-apps/api 的 once() 是用 listen + 手动 unlisten 在 JS 层实现的，
+    // listen 路径从不传 once，mock 无需模拟"首次调用后自动注销"
     const id = Math.floor(Math.random() * 1e9);
     eventCallbacks[id] = callback;
     return id;
   };
-  // 测试可编程 emit 钩子：任意事件 + 任意 payload，payload 完全由测试控制
+  // 测试可编程 emit 钩子：任意事件 + 任意 payload，payload 完全由测试控制。
+  // 真实 Tauri 事件经 IPC 异步送达，所以每个回调用 setTimeout(0) 延后一个宏任务，
+  // 保持与真实环境一致的时序语义（emit 后同步断言不成立）
   window.__MOCK_TAURI_EMIT__ = function (event, payload) {
     for (const id of eventHandlers[event] || []) {
       const callback = eventCallbacks[id];
       if (typeof callback === "function") {
-        try { callback({ event: event, id: id, payload: payload }); } catch (error) { /* 测试桩忽略回调异常 */ }
+        setTimeout(function () {
+          try { callback({ event: event, id: id, payload: payload }); } catch (error) { console.warn("[Mock] event handler error for " + event + ":", error); }
+        }, 0);
       }
     }
   };
@@ -207,8 +232,8 @@
   };
   // 注入 latest_release_version 的返回值（挂载查询路径；传 null 恢复"无更新"）
   window.__MOCK_TAURI_SET_LATEST_VERSION__ = function (value) { latestReleaseVersion = value; };
-  // 切换 download_update 的结局：success（默认）/ error
-  window.__MOCK_TAURI_SET_DOWNLOAD_MODE__ = function (mode) { downloadMode = mode === "error" ? "error" : "success"; };
+  // 切换 download_update 的结局：success（默认）/ error（事件报错）/ reject（invoke 立即失败）
+  window.__MOCK_TAURI_SET_DOWNLOAD_MODE__ = function (mode) { downloadMode = mode === "error" || mode === "reject" ? mode : "success"; };
 
   // Also set __TAURI__ for older compatibility
   window.__TAURI__ = {
