@@ -140,17 +140,30 @@ pub(crate) const FIRST_CHECK_DELAY: std::time::Duration = std::time::Duration::f
 /// 直连优先，失败再走系统代理。开发者环境里 GitHub 常需代理，
 /// 但直连成功时不应多绕一跳。reqwest 默认自动读取环境变量与 Windows
 /// 注册表中的系统代理（system-proxy feature），所以代理 client 就是默认构造。
-fn client(proxy: bool) -> Option<reqwest::blocking::Client> {
+///
+/// API 检查与文件下载必须分开设超时：reqwest 的 client 级 `timeout` 覆盖
+/// "从建连到响应体读完"全程，29MB 离线包走 20s 总超时需要 ≥12Mbps，慢速用户的
+/// 应用内更新会永远失败。所以：
+/// - API 路径传 `Some(20s)`——JSON 只有几 KB，20s 足够；
+/// - 下载路径传 `None`——不设总超时，只靠 connect_timeout(20s) 挡死连接。
+///   不设 3600s 兜底是因为真正的 56kbps 边缘用户下 29MB 要 70 分钟；下载线程
+///   卡在 read 上时 TCP 重传/保活最终会报错释放线程，代价只是 DOWNLOADING 互斥
+///   多占一会儿，可接受。
+fn client(proxy: bool, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Client> {
     let builder = reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
-        .timeout(std::time::Duration::from_secs(20));
+        .connect_timeout(std::time::Duration::from_secs(20));
+    let builder = match total_timeout {
+        Some(timeout) => builder.timeout(timeout),
+        None => builder,
+    };
     let builder = if proxy { builder } else { builder.no_proxy() };
     builder.build().ok()
 }
 
-fn fetch_response(url: &str) -> Option<reqwest::blocking::Response> {
+fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Response> {
     for proxy in [false, true] {
-        let Some(client) = client(proxy) else { continue };
+        let Some(client) = client(proxy, total_timeout) else { continue };
         let Ok(response) = client
             .get(url)
             .header("Accept", "application/vnd.github+json")
@@ -166,7 +179,7 @@ fn fetch_response(url: &str) -> Option<reqwest::blocking::Response> {
 }
 
 fn fetch_latest_release() -> Option<LatestRelease> {
-    parse_latest_release(&fetch_response(RELEASE_API)?.text().ok()?)
+    parse_latest_release(&fetch_response(RELEASE_API, Some(std::time::Duration::from_secs(20)))?.text().ok()?)
 }
 
 /// latest 比 current 新时返回 latest，否则 None。调用方传进来的 latest 应是已剥掉
@@ -323,7 +336,8 @@ fn download_with_progress(
     expected_size: u64,
 ) -> Result<Vec<u8>, String> {
     // blocking 的 Response 没有 chunk()（那是 async 的 API），它实现的是 std::io::Read。
-    let mut response = fetch_response(url).ok_or("下载请求失败")?;
+    // 下载 client 不设总超时（理由见 client 的注释），只靠 connect_timeout 挡死连接。
+    let mut response = fetch_response(url, None).ok_or("下载请求失败")?;
     let total = response.content_length().unwrap_or(expected_size);
     let mut bytes: Vec<u8> = Vec::with_capacity(total.min(64 * 1024 * 1024) as usize);
     let mut buffer = [0u8; 64 * 1024];

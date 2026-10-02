@@ -40,9 +40,11 @@ async function checkBadge(browser) {
   }
 }
 
-// 卡片路径说明：SettingsPage 刻意不监听 update-available（版本只存本页 state，角标走事件链路），
+// 卡片路径说明：SettingsPage 刻意不监听 update-available（版本只存本页 state），
 // 卡片由挂载时的 latest_release_version 查询驱动——所以下面的卡片用例都通过
-// __MOCK_TAURI_SET_LATEST_VERSION__ 预置版本，而不是 emit 事件。
+// __MOCK_TAURI_SET_LATEST_VERSION__ 预置版本，而不是 emit 事件。角标同样由
+// App 挂载时的 latest_release_version 查询点亮（update-available 事件可能在
+// 监听器注册前被后端丢弃），所以预置非 null 返回值时卡片与角标应同时出现。
 
 async function checkOfflineFlow(browser) {
   const { context, page } = await newPage(browser, () => {
@@ -100,7 +102,8 @@ async function checkInstallerFlow(browser) {
 }
 
 // 挂载查询路径：update-available 事件可能在监听器注册前被后端丢弃（冷启动 15 秒轮询），
-// 设置页挂载时主动调 latest_release_version 兜底，mock 里通过 initScript 预置返回值
+// 设置页与 App 挂载时都主动调 latest_release_version 兜底（后者驱动角标），
+// mock 里通过 initScript 预置返回值
 async function checkCardFromMountQuery(browser) {
   const { context, page } = await newPage(browser, () => {
     window.__MOCK_TAURI_SET_LATEST_VERSION__("0.0.4");
@@ -112,8 +115,8 @@ async function checkCardFromMountQuery(browser) {
     const text = await card.textContent();
     assert.ok(text.includes('0.0.4'), '卡片应显示挂载查询到的新版本号, got ' + text);
     assert.ok(text.includes('0.0.3'), '卡片应显示当前版本号, got ' + text);
-    // 挂载查询路径只更新设置页 state，不走角标链路（角标专属 update-available 事件）
-    assert.equal(await page.locator('.sidebar-update-dot').count(), 0, '挂载查询路径不应点亮角标');
+    // I1 回归：App 挂载查询必须点亮角标——否则事件丢失时角标整场缺失
+    assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '挂载查询应点亮角标');
     console.log('  mount query flow: ok');
   } finally {
     await context.close();
