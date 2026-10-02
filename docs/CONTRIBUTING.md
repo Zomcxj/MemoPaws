@@ -53,6 +53,19 @@ npm --prefix frontend exec -- tauri build --bundles nsis
 
 产物位于 `target/release/bundle/nsis/`。两个环境变量在 Windows 上必须设置：`RUST_MIN_STACK` 将测试/构建线程的最小栈设为 64MB，`CARGO_BUILD_JOBS=2` 限制并行编译任务，避免内存耗尽。
 
+### 发布 Release（Windows）
+
+发布新版本时需要上传两个资产，缺一不可（应用内“下载安装包”和“下载离线包”分别依赖这两个文件名，改名会破坏应用内更新）：
+
+1. **安装包**：构建步骤的产物 `target/release/bundle/nsis/MemoPaws_<版本>_x64-setup.exe`（如 `MemoPaws_0.0.3_x64-setup.exe`）。
+2. **离线包（免安装版）**：`cargo build --release`（`tauri build` 过程中也会完成）后在 `target/release/memopaws.exe`。上传前把它复制并重命名为 `MemoPaws_<版本>_x64.exe`（如 `MemoPaws_0.0.3_x64.exe`）。
+
+```powershell
+Copy-Item target/release/memopaws.exe MemoPaws_0.0.3_x64.exe
+```
+
+资产命名规则与 `crates/tauri/src/commands/update.rs` 的解析逻辑对应：文件名以 `-setup.exe` 结尾的被识别为安装包，以 `_x64.exe` 结尾（且不含 `-setup`）的被识别为离线包。
+
 ## 测试
 
 ### Rust 测试
@@ -84,6 +97,7 @@ node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
 node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-interaction-behaviour.cjs
+node frontend/e2e/test-update-check.cjs
 node frontend/e2e/test-design-tokens.cjs
 node frontend/e2e/shot-handles.cjs
 npm --prefix frontend run test:tauri
@@ -121,6 +135,7 @@ node frontend/e2e/test-pages.cjs
 node frontend/e2e/test-navigation.cjs
 node frontend/e2e/test-capture-overlay.cjs
 node frontend/e2e/test-interaction-behaviour.cjs
+node frontend/e2e/test-update-check.cjs
 node frontend/e2e/test-design-tokens.cjs
 node frontend/e2e/shot-handles.cjs
 npm --prefix frontend run test:tauri
@@ -190,7 +205,8 @@ crates/tauri/src/
 │   ├── capture.rs      # 截图与图像处理
 │   ├── history.rs      # 历史记录
 │   ├── textrep.rs      # 文本替换
-│   └── storage.rs      # 数据目录与迁移
+│   ├── storage.rs      # 数据目录与迁移
+│   └── update.rs       # 应用内更新（轮询、下载、安装/替换）
 ├── hotkeys.rs          # 全局快捷键
 ├── tray.rs             # 系统托盘
 └── text_replacer*.rs   # 键盘钩子与替换状态机
