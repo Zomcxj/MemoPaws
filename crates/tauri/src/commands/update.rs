@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering as AtomicOrder};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering as AtomicOrder};
 
 use tauri::Emitter;
 
@@ -150,41 +150,74 @@ pub(crate) const FIRST_CHECK_DELAY: std::time::Duration = std::time::Duration::f
 ///   不设 3600s 兜底是因为真正的 56kbps 边缘用户下 29MB 要 70 分钟；下载线程
 ///   卡在 read 上时 TCP 重传/保活最终会报错释放线程，代价只是 DOWNLOADING 互斥
 ///   多占一会儿，可接受。
-fn client(proxy: bool, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Client> {
-    let builder = reqwest::blocking::Client::builder()
+fn client(exit: Exit, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Client> {
+    let mut builder = reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(20));
-    let builder = match total_timeout {
-        Some(timeout) => builder.timeout(timeout),
-        None => builder,
+    if let Some(timeout) = total_timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder = match exit {
+        Exit::Direct => builder.no_proxy(),
+        Exit::System => builder,
+        Exit::Local(port) => match reqwest::Proxy::http(&format!("http://127.0.0.1:{port}")) {
+            Ok(proxy) => builder.proxy(proxy),
+            Err(_) => builder,
+        },
     };
-    let builder = if proxy { builder } else { builder.no_proxy() };
     builder.build().ok()
 }
 
-/// 出口轮询的粘滞状态：true = 下次先试系统代理，false = 先试直连。
-static PREFER_PROXY: AtomicBool = AtomicBool::new(false);
+/// 更新请求可用的网络出口。
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Exit {
+    /// 不走任何代理（reqwest no_proxy）
+    Direct,
+    /// 系统代理（注册表 ProxyEnable 开启时才生效；真机实测用户机器上常是关的，
+    /// 此时与 Direct 等价）
+    System,
+    /// 本机常见代理端口的 HTTP 代理。系统代理没开但 Clash/v2rayN 在跑是常态，
+    /// 主动探测端口比指望用户开系统代理可靠（端口拒绝连接时毫秒级失败，无超时代价）
+    Local(u16),
+}
 
-/// 根据这次请求的结果算下次的起手式：
-/// - 有应答的出口就是可用出口，粘住它。被墙网络下直连永远超时，固定
-///   "先直连"会让每次请求都白烧一个 20s 超时才轮到代理（真机实测）；
-/// - 两条路都没应答则翻转起点，避免连续撞同一条死路。
-fn next_preference(prefer_proxy: bool, answered: bool, used_proxy: bool) -> bool {
-    if answered {
-        used_proxy
-    } else {
-        !prefer_proxy
+/// 本机 HTTP 代理端口探测清单：Clash 7890 / Clash Verge 7897 / v2rayN 10809
+const LOCAL_PROXY_PORTS: [u16; 3] = [7890, 7897, 10809];
+const EXIT_COUNT: usize = 2 + LOCAL_PROXY_PORTS.len();
+
+fn exit_at(index: usize) -> Exit {
+    match index {
+        0 => Exit::Direct,
+        1 => Exit::System,
+        n => Exit::Local(LOCAL_PROXY_PORTS[n - 2]),
     }
 }
 
+/// 出口轮询的粘滞状态：下次请求从哪个出口起手。初始指向 7890——本应用的存在
+/// 理由就是 GitHub 更新，用户机器上有本地代理是大概率事件，且端口拒绝连接
+/// 是毫秒级失败，先试本地端口没有超时代价；没有代理的用户多花几毫秒直达直连。
+static PREFER_EXIT: AtomicU8 = AtomicU8::new(2);
+
+/// 根据这轮探测结果算下次的起手出口：拿到 2xx 的出口粘住；没有任何 2xx 但有
+/// 出口应答过（传输层通，比如限流 403）就从它起手；全军覆没才轮转到下一家。
+fn next_start(last_start: usize, succeeded: Option<usize>, answered: Option<usize>) -> usize {
+    if let Some(index) = succeeded {
+        return index;
+    }
+    if let Some(index) = answered {
+        return index;
+    }
+    (last_start + 1) % EXIT_COUNT
+}
+
 fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Response> {
-    let prefer_proxy = PREFER_PROXY.load(AtomicOrder::Relaxed);
-    let order = if prefer_proxy { [true, false] } else { [false, true] };
-    let mut answered = false;
-    let mut used_proxy = false;
+    let start = PREFER_EXIT.load(AtomicOrder::Relaxed) as usize;
+    let mut succeeded = None;
+    let mut answered = None;
     let mut found = None;
-    for proxy in order {
-        let Some(client) = client(proxy, total_timeout) else { continue };
+    for offset in 0..EXIT_COUNT {
+        let index = (start + offset) % EXIT_COUNT;
+        let Some(client) = client(exit_at(index), total_timeout) else { continue };
         let Ok(response) = client
             .get(url)
             .header("Accept", "application/vnd.github+json")
@@ -192,14 +225,19 @@ fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Opti
         else {
             continue;
         };
-        // 只有传输层失败才值得换出口重试；服务器已经答复（4xx/5xx）时换代理
-        // 只会重复同一个答案并白等一个超时。
-        answered = true;
-        used_proxy = proxy;
-        found = response.status().is_success().then_some(response);
-        break;
+        if response.status().is_success() {
+            succeeded = Some(index);
+            found = Some(response);
+            break;
+        }
+        // 非 2xx：换下一个出口。不同出口（直连被墙页 / 代理出口限流）会给出
+        // 不同答案，"服务器已答复就定案"只对同一出口成立。
+        if answered.is_none() {
+            answered = Some(index);
+        }
     }
-    PREFER_PROXY.store(next_preference(prefer_proxy, answered, used_proxy), AtomicOrder::Relaxed);
+    let next = next_start(start, succeeded, answered);
+    PREFER_EXIT.store(next as u8, AtomicOrder::Relaxed);
     found
 }
 
@@ -684,13 +722,14 @@ mod tests {
     }
 
     #[test]
-    fn preference_sticks_to_the_exit_that_answered() {
-        // 有应答的出口就是赢家：上次走代理成功，下次仍然代理起手
-        assert!(next_preference(false, true, true));
-        assert!(!next_preference(true, true, false));
-        // 两条路都没应答：翻转起点，别总撞同一条死路
-        assert!(!next_preference(true, false, true));
-        assert!(next_preference(false, false, false));
+    fn start_sticks_to_the_exit_that_succeeded() {
+        // 拿到 2xx 的出口就是赢家：上次 7890（index 2）成功，下次还从它起手
+        assert_eq!(next_start(0, Some(2), None), 2);
+        // 没有 2xx 但有出口应答过（如限流 403）：从应答者起手（传输层通）
+        assert_eq!(next_start(0, None, Some(2)), 2);
+        // 全军覆没：轮转到下一家，别总撞同一条死路
+        assert_eq!(next_start(2, None, None), 3);
+        assert_eq!(next_start(EXIT_COUNT - 1, None, None), 0);
     }
 
     #[test]
