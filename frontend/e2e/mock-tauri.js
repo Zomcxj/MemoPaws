@@ -128,6 +128,11 @@
         } else if (command === "ai_translate") {
           resolve({ text: "Mock translation" });
         } else if (command === "latest_release_version") {
+          // "__error__" 哨兵镜像真实后端的 Err：检查本身失败（网络/限流），invoke reject
+          if (latestReleaseVersion === "__error__") {
+            reject(new Error("Mock release check failed"));
+            return;
+          }
           resolve(latestReleaseVersion);
         } else if (command === "download_update") {
           // reject 模式：invoke 立即失败、不发任何事件——UI 必须靠 invoke 的
@@ -230,7 +235,8 @@
   window.__MOCK_EMIT_UPDATE__ = function () {
     window.__MOCK_TAURI_EMIT__("update-available", { version: "9.9.9", currentVersion: "0.0.4" });
   };
-  // 注入 latest_release_version 的返回值（挂载查询路径；传 null 恢复"无更新"）
+  // 注入 latest_release_version 的返回值（挂载查询路径；传 null 恢复"无更新"，
+  // 传 "__error__" 让 invoke reject——镜像后端 Err 分支的"检查失败"路径）
   window.__MOCK_TAURI_SET_LATEST_VERSION__ = function (value) { latestReleaseVersion = value; };
   // 切换 download_update 的结局：success（默认）/ error（事件报错）/ reject（invoke 立即失败）
   window.__MOCK_TAURI_SET_DOWNLOAD_MODE__ = function (mode) { downloadMode = mode === "error" || mode === "reject" ? mode : "success"; };

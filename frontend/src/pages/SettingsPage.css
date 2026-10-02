@@ -359,6 +359,20 @@
   flex: 1 1 auto;
   width: 100%;
   height: 8px;
+  /* 原生 progress 在 WebView2/Chromium 下是系统蓝/绿色，必须抹掉再用主题色画 */
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.settings-update-progress progress::-webkit-progress-bar {
+  background: var(--bg-active);
+  border-radius: 4px;
+}
+
+.settings-update-progress progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.15s ease;
 }
 
 .settings-update-progress span {

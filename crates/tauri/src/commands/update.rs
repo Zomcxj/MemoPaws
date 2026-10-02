@@ -220,7 +220,9 @@ pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
 }
 
 /// 供前端主动拉取：轮询事件可能在监听器注册前就被丢弃，挂载时必须能问一次。
-/// 返回 None 表示检查失败（无网络、被限流、仓库不可访问）或没有新版本，前端静默即可。
+/// 返回 `Ok(None)` 才是"没有新版本"；检查失败（无网络、被限流、仓库不可访问）以
+/// `Err` 传出——调用方必须能区分这两种情况，否则手动检查会在卡片已显示新版本时
+/// 谎报"未发现新版本"（真机实测踩过）。
 ///
 /// `async` 是必需的：函数体是同步 HTTP（直连失败再走代理，两个 20s 超时），而 Tauri 的
 /// 同步 command 直接跑在 WebView2 的 IPC 协议线程上，也就是 UI 线程——GitHub 不通时
@@ -228,10 +230,10 @@ pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
 /// 函数体保持同步 `fn`：里面用的是 reqwest blocking client，改 `async fn` 反而要重写
 /// 整个网络层（blocking client 在 async 上下文里只是阻塞一个 worker，不会 panic）。
 #[tauri::command(async)]
-pub fn latest_release_version(app: tauri::AppHandle) -> Option<String> {
-    let release = fetch_latest_release()?;
+pub fn latest_release_version(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let release = fetch_latest_release().ok_or_else(|| "检查更新失败，请稍后再试".to_string())?;
     let current_version = app.package_info().version.to_string();
-    newer_version(&current_version, &release.version)
+    Ok(newer_version(&current_version, &release.version))
 }
 
 /// 下载临时目录：每次落盘前清空，避免失败残留占磁盘。
