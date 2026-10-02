@@ -56,7 +56,7 @@ async function checkOfflineFlow(browser) {
     assert.equal(await card.count(), 1, '设置页应出现更新卡片');
     const text = await card.textContent();
     assert.ok(text.includes('9.9.9'), '卡片应显示新版本号, got ' + text);
-    assert.ok(text.includes('0.0.3'), '卡片应显示当前版本号, got ' + text);
+    assert.ok(text.includes('0.0.4'), '卡片应显示当前版本号, got ' + text);
 
     await card.getByRole('button', { name: '下载离线包' }).click();
     await page.waitForTimeout(600);
@@ -114,7 +114,7 @@ async function checkCardFromMountQuery(browser) {
     assert.equal(await card.count(), 1, 'latest_release_version 返回新版本时挂载即应出现卡片');
     const text = await card.textContent();
     assert.ok(text.includes('0.0.4'), '卡片应显示挂载查询到的新版本号, got ' + text);
-    assert.ok(text.includes('0.0.3'), '卡片应显示当前版本号, got ' + text);
+    assert.ok(text.includes('0.0.4'), '卡片应显示当前版本号, got ' + text);
     // I1 回归：App 挂载查询必须点亮角标——否则事件丢失时角标整场缺失
     assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '挂载查询应点亮角标');
     console.log('  mount query flow: ok');
@@ -223,7 +223,7 @@ async function checkManualCheck(browser) {
     const checkButton = page.getByRole('button', { name: '检查更新' });
     const versionHint = page.locator('.settings-actions .settings-hint').filter({ hasText: '当前版本' });
     assert.equal(await versionHint.count(), 1, '软件更新组应显示当前版本号');
-    assert.ok((await versionHint.textContent()).includes('0.0.3'), '当前版本应为 0.0.3, got ' + await versionHint.textContent());
+    assert.ok((await versionHint.textContent()).includes('0.0.4'), '当前版本应为 0.0.4, got ' + await versionHint.textContent());
     await checkButton.click();
     await page.waitForTimeout(200);
     assert.equal(await page.locator('.settings-update-card').count(), 0, '无更新时点击后不应有卡片');

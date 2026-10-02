@@ -190,8 +190,8 @@
           }
           return Promise.resolve();
         }
-        // getVersion()（@tauri-apps/api/app）用真实应用版本回答，更新卡片显示"当前 0.0.3"
-        if (command === "plugin:app|version") return Promise.resolve("0.0.3");
+        // getVersion()（@tauri-apps/api/app）用真实应用版本回答，更新卡片显示"当前 0.0.4"
+        if (command === "plugin:app|version") return Promise.resolve("0.0.4");
         if (command === "plugin:window|show") { windowCalls.push({ command: command }); visible = true; return Promise.resolve(); }
         if (command === "plugin:window|set_position" || command === "plugin:window|set_size") { windowCalls.push({ command: command, value: payload && payload.value }); return Promise.resolve(); }
        return mockInvoke(command, payload);
@@ -228,7 +228,7 @@
   };
   // 快捷方式：模拟后端冷启动轮询发现新版本（payload 固定 9.9.9，避免每个测试重复写）
   window.__MOCK_EMIT_UPDATE__ = function () {
-    window.__MOCK_TAURI_EMIT__("update-available", { version: "9.9.9", currentVersion: "0.0.3" });
+    window.__MOCK_TAURI_EMIT__("update-available", { version: "9.9.9", currentVersion: "0.0.4" });
   };
   // 注入 latest_release_version 的返回值（挂载查询路径；传 null 恢复"无更新"）
   window.__MOCK_TAURI_SET_LATEST_VERSION__ = function (value) { latestReleaseVersion = value; };
