@@ -221,10 +221,13 @@ async function checkManualCheck(browser) {
     assert.equal(await page.locator('.settings-update-card').count(), 0, '初始无更新时不应有卡片');
 
     const checkButton = page.getByRole('button', { name: '检查更新' });
+    const versionHint = page.locator('.settings-actions .settings-hint').filter({ hasText: '当前版本' });
+    assert.equal(await versionHint.count(), 1, '软件更新组应显示当前版本号');
+    assert.ok((await versionHint.textContent()).includes('0.0.3'), '当前版本应为 0.0.3, got ' + await versionHint.textContent());
     await checkButton.click();
     await page.waitForTimeout(200);
     assert.equal(await page.locator('.settings-update-card').count(), 0, '无更新时点击后不应有卡片');
-    const hint = page.locator('.settings-actions .settings-hint');
+    const hint = page.locator('.settings-actions .settings-hint').filter({ hasText: '未发现新版本' });
     assert.equal(await hint.count(), 1, '无更新时应显示"未发现新版本"提示');
 
     // 动态注入新版本，再点一次：卡片出现 + 角标点亮（手动链路与自动链路可见性一致）
