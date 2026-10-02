@@ -16,3 +16,9 @@ version = "0.0.4"
 authors = ["MemoPaws"]
 edition = "2021"
 homepage = "https://github.com/Zomcxj/MemoPaws"
+
+# 本机（16GB，commit 内存常年被其他应用挤压）编 debug 测试时 debuginfo=2 频繁
+# 触发 rustc STATUS_STACK_BUFFER_OVERRUN/OOM；降到行表级别，回溯仍有文件行号，
+# release（NSIS 发布构建）走 [profile.release] 不受影响
+[profile.dev]
+debug = 1
