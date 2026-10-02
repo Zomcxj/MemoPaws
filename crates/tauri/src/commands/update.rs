@@ -312,22 +312,24 @@ fn download_and_apply(app: &tauri::AppHandle, kind: &str) -> Result<(), String> 
     }
 }
 
-/// 进度事件的节流步长。
-const PROGRESS_STEP: u64 = 256 * 1024;
+/// 进度事件的节流间隔（毫秒）。按时间而非字节节流：快网下 256KB 一跳显得卡顿，
+/// 100ms 一帧就是肉眼流畅的实时进度；慢网下 64KB 读块本来就远小于 256KB，
+/// 按字节节流可能几十秒才跳一格。
+const PROGRESS_INTERVAL_MS: u128 = 100;
 
 /// 该不该上报进度。抽成纯函数是为了能离线测：网络读循环里的判断没法在测试里驱动。
 ///
-/// - `total == 0`（既没有 Content-Length 也没有 API 的 size）一律不上报：`bytes.len() >= 0`
-///   恒真会把节流完全短路，而且 payload 的 `total: 0` 会让前端算出 NaN、永远等不到 100%。
-///   完成信号由末尾的 `update-ready` 承担。
-/// - 其余情况：每满 `PROGRESS_STEP` 报一次，或已读满 `total` 时立即补报，
-///   保证末尾一定有一条 100%。
-fn progress_event(total: u64, received: u64, last_reported: u64) -> Option<(u64, u64)> {
+/// - `total == 0`（既没有 Content-Length 也没有 API 的 size）一律不上报：字节阈值
+///   失效后 `received > last_reported` 恒真会把节流完全短路，而且 payload 的
+///   `total: 0` 会让前端算出 NaN、永远等不到 100%。完成信号由末尾的 `update-ready` 承担。
+/// - 其余情况：距上次上报满 `PROGRESS_INTERVAL_MS` 且有新字节就报一次；
+///   已读满 `total` 时无条件补报，保证末尾一定有一条 100%。
+fn progress_event(total: u64, received: u64, last_reported: u64, elapsed_ms: u128) -> Option<(u64, u64)> {
     if total == 0 {
         return None;
     }
-    let stepped = received.saturating_sub(last_reported) >= PROGRESS_STEP;
-    (stepped || received >= total).then_some((received, total))
+    let due = elapsed_ms >= PROGRESS_INTERVAL_MS && received > last_reported;
+    (due || received >= total).then_some((received, total))
 }
 
 fn download_with_progress(
@@ -342,6 +344,7 @@ fn download_with_progress(
     let mut bytes: Vec<u8> = Vec::with_capacity(total.min(64 * 1024 * 1024) as usize);
     let mut buffer = [0u8; 64 * 1024];
     let mut last_reported = 0u64;
+    let mut last_emit = std::time::Instant::now();
     loop {
         let read = response
             .read(&mut buffer)
@@ -350,8 +353,11 @@ fn download_with_progress(
             break;
         }
         bytes.extend_from_slice(&buffer[..read]);
-        if let Some((received, total)) = progress_event(total, bytes.len() as u64, last_reported) {
+        if let Some((received, total)) =
+            progress_event(total, bytes.len() as u64, last_reported, last_emit.elapsed().as_millis())
+        {
             last_reported = received;
+            last_emit = std::time::Instant::now();
             let _ = app.emit(
                 "update-download-progress",
                 serde_json::json!({ "received": received, "total": total }),
@@ -554,14 +560,15 @@ mod tests {
     }
 
     /// 按 64KB 分块喂一遍 progress_event，返回实际上报的 (received, total) 序列。
-    /// 模拟 download_with_progress 的读循环，但不碰网络。
-    fn drain_progress(total: u64, chunk: u64) -> Vec<(u64, u64)> {
+    /// 模拟 download_with_progress 的读循环，但不碰网络；每块之间经过的毫秒数
+    /// 由 elapsed_ms 给出（默认每块都已满节流间隔，模拟慢速流）。
+    fn drain_progress_timed(total: u64, chunk: u64, elapsed_ms: u128) -> Vec<(u64, u64)> {
         let mut events = Vec::new();
         let mut received = 0u64;
         let mut last_reported = 0u64;
         while received < total {
             received += chunk.min(total - received);
-            if let Some(event) = progress_event(total, received, last_reported) {
+            if let Some(event) = progress_event(total, received, last_reported, elapsed_ms) {
                 last_reported = received;
                 events.push(event);
             }
@@ -569,36 +576,47 @@ mod tests {
         events
     }
 
+    fn drain_progress(total: u64, chunk: u64) -> Vec<(u64, u64)> {
+        drain_progress_timed(total, chunk, PROGRESS_INTERVAL_MS)
+    }
+
     #[test]
-    fn progress_throttles_an_exact_multiple_installer_to_256kb_steps() {
-        // 8MB 安装包：32 个事件，末次 received == total
+    fn progress_reports_every_chunk_once_the_interval_has_elapsed() {
+        // 8MB 安装包按 64KB 读：128 块全部到点上报，末次 received == total
         let events = drain_progress(8 * 1024 * 1024, 64 * 1024);
-        assert_eq!(events.len(), 32, "每 256KB 一次，不得多报");
+        assert_eq!(events.len(), 128, "每 64KB 一报，不得合并");
         assert_eq!(events.last(), Some(&(8 * 1024 * 1024, 8 * 1024 * 1024)));
     }
 
     #[test]
-    fn progress_reports_the_offline_package_remainder_exactly_once() {
-        // 29MB 离线包不是 256KB 整数倍：111 个整步 + 末尾补报 = 112
+    fn progress_reports_the_offline_package_stream_in_real_time() {
+        // 29MB 离线包：445 个整块 + 4096 字节余块 = 446 次上报，末尾恰好报满
         let total = 29_167_616u64;
         let events = drain_progress(total, 64 * 1024);
-        assert_eq!(events.len(), 112);
+        assert_eq!(events.len(), total.div_ceil(64 * 1024) as usize);
         assert_eq!(events.last(), Some(&(total, total)), "末尾必须报满");
     }
 
     #[test]
+    fn progress_stays_quiet_between_intervals_and_reports_the_end_unconditionally() {
+        // 读取快于节流间隔（elapsed < 100ms）时中间不上报，只有末尾 100% 必报
+        let events = drain_progress_timed(300 * 1024, 64 * 1024, 0);
+        assert_eq!(events, vec![(300 * 1024, 300 * 1024)]);
+    }
+
+    #[test]
     fn progress_reports_a_small_file_exactly_once() {
-        // 100KB 小文件不足一个节流步，只靠 received >= total 报出一次
+        // 100KB 小文件两个 64KB 块，到点即报：两次都发
         let events = drain_progress(100 * 1024, 64 * 1024);
-        assert_eq!(events, vec![(100 * 1024, 100 * 1024)]);
+        assert_eq!(events, vec![(64 * 1024, 100 * 1024), (100 * 1024, 100 * 1024)]);
     }
 
     #[test]
     fn progress_stays_silent_when_the_total_is_unknown() {
         // total == 0 时前端会算出 NaN，0/0 对 UI 没有信息量
-        assert_eq!(progress_event(0, 0, 0), None);
-        assert_eq!(progress_event(0, 64 * 1024, 0), None);
-        assert_eq!(progress_event(0, u64::MAX, 0), None);
+        assert_eq!(progress_event(0, 0, 0, PROGRESS_INTERVAL_MS), None);
+        assert_eq!(progress_event(0, 64 * 1024, 0, PROGRESS_INTERVAL_MS), None);
+        assert_eq!(progress_event(0, u64::MAX, 0, PROGRESS_INTERVAL_MS), None);
         assert!(drain_progress(0, 64 * 1024).is_empty());
     }
 
