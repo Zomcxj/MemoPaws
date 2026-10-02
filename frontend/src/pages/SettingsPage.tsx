@@ -94,17 +94,16 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
   // 版本只存在本页 state，不回写 App.tsx——角标走 update-available 事件链路，双写会不一致。
   useEffect(() => {
     let active = true;
-    Promise.all([
-      invoke<UpdateCheck>("latest_release_version"),
-      getVersion().catch(() => ""),
-    ])
-      .then(([check, current]) => {
-        if (active && current) setCurrentVersion(current);
-        if (active && check?.hasUpdate && check.latestVersion) {
-          setUpdateInfo({ version: check.latestVersion, currentVersion: current });
-        }
-      })
-      .catch(() => {});
+    // 两个请求各自兜底：release 检查失败（网络抖动很常见）不能把已成功的
+    // getVersion 结果一起带崩——那会让"当前版本"永远显示不出来（真机实测踩过）
+    const currentPromise = getVersion().catch(() => "");
+    const checkPromise = invoke<UpdateCheck>("latest_release_version").catch(() => null);
+    void Promise.all([currentPromise, checkPromise]).then(([current, check]) => {
+      if (active && current) setCurrentVersion(current);
+      if (active && check?.hasUpdate && check.latestVersion) {
+        setUpdateInfo({ version: check.latestVersion, currentVersion: current });
+      }
+    });
     return () => {
       active = false;
     };
@@ -132,8 +131,9 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
         }
       })
       .catch(() => {
-        // 检查失败：卡片在就不打扰，否则明确说"检查失败"而不是谎报"未发现"
-        setCheckState(updateInfo ? "idle" : "failed");
+        // 检查失败一律明说。之前"卡片在就保持安静"在真机上被读成"点了没反应"；
+        // 失败提示与卡片并不矛盾（卡片是更早一次成功查询的结果）
+        setCheckState("failed");
       });
   };
 

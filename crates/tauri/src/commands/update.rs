@@ -11,7 +11,7 @@ pub(crate) const USER_AGENT: &str = concat!("MemoPaws/", env!("CARGO_PKG_VERSION
 
 /// 发布页解析结果：版本号与两类资产的 (url, size)。资产缺失时为 None，
 /// 允许只提供其一。
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LatestRelease {
     pub version: String,
     pub installer: Option<(String, u64)>,
@@ -178,8 +178,27 @@ fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Opti
     None
 }
 
+/// 最近一次成功抓取的 release 与抓取时间。真机实测：卡片刚显示完新版本，
+/// 点下载时重新打 API 却赶上失败/限流（共享代理出口 IP 的 60 次/小时配额），
+/// 白白把下载挡在门外。成功结果缓存 10 分钟，下载与手动检查共用；
+/// 代价是发布新 release 后最多 10 分钟内手动检查仍看到旧缓存，可接受。
 fn fetch_latest_release() -> Option<LatestRelease> {
-    parse_latest_release(&fetch_response(RELEASE_API, Some(std::time::Duration::from_secs(20)))?.text().ok()?)
+    const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, LatestRelease)>> =
+        std::sync::Mutex::new(None);
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((fetched_at, release)) = guard.as_ref() {
+            if fetched_at.elapsed() < CACHE_TTL {
+                return Some(release.clone());
+            }
+        }
+    }
+    let release =
+        parse_latest_release(&fetch_response(RELEASE_API, Some(std::time::Duration::from_secs(20)))?.text().ok()?)?;
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((std::time::Instant::now(), release.clone()));
+    }
+    Some(release)
 }
 
 /// latest 比 current 新时返回 latest，否则 None。调用方传进来的 latest 应是已剥掉

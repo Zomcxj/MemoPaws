@@ -263,12 +263,12 @@ async function checkManualCheck(browser) {
     assert.equal(await hint.count(), 0, '发现新版本后"已是最新版本"提示应消失');
     assert.equal(await noReleaseHint.count(), 0, '发现新版本后"未发现新版本"提示应消失');
 
-    // 5) 卡片已显示时检查失败：保持安静（不再与卡片矛盾，真机实测踩过）
+    // 5) 卡片已显示时检查失败：显示"检查失败"但不清卡片——安静曾真机被读成"没反应"
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("__error__"));
     await checkButton.click();
     await page.waitForTimeout(200);
     assert.equal(await page.locator('.settings-update-card').count(), 1, '检查失败不得清掉已有卡片');
-    assert.equal(await failedHint.count(), 0, '卡片已显示时检查失败应保持安静');
+    assert.equal(await failedHint.count(), 1, '卡片已显示时检查失败也要明说');
     console.log('  manual check flow: ok');
   } finally {
     await context.close();
