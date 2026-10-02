@@ -212,6 +212,36 @@ async function checkDownloadInvokeReject(browser) {
   }
 }
 
+// 手动"检查更新"按钮：无更新时显示"未发现新版本"；发现新版本时出卡片并点亮角标
+//（onUpdateFound 回写 App state）。mock 值可以在页面加载后动态改，覆盖两次点击。
+async function checkManualCheck(browser) {
+  const { context, page } = await newPage(browser);
+  try {
+    await openSettings(page);
+    assert.equal(await page.locator('.settings-update-card').count(), 0, '初始无更新时不应有卡片');
+
+    const checkButton = page.getByRole('button', { name: '检查更新' });
+    await checkButton.click();
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator('.settings-update-card').count(), 0, '无更新时点击后不应有卡片');
+    const hint = page.locator('.settings-actions .settings-hint');
+    assert.equal(await hint.count(), 1, '无更新时应显示"未发现新版本"提示');
+
+    // 动态注入新版本，再点一次：卡片出现 + 角标点亮（手动链路与自动链路可见性一致）
+    await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9"));
+    await checkButton.click();
+    await page.waitForTimeout(200);
+    const card = page.locator('.settings-update-card');
+    assert.equal(await card.count(), 1, '手动检查发现新版本后应出现卡片');
+    assert.ok((await card.textContent()).includes('9.9.9'), '卡片应显示新版本号');
+    assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '手动检查发现新版本应点亮角标');
+    assert.equal(await hint.count(), 0, '发现新版本后"未发现新版本"提示应消失');
+    console.log('  manual check flow: ok');
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -222,6 +252,7 @@ async function main() {
     await checkDownloadError(browser);
     await checkUnlistenRemovesHandler(browser);
     await checkDownloadInvokeReject(browser);
+    await checkManualCheck(browser);
     console.log('Update check tests passed.');
   } finally {
     await browser.close();
