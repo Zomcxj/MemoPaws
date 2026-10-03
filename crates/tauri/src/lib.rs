@@ -110,6 +110,13 @@ pub fn run() {
                 .map_err(|error| error.to_string())?;
             app.manage(Mutex::new(history));
             spawn_update_poller(app.handle().clone());
+            // 窗口级亚克力磨砂：Windows 只提供模糊+染色，前端 CSS 负责半透材质层次。
+            // 非 glass 主题下各区背景是不透明的，磨砂被盖住、零成本；glass 模式
+            // 下背景透出磨砂。Win10 没有 Mica，apply_blur 自动退到 Acrylic。
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window_vibrancy::apply_blur(&window, Some((18, 18, 18, 125)));
+            }
             let clipboard =
                 memopaws_clipboard::ClipboardManager::load().map_err(|error| error.to_string())?;
             app.manage(Mutex::new(clipboard));

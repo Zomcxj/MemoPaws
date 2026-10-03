@@ -20,6 +20,14 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const { theme, resolvedTheme, setTheme } = useTheme();
 
+  // 液态玻璃开关：独立于 dark/light/auto，铺在已有主题上。本地持久化即可，
+  // 后端配置无字段可收（纯展示层偏好）。
+  const [glass, setGlass] = useState(() => window.localStorage.getItem("memopaws-glass") === "on");
+  useEffect(() => {
+    document.documentElement.setAttribute("data-glass", glass ? "on" : "off");
+    window.localStorage.setItem("memopaws-glass", glass ? "on" : "off");
+  }, [glass]);
+
   useEffect(() => {
     let active = true;
     invoke<Record<string, unknown>>("get_config")
@@ -115,7 +123,7 @@ export default function App() {
       case "memo": return <MemoPage language={language} onDirtyChange={setMemoDirty} renderTheme={resolvedTheme} />;
       case "keys": return <KeysPage language={language} />;
       case "clipboard": return <ClipboardPage language={language} />;
-      case "settings": return <SettingsPage theme={theme} onThemeChange={setTheme} onLanguageChange={changeLanguage} onUpdateFound={setLatestVersion} />;
+      case "settings": return <SettingsPage theme={theme} onThemeChange={setTheme} onLanguageChange={changeLanguage} onUpdateFound={setLatestVersion} glass={glass} onGlassChange={setGlass} />;
     }
   };
 
