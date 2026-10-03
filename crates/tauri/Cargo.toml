@@ -38,6 +38,8 @@ xcap = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "system-proxy", "blocking"] }
+# 系统层亚克力磨砂（Windows: apply_blur）。本机 registry 已缓存 0.6.0，离线可用
+window-vibrancy = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
