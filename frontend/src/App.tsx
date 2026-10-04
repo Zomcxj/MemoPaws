@@ -26,6 +26,9 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-glass", glass ? "on" : "off");
     window.localStorage.setItem("memopaws-glass", glass ? "on" : "off");
+    // DWM 层的亚克力必须跟随开关同步：静态挂在 tauri.conf.json 里时关掉开关，
+    // 标题栏等 CSS 达不到的区域还会一直是玻璃态
+    void invoke("set_glass_effect", { enabled: glass }).catch(() => {});
   }, [glass]);
 
   useEffect(() => {

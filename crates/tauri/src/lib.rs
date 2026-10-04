@@ -62,6 +62,23 @@ fn close_operation_plan(action: CloseAction) -> &'static [CloseOperation] {
     }
 }
 
+#[tauri::command]
+fn set_glass_effect(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    let config = if enabled {
+        Some(
+            tauri::window::EffectsBuilder::new()
+                .effect(tauri::window::Effect::Acrylic)
+                .build(),
+        )
+    } else {
+        None
+    };
+    window.set_effects(config).map_err(|e| e.to_string())
+}
+
 pub fn run() {
     std::panic::set_hook(Box::new(|info| {
         let message = info.to_string();
@@ -110,13 +127,6 @@ pub fn run() {
                 .map_err(|error| error.to_string())?;
             app.manage(Mutex::new(history));
             spawn_update_poller(app.handle().clone());
-            // 窗口级亚克力磨砂：Windows 只提供模糊+染色，前端 CSS 负责半透材质层次。
-            // 非 glass 主题下各区背景是不透明的，磨砂被盖住、零成本；glass 模式
-            // 下背景透出磨砂。Win10 没有 Mica，apply_blur 自动退到 Acrylic。
-            #[cfg(target_os = "windows")]
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window_vibrancy::apply_blur(&window, Some((18, 18, 18, 125)));
-            }
             let clipboard =
                 memopaws_clipboard::ClipboardManager::load().map_err(|error| error.to_string())?;
             app.manage(Mutex::new(clipboard));
@@ -175,6 +185,7 @@ pub fn run() {
             migrate_data_dir,
             restart_app,
             show_main_window_when_ready,
+            set_glass_effect,
             set_close_behavior,
             set_clipboard_max_items,
             set_history_max_items,

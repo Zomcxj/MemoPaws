@@ -65,12 +65,19 @@
 
 html[data-glass="on"] .app-shell,
 html[data-glass="on"] .app-layout,
-html[data-glass="on"] .app-content {
+html[data-glass="on"] .app-content,
+/* 页面根容器也要透明：留给 DWM 磨砂自由透出，否则每个页面都是一块
+   直切到窗口边缘的矩形，组件缝隙处露出整齐的直角条 */
+html[data-glass="on"] .memo-page,
+html[data-glass="on"] .keys-page,
+html[data-glass="on"] .recognize-page,
+html[data-glass="on"] .clipboard-page,
+html[data-glass="on"] .settings-page {
   background: transparent;
 }
 
 html[data-theme="dark"][data-glass="on"] {
-  --bg-primary: rgba(24, 24, 22, 0.5);
+  --bg-primary: transparent;
   --bg-secondary: rgba(38, 38, 36, 0.72);
   --bg-panel: rgba(44, 44, 43, 0.55);
   --bg-input: rgba(27, 27, 25, 0.55);
@@ -81,7 +88,7 @@ html[data-theme="dark"][data-glass="on"] {
 }
 
 html[data-theme="light"][data-glass="on"] {
-  --bg-primary: rgba(245, 243, 240, 0.45);
+  --bg-primary: transparent;
   --bg-secondary: rgba(250, 248, 246, 0.72);
   --bg-panel: rgba(255, 255, 255, 0.55);
   --bg-input: rgba(245, 243, 240, 0.6);
