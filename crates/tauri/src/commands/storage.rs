@@ -14,6 +14,32 @@ pub fn get_data_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn save_image_as(window: tauri::WebviewWindow, image: Vec<u8>) -> Result<Option<String>, String> {
+    // The dialog is modal over its owner, so it always sits above the fullscreen
+    // capture overlay. Hiding the owner makes Windows re-show it and can leave
+    // an ownerless dialog invisible, so the owner stays visible.
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        window
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_file_name("memopaws.png")
+            .add_filter("PNG", &["png"])
+            .blocking_save_file()
+            .map(|path| path.to_string())
+    })
+    .await
+    .map_err(|error| format!("save dialog failed: {error}"))?;
+    match picked {
+        Some(path) => {
+            std::fs::write(&path, &image).map_err(|error| error.to_string())?;
+            Ok(Some(path))
+        }
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
 pub async fn choose_data_dir(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {

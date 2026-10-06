@@ -119,6 +119,12 @@ body {
   overflow: hidden;
 }
 
+html[data-window="pin"],
+html[data-window="pin"] body,
+html[data-window="pin"] #root {
+  background: transparent;
+}
+
 .app-shell {
   display: flex;
   flex-direction: column;

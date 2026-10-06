@@ -1,6 +1,5 @@
 
-use base64::{engine::general_purpose::STANDARD, Engine};
-use image::{codecs::png::PngEncoder, DynamicImage};
+use image::{codecs::png::{CompressionType, FilterType, PngEncoder}, DynamicImage};
 use memopaws_canvas::{CaptureManager, CaptureRecord};
 
 
@@ -16,18 +15,11 @@ pub struct CaptureRegion {
     pub height: u32,
 }
 
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CaptureResult {
-    pub image: Vec<u8>,
-    pub preview: String,
-}
-
 #[tauri::command]
 pub async fn capture_screen(
     region: Option<CaptureRegion>,
     display_index: Option<usize>,
-) -> Result<CaptureResult, String> {
+) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let monitors =
             xcap::Monitor::all().map_err(|error| format!("screen capture failed: {error}"))?;
@@ -57,11 +49,15 @@ pub async fn capture_screen(
         };
         let mut png = Vec::new();
         DynamicImage::ImageRgba8(image)
-            .write_with_encoder(PngEncoder::new(&mut png))
+            // Lossless fixed filtering avoids scoring five filters per screenshot row.
+            .write_with_encoder(PngEncoder::new_with_quality(
+                &mut png,
+                CompressionType::Fast,
+                FilterType::Sub,
+            ))
             .map_err(|error| format!("screen capture failed: {error}"))?;
-        // 先借 png 生成 preview，再 move 进 image，避免整份 PNG 额外拷贝
-        let preview = format!("data:image/png;base64,{}", STANDARD.encode(&png));
-        Ok(CaptureResult { image: png, preview })
+        // Binary IPC avoids serializing the full PNG as both numbers and base64.
+        Ok(tauri::ipc::Response::new(png))
     })
     .await
     .map_err(|error| format!("screen capture task failed: {error}"))?

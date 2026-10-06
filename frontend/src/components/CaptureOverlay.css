@@ -310,3 +310,15 @@
   border-right: 2px solid rgba(255, 255, 255, 0.85);
   border-bottom: 2px solid rgba(255, 255, 255, 0.85);
 }
+
+.capture-overlay-rect-radius {
+  position: absolute;
+  right: 0;
+  top: -30px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgba(30, 30, 30, 0.85);
+  display: flex;
+  align-items: center;
+}
+.capture-overlay-rect-radius input[type="range"] { width: 90px; height: 12px; accent-color: var(--accent); }

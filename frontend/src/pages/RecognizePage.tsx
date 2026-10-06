@@ -1,5 +1,6 @@
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import type { Lang } from "../i18n/lang";
 import { CaptureOverlay, type RegionCss } from "../components/CaptureOverlay";
@@ -9,7 +10,7 @@ type OcrLanguage = "zh" | "en" | "ja" | "ko" | "fr" | "de" | "es" | "ru";
 interface TextResult { text: string }
 interface HistoryRecord { time: string; type: string; text: string; ocr_text?: string; translate_text?: string }
 interface DisplayInfo { index: number; name: string; x: number; y: number; width: number; height: number; is_primary: boolean }
-interface WindowGeometry { position: PhysicalPosition; size: PhysicalSize; fullscreen: boolean }
+interface WindowGeometry { position: PhysicalPosition; size: PhysicalSize; fullscreen: boolean; visible: boolean }
 
 const languages: { value: OcrLanguage; label: string }[] = [
   { value: "zh", label: "中文" }, { value: "en", label: "English" }, { value: "ja", label: "日本語" },
@@ -45,7 +46,6 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const [historyOpen, setHistoryOpen] = useState(true);
   const [covering, setCovering] = useState(false);
   const [captureBackground, setCaptureBackground] = useState("");
-  const [captureBytes, setCaptureBytes] = useState<Uint8Array | null>(null);
   const [zoom, setZoom] = useState(1);
   const [past, setPast] = useState<Uint8Array[]>([]);
   const [future, setFuture] = useState<Uint8Array[]>([]);
@@ -57,6 +57,8 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef(preview);
   const windowGeometryRef = useRef<WindowGeometry | null>(null);
+  const captureImageRef = useRef<HTMLImageElement | null>(null);
+  const pinRestoreVisibleRef = useRef(false);
   const captureRef = useRef<() => void>(() => {});
 
   const urlFor = (bytes: Uint8Array) => URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
@@ -119,6 +121,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
         position: await window.outerPosition(),
         size: await window.outerSize(),
         fullscreen: await window.isFullscreen(),
+        visible: await window.isVisible(),
       };
       await window.hide();
       // 等待 Windows 合成器播完隐藏动画，否则主窗口残影会留在截图里
@@ -129,9 +132,14 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
         await window.setPosition(new PhysicalPosition(display.x, display.y));
       }
       await window.setFullscreen(true);
-      const result = await invoke<{ image: number[]; preview: string }>("capture_screen", { displayIndex: displays.length > 1 ? selectedDisplay : undefined });
-      setCaptureBytes(new Uint8Array(result.image));
-      setCaptureBackground(result.preview);
+      const result = await invoke<ArrayBuffer | number[]>("capture_screen", { displayIndex: displays.length > 1 ? selectedDisplay : undefined });
+      // Tauri's postMessage fallback returns raw responses as a number array.
+      const bytes = result instanceof ArrayBuffer ? result : new Uint8Array(result);
+      const screenshot = new Image();
+      screenshot.src = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      captureImageRef.current = screenshot;
+      await screenshot.decode();
+      setCaptureBackground(screenshot.src);
       setOverlay(true);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await window.show();
@@ -141,7 +149,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       await restoreCaptureWindow();
     }
   };
-  const restoreCaptureWindow = async () => {
+  const restoreCaptureWindow = async (options: { showAfter?: boolean } = {}) => {
     const geometry = windowGeometryRef.current;
     if (!geometry) return;
     const window = getCurrentWindow();
@@ -157,14 +165,17 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       await window.setSize(geometry.size);
       if (geometry.fullscreen) await window.setFullscreen(true);
       setOverlay(false);
-      setCaptureBytes(null);
+      if (captureImageRef.current) URL.revokeObjectURL(captureImageRef.current.src);
+      captureImageRef.current = null;
       setCaptureBackground("");
       setCovering(false);
       restoreSucceeded = true;
     } finally {
       setCovering(false);
       try {
-        await window.show();
+        if (options.showAfter !== false) {
+          await window.show();
+        }
         if (restoreSucceeded) windowGeometryRef.current = null;
       } catch (reason) {
         windowGeometryRef.current = geometry;
@@ -173,28 +184,45 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     }
   };
   captureRef.current = () => { void capture(); };
-  const exportImage = () => { if (!image) return; const url = urlFor(image); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `memopaws-${Date.now()}.png`; anchor.click(); URL.revokeObjectURL(url); };
+  const exportImage = () => { if (image) void run(async () => { await exportImageBytes(image); }); };
   // Crop from the already-captured screenshot, avoiding re-capturing from the screen
   // (the overlay's dark backdrop would pollute a live re-capture).
-  const cropFromImage = async (region: RegionCss, scale: number): Promise<Uint8Array> => {
-    if (!captureBytes) throw new Error(t.needImage);
+  const cropFromImage = async (region: RegionCss, scale: number, cornerRadius?: number): Promise<Uint8Array> => {
+    const screenshot = captureImageRef.current;
+    if (!screenshot) throw new Error(t.needImage);
     const f = scale || window.devicePixelRatio || 1;
-    const result = await invoke<{ image: number[] }>("image_crop", {
-      image: Array.from(captureBytes),
-      x: Math.round(region.x * f),
-      y: Math.round(region.y * f),
-      width: Math.max(1, Math.round(region.width * f)),
-      height: Math.max(1, Math.round(region.height * f)),
-    });
-    return new Uint8Array(result.image);
+    const x = Math.max(0, Math.round(region.x * f));
+    const y = Math.max(0, Math.round(region.y * f));
+    const width = Math.min(Math.max(1, Math.round(region.width * f)), screenshot.naturalWidth - x);
+    const height = Math.min(Math.max(1, Math.round(region.height * f)), screenshot.naturalHeight - y);
+    if (width <= 0 || height <= 0) throw new Error("截图选区超出图片边界");
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法创建截图画布");
+    const r = Math.max(0, Math.min(Math.round((cornerRadius || 0) * f), width / 2, height / 2));
+    // Crop and round in one canvas pass; never send the full screen back over IPC.
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.arcTo(canvas.width, 0, canvas.width, canvas.height, r);
+    ctx.arcTo(canvas.width, canvas.height, 0, canvas.height, r);
+    ctx.arcTo(0, canvas.height, 0, 0, r);
+    ctx.arcTo(0, 0, canvas.width, 0, r);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(screenshot, x, y, width, height, 0, 0, width, height);
+    const blobOut = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blobOut) throw new Error("无法生成截图 PNG 图片");
+    return new Uint8Array(await blobOut.arrayBuffer());
   };
-  const overlayRecognize = async (region: RegionCss, scale: number) => {
-    const bytes = await cropFromImage(region, scale);
+  const overlayRecognize = async (region: RegionCss, scale: number, cornerRadius?: number) => {
+    const bytes = await cropFromImage(region, scale, cornerRadius);
     const result = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() });
     return result.text || "(无识别结果)";
   };
-  const overlayTranslate = async (region: RegionCss, scale: number) => {
-    const bytes = await cropFromImage(region, scale);
+  const overlayTranslate = async (region: RegionCss, scale: number, cornerRadius?: number) => {
+    const bytes = await cropFromImage(region, scale, cornerRadius);
     const ocr = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() });
     const tr = await invoke<TextResult>("ai_translate", { text: ocr.text, target, source, ...config() });
     return { ocrText: ocr.text, translation: tr.text || "(翻译失败)" };
@@ -206,21 +234,27 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     setTranslation(confirmedTranslation);
     await restoreCaptureWindow();
   };
-  const overlayCopyImage = (region: RegionCss, scale: number) => void run(async () => {
-    const bytes = await cropFromImage(region, scale);
+  const overlayPinImage = async (region: RegionCss, scale: number, cornerRadius: number) => {
+      const bytes = await cropFromImage(region, scale, cornerRadius);
+      await invoke("pin_image", { image: Array.from(bytes), radius: cornerRadius });
+      pinRestoreVisibleRef.current = windowGeometryRef.current?.visible ?? false;
+      setOverlay(false);
+      // 钉图后主窗口不显示：只恢复几何，保持隐藏，关闭钉图时再按需恢复。
+      await restoreCaptureWindow({ showAfter: false });
+  };
+  const overlayCopyImage = async (region: RegionCss, scale: number, cornerRadius?: number) => {
+    const bytes = await cropFromImage(region, scale, cornerRadius);
     const blob = new Blob([bytes.slice()], { type: "image/png" });
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-  });
-  const overlaySaveImage = (region: RegionCss, scale: number) => void run(async () => {
-    const bytes = await cropFromImage(region, scale);
-    exportImageBytes(bytes);
-  });
+  };
+  const overlaySaveImage = async (region: RegionCss, scale: number, cornerRadius?: number) => {
+    const bytes = await cropFromImage(region, scale, cornerRadius);
+    // 保存框以主窗口为 owner 模态弹出，始终在截图浮层之上，无需隐藏窗口。
+    await exportImageBytes(bytes);
+  };
 
   const exportImageBytes = (bytes: Uint8Array) => {
-    const url = urlFor(bytes);
-    const anchor = document.createElement("a");
-    anchor.href = url; anchor.download = `memopaws-${Date.now()}.png`; anchor.click();
-    URL.revokeObjectURL(url);
+    return invoke<string | null>("save_image_as", { image: Array.from(bytes) });
   };
 
   // Context menu.
@@ -240,6 +274,22 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
 requestAnimationFrame(() => requestAnimationFrame(() => captureRef.current())); } } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
   useEffect(() => { const captureEvent = () => { (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = false; captureRef.current(); }; const fitEvent = () => setZoom(1); const recognizeTextEvent = (event: Event) => { const text = (event as CustomEvent<{ text?: unknown }>).detail?.text; if (typeof text === "string") { setOcrText(text); setTranslation(""); setError(""); setCopied(false); } }; const recognizeImageEvent = (event: Event) => { const bytes = (event as CustomEvent<{ image?: unknown }>).detail?.image; if (!Array.isArray(bytes) || !bytes.every((byte) => typeof byte === "number")) return; setOriginal(new Uint8Array(bytes)); setBytes(new Uint8Array(bytes), false); setOcrText(""); setTranslation(""); setError(""); }; window.addEventListener("memopaws-capture", captureEvent); window.addEventListener("canvas_fit", fitEvent); window.addEventListener("recognize-text", recognizeTextEvent); window.addEventListener("recognize-image", recognizeImageEvent); return () => { window.removeEventListener("memopaws-capture", captureEvent); window.removeEventListener("canvas_fit", fitEvent); window.removeEventListener("recognize-text", recognizeTextEvent); window.removeEventListener("recognize-image", recognizeImageEvent); }; }, []);
   useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
+  // 钉图期间主窗口保持隐藏；关闭钉图窗口后恢复显示（仅当截图前主窗口可见）。
+  useEffect(() => {
+    let active = true;
+    let stop: (() => void) | undefined;
+    void listen("pin-closed", () => {
+      if (!active) return;
+      void (async () => {
+        if (pinRestoreVisibleRef.current) {
+          pinRestoreVisibleRef.current = false;
+          const window = getCurrentWindow();
+          await window.show();
+        }
+      })();
+    }).then((unlisten) => { stop = unlisten; });
+    return () => { active = false; stop?.(); };
+  }, []);
 
   const closeOverlay = async () => { await restoreCaptureWindow(); };
 
@@ -253,7 +303,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => captureRef.current())); 
       <button className="tool-button" disabled={!image || loading} onClick={() => preprocess("mosaic")}>{t.mosaic}</button>
       <button className="tool-button" disabled={!past.length} onClick={undo}>↶</button><button className="tool-button" disabled={!future.length} onClick={redo}>↷</button>
       <button className="tool-button" disabled={!image} onClick={() => setZoom((value) => Math.min(8, value * 1.25))}>+</button><button className="tool-button" disabled={!image} onClick={() => setZoom((value) => Math.max(.1, value / 1.25))}>-</button>
-      <button className="tool-button" disabled={!original} onClick={reset}>{t.reset}</button><button className="tool-button" disabled={!image} onClick={clear}>{t.clear}</button><button className="tool-button" disabled={!image} onClick={exportImage}>{t.save}</button>
+      <button className="tool-button" disabled={!original} onClick={reset}>{t.reset}</button><button className="tool-button" disabled={!image} onClick={clear}>{t.clear}</button><button className="tool-button" disabled={!image || loading} onClick={exportImage}>{t.save}</button>
     </div><button className="recognize-primary" disabled={!image || loading} onClick={onePunch}>{loading ? t.processing : t.punch}</button></header>
     {error && <div className="recognize-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>{t.close}</button></div>}
     <div className="recognize-workspace">
@@ -306,6 +356,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => captureRef.current())); 
       onCancel={() => void closeOverlay()}
       onRecognize={overlayRecognize}
       onTranslate={overlayTranslate}
+      onPinImage={overlayPinImage}
       onCopyImage={overlayCopyImage}
        onSaveImage={overlaySaveImage}
         labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX", resize: language === "zh" ? "调整结果窗口大小" : "Resize result window" }}

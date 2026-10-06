@@ -24,12 +24,13 @@ interface Props {
   background: string;
   hint: string;
   onConfirm: (result: { image: Uint8Array; ocrText: string; translation: string }) => Promise<void> | void;
-  onCrop: (region: RegionCss, scale: number) => Promise<Uint8Array>;
+  onCrop: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<Uint8Array>;
   onCancel: () => void;
-  onRecognize?: (region: RegionCss, scale: number) => Promise<string>;
-  onTranslate?: (region: RegionCss, scale: number) => Promise<{ ocrText: string; translation: string }>;
-  onCopyImage?: (region: RegionCss, scale: number) => void;
-  onSaveImage?: (region: RegionCss, scale: number) => void;
+  onRecognize?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<string>;
+  onTranslate?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<{ ocrText: string; translation: string }>;
+   onPinImage?: (region: RegionCss, scale: number, cornerRadius: number) => Promise<void> | void;
+   onCopyImage?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<void> | void;
+   onSaveImage?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<void> | void;
   labels?: Partial<CaptureLabels>;
 }
 
@@ -68,6 +69,7 @@ export function CaptureOverlay({
   onCancel,
   onRecognize,
   onTranslate,
+  onPinImage,
   onCopyImage,
   onSaveImage,
   labels,
@@ -78,6 +80,7 @@ export function CaptureOverlay({
   const sampleRef = useRef<HTMLCanvasElement | null>(null);
   const magnifierRef = useRef<HTMLCanvasElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [cornerRadius, setCornerRadius] = useState(12);
   const [selection, setSelection] = useState<{ region: RegionCss; scale: number; rect: DragState } | null>(null);
   const [editing, setEditing] = useState(false);
   const editRef = useRef<SelectionEdit | null>(null);
@@ -408,7 +411,7 @@ export function CaptureOverlay({
     setBusy(true);
     setResultError("");
     try {
-      const image = await onCrop(selection.region, selection.scale);
+      const image = await onCrop(selection.region, selection.scale, cornerRadius);
       if (operationTokenRef.current === operationToken) await onConfirm({ image, ocrText, translation });
     } catch (reason) {
       setResultError(reason instanceof Error ? reason.message : String(reason));
@@ -424,7 +427,7 @@ export function CaptureOverlay({
     if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
     setBusy(true); setResultError("");
     try {
-      const result = await onRecognize(selection.region, selection.scale);
+      const result = await onRecognize(selection.region, selection.scale, cornerRadius);
       if (operationTokenRef.current === operationToken) setOcrText(result);
     }
     catch (reason) { setResultError(reason instanceof Error ? reason.message : String(reason)); }
@@ -437,7 +440,7 @@ export function CaptureOverlay({
     if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
     setBusy(true); setResultError("");
     try {
-      const result = await onTranslate(selection.region, selection.scale);
+      const result = await onTranslate(selection.region, selection.scale, cornerRadius);
       if (operationTokenRef.current === operationToken) {
         setOcrText(result.ocrText); setTranslation(result.translation);
       }
@@ -484,9 +487,17 @@ export function CaptureOverlay({
     if (resizingResultWindow?.pointerId === event.pointerId) setResizingResultWindow(null);
   };
 
-  const act = (handler?: (region: RegionCss, scale: number) => void) => () => {
-    if (!selection || !handler) return;
-    handler(selection.region, selection.scale);
+  const act = (handler?: (region: RegionCss, scale: number, cornerRadius: number) => Promise<void> | void) => async () => {
+    if (!selection || !handler || busy) return;
+    setBusy(true);
+    setResultError("");
+    try {
+      await handler(selection.region, selection.scale, cornerRadius);
+    } catch (reason) {
+      setResultError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -524,6 +535,7 @@ export function CaptureOverlay({
             {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
             {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
             {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
+             {onPinImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label="Pin image" onClick={act(onPinImage)} disabled={busy}>钉图</button>}
             <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
            <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
           </div>
@@ -537,14 +549,19 @@ export function CaptureOverlay({
           {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
           {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
           {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
+           {onPinImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label="Pin image" onClick={act(onPinImage)} disabled={busy}>钉图</button>}
           <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
-           <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
-        </div>
+            <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
+           {resultError && <div className="capture-result-error" role="alert">{resultError}</div>}
+         </div>
       )}
 
       {rectStyle && Math.abs(active!.width) >= MIN_SIZE && Math.abs(active!.height) >= MIN_SIZE && (
         <>
-          <div className="capture-overlay-rect" style={rectStyle} onMouseDown={(event) => beginSelectionEdit("move", event)}>
+          <div className="capture-overlay-rect" style={{ ...rectStyle, borderRadius: cornerRadius }} onMouseDown={(event) => beginSelectionEdit("move", event)}>
+            <div className="capture-overlay-rect-radius" onMouseDown={(e) => e.stopPropagation()}>
+              <input type="range" min={0} max={40} value={cornerRadius} onChange={(e) => setCornerRadius(Number(e.target.value))} title="圆角" />
+            </div>
             {selection && (["n", "ne", "e", "se", "s", "sw", "w", "nw"] as ResizeHandle[]).map((handle) => (
               <button
                 key={handle}

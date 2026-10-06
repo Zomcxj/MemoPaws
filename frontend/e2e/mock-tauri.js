@@ -71,6 +71,54 @@
     get_value: "test-api-key-12345"
   };
 
+   // 一次性生成的不透明 PNG（128×96），供 image_crop 等返回真实可解码字节。
+   let opaquePngCache = null;
+   function opaquePngBytes() {
+     if (!opaquePngCache) {
+       const canvas = document.createElement("canvas");
+       canvas.width = 128;
+       canvas.height = 96;
+       const ctx = canvas.getContext("2d");
+       ctx.fillStyle = "rgb(18,52,86)";
+       ctx.fillRect(0, 0, canvas.width, canvas.height);
+       const binary = atob(canvas.toDataURL("image/png").split(",")[1]);
+       const bytes = new Uint8Array(binary.length);
+       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+       opaquePngCache = Array.from(bytes);
+     }
+     return opaquePngCache;
+   }
+
+   // capture_screen 的目标契约是 tauri::ipc::Response：invoke 直接拿到整屏 PNG
+   // 的 ArrayBuffer，前端自己 objectURL 并解码一次。1280×720 全不透明，像素按
+   // rgb(x%256, y%256, 64) 把坐标编进颜色，测试据此验证裁到的是选区而非整屏。
+   let capturePngCache = null;
+   function capturePngBuffer() {
+     if (!capturePngCache) {
+       const canvas = document.createElement("canvas");
+       canvas.width = 1280;
+       canvas.height = 720;
+       const ctx = canvas.getContext("2d");
+       const frame = ctx.createImageData(1280, 720);
+       const data = frame.data;
+       for (let y = 0; y < 720; y++) {
+         for (let x = 0; x < 1280; x++) {
+           const i = (y * 1280 + x) * 4;
+           data[i] = x % 256;
+           data[i + 1] = y % 256;
+           data[i + 2] = 64;
+           data[i + 3] = 255;
+         }
+       }
+       ctx.putImageData(frame, 0, 0);
+       const binary = atob(canvas.toDataURL("image/png").split(",")[1]);
+       const bytes = new Uint8Array(binary.length);
+       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+       capturePngCache = bytes.buffer;
+     }
+     return capturePngCache;
+   }
+
    function mockInvoke(command, args) {
      commandCalls.push({ command: command, args: args || null, visible: visible });
      return new Promise(function(resolve, reject) {
@@ -120,9 +168,12 @@
         } else if (command === "unlock") {
           resolve(true);
         } else if (command === "capture_screen") {
-          resolve({ image: [137, 80, 78, 71], preview: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'%3E%3Crect width='1280' height='720' fill='%23456789'/%3E%3C/svg%3E" });
+          // 原始二进制：invoke 的返回值就是 ArrayBuffer，没有 { image, preview } 外壳
+          resolve(capturePngBuffer());
         } else if (command === "image_crop") {
-          resolve({ image: [137, 80, 78, 71] });
+          // 前端应当在本地 canvas 裁剪；这条分支只用来让误调 IPC 的实现被
+          // image_crop 计数断言抓住，而不是在解码处抛错。
+          resolve({ image: opaquePngBytes() });
         } else if (command === "ai_ocr") {
           resolve({ text: "Mock OCR text" });
         } else if (command === "ai_translate") {
@@ -178,7 +229,8 @@
      invoke: function(command, payload) {
        if (command === "plugin:window|outer_position") return Promise.resolve({ x: 0, y: 0 });
        if (command === "plugin:window|outer_size") return Promise.resolve({ width: 1280, height: 720 });
-       if (command === "plugin:window|is_fullscreen") { windowCalls.push({ command: command }); return Promise.resolve(fullscreen); }
+        if (command === "plugin:window|is_fullscreen") { windowCalls.push({ command: command }); return Promise.resolve(fullscreen); }
+        if (command === "plugin:window|is_visible") { windowCalls.push({ command: command }); return Promise.resolve(visible); }
         if (command === "plugin:window|set_fullscreen") { windowCalls.push({ command: command, value: payload && payload.value }); fullscreen = Boolean(payload && payload.value); return Promise.resolve(); }
         if (command === "plugin:window|hide") { windowCalls.push({ command: command }); visible = false; return Promise.resolve(); }
         // @tauri-apps/api/event 的 listen/unlisten 走这里；handler 是 transformCallback 返回的 id
@@ -214,6 +266,8 @@
   window.__MOCK_TAURI_RUNTIME_UPDATES__ = runtimeUpdates;
   window.__MOCK_TAURI_SET_API_MODE__ = function(mode) { apiTestMode = mode; };
   window.__MOCK_TAURI_SET_FULLSCREEN__ = function(value) { fullscreen = Boolean(value); };
+  // 由 plugin:window|hide/show 维护的可见性，供注入脚本在记录命令时如实上报
+  window.__MOCK_TAURI_IS_VISIBLE__ = function() { return visible; };
 
   // listen() 注册回调前 @tauri-apps/api 会先调 transformCallback 拿 handler id，
   // 真实环境由 Tauri IPC 注入，浏览器 mock 环境必须自己补
