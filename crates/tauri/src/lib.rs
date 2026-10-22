@@ -1,6 +1,7 @@
 mod clipboard_hook;
 mod commands;
 mod hotkeys;
+mod local_ocr;
 mod pinned_images;
 mod text_replacer;
 mod text_replacer_hook;

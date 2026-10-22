@@ -69,12 +69,28 @@ fn mosaic_area(image: &mut RgbaImage, block: u32, origin_x: u32, origin_y: u32, 
 }
 
 pub fn decode_limited(bytes: &[u8]) -> Result<DynamicImage, OcrError> {
+    decode_with_limit(bytes, None)
+}
+
+/// 本地 OCR 专用：在既有字节/格式/像素校验之上，额外限制解码期间的内存
+/// 分配（宽×高×4 的预算由调用方决定）。原有 AI 调用方的分配行为不变。
+pub fn decode_limited_with_rgba_limit(bytes: &[u8], max_rgba_bytes: u64) -> Result<DynamicImage, OcrError> {
+    decode_with_limit(bytes, Some(max_rgba_bytes))
+}
+
+fn decode_with_limit(bytes: &[u8], max_alloc: Option<u64>) -> Result<DynamicImage, OcrError> {
     if bytes.len() > MAX_INPUT_BYTES { return Err(OcrError::InputTooLarge { max_bytes: MAX_INPUT_BYTES }); }
     let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|_| OcrError::UnsupportedImage)?;
     let format = reader.format().filter(|format| matches!(format, ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Gif | ImageFormat::WebP | ImageFormat::Bmp)).ok_or(OcrError::UnsupportedImage)?;
     let (width, height) = ImageReader::with_format(Cursor::new(bytes), format).into_dimensions().map_err(|_| OcrError::UnsupportedImage)?;
     if u64::from(width) * u64::from(height) > MAX_PIXELS { return Err(OcrError::PixelLimit { max_pixels: MAX_PIXELS }); }
-    ImageReader::with_format(Cursor::new(bytes), format).decode().map_err(|_| OcrError::UnsupportedImage)
+    let mut final_reader = ImageReader::with_format(Cursor::new(bytes), format);
+    if let Some(limit) = max_alloc {
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(limit);
+        final_reader.limits(limits);
+    }
+    final_reader.decode().map_err(|_| OcrError::UnsupportedImage)
 }
 
 fn resize(image: DynamicImage) -> DynamicImage {
@@ -123,6 +139,46 @@ mod tests {
         let coarse = decode_rgba(&mosaic_png(&original, 999).expect("mosaic succeeds"));
         let first = *coarse.get_pixel(0, 0);
         assert!(coarse.pixels().all(|pixel| *pixel == first), "clamped block covers whole image");
+    }
+
+    #[test]
+    fn decode_limited_rejects_corrupt_and_oversized_input() {
+        assert!(matches!(decode_limited(b"not an image"), Err(OcrError::UnsupportedImage)));
+        assert!(matches!(
+            decode_limited(&vec![0_u8; MAX_INPUT_BYTES + 1]),
+            Err(OcrError::InputTooLarge { .. })
+        ));
+        assert!(matches!(
+            decode_limited_with_rgba_limit(b"not an image", 128 * 1024 * 1024),
+            Err(OcrError::UnsupportedImage)
+        ));
+    }
+
+    #[test]
+    fn decode_limited_accepts_bmp_and_keeps_ai_prepare_unchanged() {
+        // 格式支持面不变：BMP 依旧可解码（有界变体走同一条校验管线）。
+        let buffer = RgbaImage::from_fn(6, 4, |x, y| image::Rgba([x as u8, y as u8, 7, 255]));
+        let mut bmp = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(buffer).write_to(&mut bmp, ImageFormat::Bmp).expect("bmp encodes");
+        let decoded = decode_limited_with_rgba_limit(bmp.get_ref(), 128 * 1024 * 1024).expect("bmp decodes");
+        assert_eq!(decoded.dimensions(), (6, 4));
+        // AI 预处理尺寸策略不变：大图仍缩到 1024 以内，输出 data_uri。
+        let large = sample_png(2000, 1500);
+        let prepared = prepare_image(&large).expect("AI prepare unchanged");
+        assert!(prepared.width <= 1024 && prepared.height <= 1024);
+        assert!(prepared.data_uri.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn decode_limited_with_rgba_limit_enforces_128mib_boundary() {
+        // 8192×4096×4 = 128MiB：恰好等于上限，允许。
+        let boundary = sample_png(8192, 4096);
+        assert!(decode_limited_with_rgba_limit(&boundary, 128 * 1024 * 1024).is_ok());
+        // 8192×4097×4 = 128MiB + 4 字节：超限，拒绝（普通 decode_limited 仍放行，
+        // 因为它的 40M 像素上限独立于本地 OCR 的 RGBA 预算）。
+        let over = sample_png(8192, 4097);
+        assert!(decode_limited_with_rgba_limit(&over, 128 * 1024 * 1024).is_err());
+        assert!(decode_limited(&over).is_ok());
     }
 }
 
