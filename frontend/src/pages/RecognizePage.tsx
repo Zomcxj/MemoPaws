@@ -1,6 +1,5 @@
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import type { Lang } from "../i18n/lang";
 import { CaptureOverlay, type RegionCss } from "../components/CaptureOverlay";
@@ -58,7 +57,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const previewRef = useRef(preview);
   const windowGeometryRef = useRef<WindowGeometry | null>(null);
   const captureImageRef = useRef<HTMLImageElement | null>(null);
-  const pinRestoreVisibleRef = useRef(false);
+  const captureSessionStartedRef = useRef(false);
   const captureRef = useRef<() => void>(() => {});
 
   const urlFor = (bytes: Uint8Array) => URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
@@ -123,6 +122,9 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
         fullscreen: await window.isFullscreen(),
         visible: await window.isVisible(),
       };
+      // 会话登记在隐藏之前：Rust 端记录"首张钉图截图开始前主窗是否可见"。
+      await invoke("capture_session_begin", { visible: windowGeometryRef.current.visible });
+      captureSessionStartedRef.current = true;
       await window.hide();
       // 等待 Windows 合成器播完隐藏动画，否则主窗口残影会留在截图里
       await new Promise((resolve) => setTimeout(resolve, 320));
@@ -149,7 +151,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       await restoreCaptureWindow();
     }
   };
-  const restoreCaptureWindow = async (options: { showAfter?: boolean } = {}) => {
+  const restoreCaptureWindow = async (options: { outcome?: "pin" | "confirm" | "cancel" } = {}) => {
     const geometry = windowGeometryRef.current;
     if (!geometry) return;
     const window = getCurrentWindow();
@@ -164,19 +166,25 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       await window.setPosition(geometry.position);
       await window.setSize(geometry.size);
       if (geometry.fullscreen) await window.setFullscreen(true);
-      setOverlay(false);
-      if (captureImageRef.current) URL.revokeObjectURL(captureImageRef.current.src);
-      captureImageRef.current = null;
-      setCaptureBackground("");
       setCovering(false);
       restoreSucceeded = true;
     } finally {
       setCovering(false);
       try {
-        if (options.showAfter !== false) {
-          await window.show();
+        // 会话只结算一次：先 finish 拿到"是否恢复显示"。浮层摘除放在结算和
+        // geometry 释放之后——浮层消失即代表恢复全部完成，此后的新截图/快捷键
+        // 不会被 windowGeometry guard 拦下。
+        let showAfterRestore = true;
+        if (restoreSucceeded && captureSessionStartedRef.current) {
+          showAfterRestore = await invoke<boolean>("capture_session_finish", { outcome: options.outcome ?? "cancel" });
+          captureSessionStartedRef.current = false;
         }
         if (restoreSucceeded) windowGeometryRef.current = null;
+        setOverlay(false);
+        if (captureImageRef.current) URL.revokeObjectURL(captureImageRef.current.src);
+        captureImageRef.current = null;
+        setCaptureBackground("");
+        if (showAfterRestore) await window.show();
       } catch (reason) {
         windowGeometryRef.current = geometry;
         throw reason;
@@ -232,15 +240,13 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     setBytes(image, false);
     setOcrText(confirmedOcr);
     setTranslation(confirmedTranslation);
-    await restoreCaptureWindow();
+    await restoreCaptureWindow({ outcome: "confirm" });
   };
   const overlayPinImage = async (region: RegionCss, scale: number, cornerRadius: number) => {
       const bytes = await cropFromImage(region, scale, cornerRadius);
       await invoke("pin_image", { image: Array.from(bytes), radius: cornerRadius });
-      pinRestoreVisibleRef.current = windowGeometryRef.current?.visible ?? false;
-      setOverlay(false);
-      // 钉图后主窗口不显示：只恢复几何，保持隐藏，关闭钉图时再按需恢复。
-      await restoreCaptureWindow({ showAfter: false });
+      // 钉图后主窗口不显示：会话以 "pin" 结算，浮层由 restoreCaptureWindow 统一摘除。
+      await restoreCaptureWindow({ outcome: "pin" });
   };
   const overlayCopyImage = async (region: RegionCss, scale: number, cornerRadius?: number) => {
     const bytes = await cropFromImage(region, scale, cornerRadius);
@@ -274,22 +280,6 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
 requestAnimationFrame(() => requestAnimationFrame(() => captureRef.current())); } } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
   useEffect(() => { const captureEvent = () => { (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = false; captureRef.current(); }; const fitEvent = () => setZoom(1); const recognizeTextEvent = (event: Event) => { const text = (event as CustomEvent<{ text?: unknown }>).detail?.text; if (typeof text === "string") { setOcrText(text); setTranslation(""); setError(""); setCopied(false); } }; const recognizeImageEvent = (event: Event) => { const bytes = (event as CustomEvent<{ image?: unknown }>).detail?.image; if (!Array.isArray(bytes) || !bytes.every((byte) => typeof byte === "number")) return; setOriginal(new Uint8Array(bytes)); setBytes(new Uint8Array(bytes), false); setOcrText(""); setTranslation(""); setError(""); }; window.addEventListener("memopaws-capture", captureEvent); window.addEventListener("canvas_fit", fitEvent); window.addEventListener("recognize-text", recognizeTextEvent); window.addEventListener("recognize-image", recognizeImageEvent); return () => { window.removeEventListener("memopaws-capture", captureEvent); window.removeEventListener("canvas_fit", fitEvent); window.removeEventListener("recognize-text", recognizeTextEvent); window.removeEventListener("recognize-image", recognizeImageEvent); }; }, []);
   useEffect(() => { const onDocClick = () => closeContextMenu(); document.addEventListener("click", onDocClick); return () => document.removeEventListener("click", onDocClick); }, []);
-  // 钉图期间主窗口保持隐藏；关闭钉图窗口后恢复显示（仅当截图前主窗口可见）。
-  useEffect(() => {
-    let active = true;
-    let stop: (() => void) | undefined;
-    void listen("pin-closed", () => {
-      if (!active) return;
-      void (async () => {
-        if (pinRestoreVisibleRef.current) {
-          pinRestoreVisibleRef.current = false;
-          const window = getCurrentWindow();
-          await window.show();
-        }
-      })();
-    }).then((unlisten) => { stop = unlisten; });
-    return () => { active = false; stop?.(); };
-  }, []);
 
   const closeOverlay = async () => { await restoreCaptureWindow(); };
 

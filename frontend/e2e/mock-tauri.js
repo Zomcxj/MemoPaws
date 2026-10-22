@@ -21,6 +21,44 @@
   // download_update 的结局模式：success（离线包→ready）/ error（→update-download-error）
   // / reject（invoke 立即 reject 且不发任何事件，镜像后端下载互斥时的立即失败）
   let downloadMode = "success";
+
+  // 钉图会话状态机：与 Rust `pinned_images::Pins` 同一套规则（首张前可见性、
+  // 会话互斥、取消/确认/钉图三种 finish 结果、最后一张销毁才恢复）。
+  const pinSession = { next: 0, images: new Map(), captureVisible: null, restoreVisible: null };
+  function sessionBegin(visible) {
+    if (pinSession.captureVisible !== null) throw new Error("capture is already active");
+    pinSession.captureVisible = Boolean(visible);
+  }
+  function sessionInsert() {
+    pinSession.next += 1;
+    const label = "pin-" + pinSession.next;
+    if (pinSession.restoreVisible === null) {
+      pinSession.restoreVisible = pinSession.captureVisible === null ? false : pinSession.captureVisible;
+    }
+    pinSession.images.set(label, {});
+    return label;
+  }
+  function sessionRemove(label) {
+    if (!pinSession.images.delete(label)) return null;
+    if (pinSession.images.size === 0 && pinSession.captureVisible === null) {
+      const restore = pinSession.restoreVisible;
+      pinSession.restoreVisible = null;
+      return restore;
+    }
+    return null;
+  }
+  function sessionFinish(outcome) {
+    if (!["pin", "confirm", "cancel"].includes(outcome)) throw new Error("invalid capture outcome");
+    if (pinSession.captureVisible === null) throw new Error("capture is not active");
+    const before = pinSession.captureVisible;
+    pinSession.captureVisible = null;
+    const pending = pinSession.images.size === 0 ? pinSession.restoreVisible : null;
+    if (pinSession.images.size === 0) pinSession.restoreVisible = null;
+    if (outcome === "confirm") return true;
+    if (outcome === "pin" && pinSession.images.size > 0) return false;
+    if (outcome === "cancel" && pinSession.images.size > 0) return before;
+    return pending !== null ? pending : true;
+  }
   const MOCK_DATA = {
     key_list: [
       { id: 1, name: "Test LLM Key", type: "llm", url: "https://api.openai.com/v1", url_anthropic: "", note: "Test key", order: 0, created: "1700000000" },
@@ -170,6 +208,16 @@
         } else if (command === "capture_screen") {
           // 原始二进制：invoke 的返回值就是 ArrayBuffer，没有 { image, preview } 外壳
           resolve(capturePngBuffer());
+        } else if (command === "pin_image") {
+          // 镜像新后端：返回唯一 pin-N 标签并登记进会话状态。
+          try { resolve(sessionInsert()); } catch (error) { reject(error); }
+        } else if (command === "pin_close") {
+          // 真实后端由销毁钩子恢复主窗；浏览器里关闭走 __MOCK_TAURI_CLOSE_PIN__。
+          resolve(null);
+        } else if (command === "capture_session_begin") {
+          try { sessionBegin(args && args.visible); resolve(null); } catch (error) { reject(error); }
+        } else if (command === "capture_session_finish") {
+          try { resolve(sessionFinish((args && args.outcome) || "cancel")); } catch (error) { reject(error); }
         } else if (command === "image_crop") {
           // 前端应当在本地 canvas 裁剪；这条分支只用来让误调 IPC 的实现被
           // image_crop 计数断言抓住，而不是在解码处抛错。
@@ -266,6 +314,13 @@
   window.__MOCK_TAURI_RUNTIME_UPDATES__ = runtimeUpdates;
   window.__MOCK_TAURI_SET_API_MODE__ = function(mode) { apiTestMode = mode; };
   window.__MOCK_TAURI_SET_FULLSCREEN__ = function(value) { fullscreen = Boolean(value); };
+  // 模拟原生 destroyed 钩子：移除钉图；仅当返回 true（最后一张且首张前可见）时恢复显示。
+  window.__MOCK_TAURI_CLOSE_PIN__ = function(label) {
+    const restore = sessionRemove(label);
+    if (restore === true) visible = true;
+    return restore;
+  };
+  window.__MOCK_TAURI_PIN_LABELS__ = function() { return Array.from(pinSession.images.keys()); };
   // 由 plugin:window|hide/show 维护的可见性，供注入脚本在记录命令时如实上报
   window.__MOCK_TAURI_IS_VISIBLE__ = function() { return visible; };
 

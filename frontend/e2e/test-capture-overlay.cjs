@@ -15,7 +15,7 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 
-const BASE_URL = "http://localhost:1420";
+const BASE_URL = process.env.MEMOPAWS_BASE_URL || "http://localhost:1420";
 const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, "mock-tauri.js"), "utf-8");
 
 // A real, fully opaque PNG generated in the page, served for get_pinned_image so
@@ -569,7 +569,8 @@ async function pinAlphaFlow(browser) {
     // 钉图后主窗口必须保持隐藏（"不要出现主界面"），关闭钉图窗口再恢复。
     const hiddenAgain = await page.waitForFunction(() => !window.__MOCK_TAURI_IS_VISIBLE__(), null, { timeout: 5000 }).then(() => true).catch(() => false);
     if (!hiddenAgain) problems.push("main window must stay hidden while the pin is up (no main UI during pin)");
-    await page.evaluate(() => window.__MOCK_TAURI_EMIT__("pin-closed"));
+    // 新会话模型：销毁由 __MOCK_TAURI_CLOSE_PIN__ 模拟原生 destroyed 钩子恢复主窗。
+    await page.evaluate(() => window.__MOCK_TAURI_CLOSE_PIN__(window.__MOCK_TAURI_PIN_LABELS__()[0]));
     const mainRestored = await page.waitForFunction(() => window.__MOCK_TAURI_IS_VISIBLE__(), null, { timeout: 3000 }).then(() => true).catch(() => false);
     if (!mainRestored) problems.push("main window did not come back after the pin was closed");
     if (problems.length) throw new Error(problems.join("; "));
@@ -658,8 +659,62 @@ async function captureFallbackFlow(browser) {
   });
 }
 
+// Multi-pin session rules: pins taken while the main window was visible keep
+// that origin; closing a non-last pin never restores, the last close does, and
+// a close that lands during a pending capture only settles at session finish.
+async function multiPinSessionFlow(browser) {
+  await withPage(browser, [MOCK_SCRIPT, PIN_IMAGE_SCRIPT], async (page) => {
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    const isVisible = () => page.evaluate(() => window.__MOCK_TAURI_IS_VISIBLE__());
+    const labels = () => page.evaluate(() => window.__MOCK_TAURI_PIN_LABELS__());
+    const closePin = (label) => page.evaluate((target) => window.__MOCK_TAURI_CLOSE_PIN__(target), label);
+    const capture = () => page.evaluate(() => window.dispatchEvent(new CustomEvent("memopaws-capture")));
+    const pinSelection = async (from, to) => {
+      await drag(page, from, to);
+      const overlay = page.locator(".capture-overlay");
+      await overlay.getByRole("button", { name: "Pin image" }).click();
+      await page.locator(".capture-overlay").waitFor({ state: "detached", timeout: 30000 });
+    };
+    const problems = [];
+
+    // Scenario A: visible origin — hidden stays hidden until the last pin closes.
+    await page.getByRole("button", { name: "截图" }).click();
+    await waitForOverlay(page);
+    await pinSelection({ x: 100, y: 100 }, { x: 400, y: 300 });
+    if (await isVisible()) problems.push("A: main window must stay hidden after the first pin");
+    await capture();
+    await waitForOverlay(page);
+    await pinSelection({ x: 500, y: 120 }, { x: 800, y: 400 });
+    if ((await labels()).length !== 2) problems.push(`A: expected two independent pins, saw ${JSON.stringify(await labels())}`);
+    await closePin("pin-1");
+    if (await isVisible()) problems.push("A: closing a non-last pin must not restore the main window");
+    await closePin("pin-2");
+    if (!(await isVisible())) problems.push("A: closing the last pin must restore the main window");
+
+    // Scenario B: hidden origin — even the last close must stay hidden.
+    await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("plugin:window|hide"));
+    await page.getByRole("button", { name: "截图" }).click();
+    await waitForOverlay(page);
+    await pinSelection({ x: 100, y: 100 }, { x: 400, y: 300 });
+    await closePin("pin-3");
+    if (await isVisible()) problems.push("B: a hidden-origin pin must stay hidden after its last close");
+
+    // Scenario C: closing the last pin during a pending capture must not fire a
+    // stale restore; only the capture session finish settles visibility.
+    await page.getByRole("button", { name: "截图" }).click();
+    await waitForOverlay(page);
+    await closePin("pin-3");
+    if ((await labels()).length !== 0) problems.push("C: pin registry must be empty after the last close");
+    await page.keyboard.press("Escape");
+    await waitForDetach(page);
+    if (!(await isVisible())) problems.push("C: cancel finish must settle the pending restoration");
+    if (problems.length) throw new Error(problems.join("; "));
+  });
+}
+
 const FLOWS = [
   ["capture overlay selection flow", captureOverlayFlow],
+  ["multi-pin session visibility rules", multiPinSessionFlow],
   ["toolbar/context save uses native save_image_as", nativeSaveFlow],
   ["overlay save busy and error on the overlay", overlaySaveFlow],
   ["overlay save hides the window and restores it", overlaySaveVisibilityFlow],
