@@ -68,7 +68,7 @@ fn mosaic_area(image: &mut RgbaImage, block: u32, origin_x: u32, origin_y: u32, 
     }
 }
 
-fn decode_limited(bytes: &[u8]) -> Result<DynamicImage, OcrError> {
+pub fn decode_limited(bytes: &[u8]) -> Result<DynamicImage, OcrError> {
     if bytes.len() > MAX_INPUT_BYTES { return Err(OcrError::InputTooLarge { max_bytes: MAX_INPUT_BYTES }); }
     let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|_| OcrError::UnsupportedImage)?;
     let format = reader.format().filter(|format| matches!(format, ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Gif | ImageFormat::WebP | ImageFormat::Bmp)).ok_or(OcrError::UnsupportedImage)?;

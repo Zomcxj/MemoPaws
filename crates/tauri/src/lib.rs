@@ -80,67 +80,6 @@ fn set_glass_effect(app: tauri::AppHandle, enabled: bool) -> Result<(), String> 
     window.set_effects(config).map_err(|e| e.to_string())
 }
 
-static PINNED_IMAGE: std::sync::Mutex<Option<(Vec<u8>, f64)>> = std::sync::Mutex::new(None);
-
-fn image_dims(bytes: &[u8]) -> Option<(u32, u32)> {
-    image::load_from_memory(bytes).ok().map(|img| (img.width(), img.height()))
-}
-
-#[tauri::command]
-async fn pin_image(app: tauri::AppHandle, image: Vec<u8>, radius: Option<f64>) -> Result<(), String> {
-    let radius = radius.unwrap_or(0.0);
-    if let Ok(mut guard) = PINNED_IMAGE.lock() {
-        *guard = Some((image.clone(), radius));
-    }
-    let (w, h) = image_dims(&image).unwrap_or((640, 480));
-    let scale = (800.0 / w as f64).min(600.0 / h as f64).min(1.0);
-    let width = w as f64 * scale;
-    let height = h as f64 * scale;
-    let main = app.clone();
-    app.run_on_main_thread(move || {
-        match main.get_webview_window("pin") {
-            Some(window) => {
-                let _ = window.eval("location.reload()");
-                window.set_size(tauri::LogicalSize::new(width, height)).ok();
-                window.show().ok();
-                window.set_focus().ok();
-            }
-            None => {
-                if let Err(e) = tauri::WebviewWindowBuilder::new(&main, "pin", tauri::WebviewUrl::App("index.html#pin".into()))
-                    .title("钉图")
-                    .always_on_top(true)
-                    .decorations(false)
-                    .transparent(true)
-                    .resizable(true)
-                    .inner_size(width, height)
-                    .build()
-                {
-                    eprintln!("pin window creation failed: {e}");
-                }
-            }
-        }
-    })
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn get_pinned_image() -> Option<(Vec<u8>, f64)> {
-    PINNED_IMAGE.lock().ok()?.clone()
-}
-
-#[tauri::command]
-fn pin_close(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("pin") {
-        window.close().map_err(|e| e.to_string())?;
-    }
-    // 主窗口在钉图期间隐藏；关闭钉图后由主窗口决定是否恢复显示。
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.emit("pin-closed", ());
-    }
-    Ok(())
-}
-
 pub fn run() {
     std::panic::set_hook(Box::new(|info| {
         let message = info.to_string();
@@ -180,6 +119,7 @@ pub fn run() {
         .setup(|app| {
             memopaws_core::init();
             app.manage(hotkeys::ShortcutActions::default());
+            app.manage(pinned_images::PinState::default());
             let path = memopaws_core::paths::keys_path().map_err(|error| error.to_string())?;
             let vault = memopaws_keys::KeyVault::load(path)
                 .unwrap_or_else(|error| error.into_locked_vault());
@@ -249,9 +189,11 @@ pub fn run() {
             restart_app,
             show_main_window_when_ready,
             set_glass_effect,
-            pin_image,
-            get_pinned_image,
-            pin_close,
+            pinned_images::pin_image,
+            pinned_images::get_pinned_image,
+            pinned_images::pin_close,
+            pinned_images::capture_session_begin,
+            pinned_images::capture_session_finish,
             set_close_behavior,
             set_clipboard_max_items,
             set_history_max_items,
@@ -285,6 +227,14 @@ pub fn run() {
             latest_release_version,
         ])
         .on_window_event(|window, event| {
+            // Independent pin windows own their cleanup: destroy → registry
+            // removal → main-window restore only after the last one closes.
+            if window.label().starts_with("pin-") {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    pinned_images::destroyed(window);
+                }
+                return;
+            }
             if window.label() != "main" {
                 return;
             }
