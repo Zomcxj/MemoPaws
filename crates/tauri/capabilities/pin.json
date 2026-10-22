@@ -1,0 +1,12 @@
+{
+  "identifier": "pin",
+  "windows": ["pin-*"],
+  "permissions": [
+    "core:window:allow-inner-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor",
+    "core:window:allow-current-monitor",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging"
+  ]
+}

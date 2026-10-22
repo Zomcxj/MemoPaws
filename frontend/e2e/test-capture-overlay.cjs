@@ -712,6 +712,78 @@ async function multiPinSessionFlow(browser) {
   });
 }
 
+// Pin window wheel/drag contract: one wheel step resizes the window
+// proportionally to the image's natural 4:3 ratio, right-click/Esc close only
+// the calling pin instance, and the Blob URL is revoked when the page unmounts.
+const PIN_WHEEL_SCRIPT = `
+  (function () {
+    const original = window.__TAURI_INTERNALS__.invoke;
+    let inner = { width: 400, height: 300 };
+    let revokes = 0;
+    const nativeRevoke = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = function (value) { revokes += 1; window.__MOCK_REVOKE_COUNT__ = revokes; return nativeRevoke(value); };
+    const readSize = (payload) => {
+      const value = payload && payload.value;
+      if (!value) return null;
+      // Size 实例的原型 getter 过不了 jsonValue 序列化，落盘前拍成纯对象。
+      if (typeof value.width === "number") return { width: value.width, height: value.height };
+      if (value.size && typeof value.size.width === "number") return { width: value.size.width, height: value.size.height };
+      if (value.data && typeof value.data.width === "number") return { width: value.data.width, height: value.data.height };
+      return null;
+    };
+    window.__TAURI_INTERNALS__.invoke = function (command, payload) {
+      if (command === "plugin:window|inner_size") return Promise.resolve(inner);
+      if (command === "plugin:window|set_size") {
+        const size = readSize(payload) || {};
+        if (size.width && size.height) inner = { width: size.width, height: size.height };
+        window.__MOCK_TAURI_WINDOW_CALLS__.push({ command: command, value: size });
+        return Promise.resolve();
+      }
+      if (command === "plugin:window|scale_factor") return Promise.resolve(1);
+      if (command === "plugin:window|current_monitor") {
+        return Promise.resolve({ name: "Test", position: { x: 0, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1, workArea: { position: { x: 0, y: 0 }, size: { width: 1920, height: 1080 } } });
+      }
+      if (command === "plugin:window|start_dragging") { window.__MOCK_TAURI_WINDOW_CALLS__.push({ command: command }); return Promise.resolve(); }
+      return original.call(this, command, payload);
+    };
+  })();
+`;
+
+async function pinWheelFlow(browser) {
+  await withPage(browser, [MOCK_SCRIPT, PIN_IMAGE_SCRIPT, PIN_WHEEL_SCRIPT], async (page) => {
+    await page.goto(`${BASE_URL}/#pin`, { waitUntil: "networkidle" });
+    await page.locator("img[alt=\"pinned\"]").waitFor({ timeout: 5000 });
+
+    const problems = [];
+    await page.evaluate(() => {
+      document.querySelector("[data-pin-root]").dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
+    });
+    const sized = await page.waitForFunction(() => {
+      const calls = window.__MOCK_TAURI_WINDOW_CALLS__.filter((call) => call.command === "plugin:window|set_size");
+      return calls.length ? calls[calls.length - 1].value : null;
+    }, null, { timeout: 5000 }).then((handle) => handle.jsonValue()).catch(() => null);
+    if (!sized || !sized.width || !sized.height) problems.push(`wheel did not resize the window: ${JSON.stringify(sized)}`);
+    else {
+      // 400×300 initial size × 1.1 → 440; the 128×96 pin image is 4:3.
+      if (Math.round(sized.width) !== 440) problems.push(`wheel must scale 400 → 440, saw ${sized.width}`);
+      if (Math.abs(sized.height - Math.round(sized.width * 3 / 4)) > 1) problems.push(`wheel must preserve the 4:3 aspect within 1px, saw ${JSON.stringify(sized)}`);
+    }
+
+    await page.locator("img[alt=\"pinned\"]").click({ button: "right" });
+    const rightClose = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === "pin_close"));
+    if (!rightClose) problems.push("right-click must close the calling pin instance");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "pin_close").length >= 2, null, { timeout: 3000 }).catch(() => {});
+    const escClose = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "pin_close").length);
+    if (escClose < 2) problems.push(`Escape must close the pin, saw ${escClose} pin_close call(s)`);
+    // 必须仍在 #pin 页上检查：导航回主页面后 App 合法调用这些命令。
+    const forbidden = await page.evaluate(() => ["show_main_window_when_ready", "set_glass_effect", "latest_release_version", "get_config"].filter((command) => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === command)));
+    if (forbidden.length) problems.push(`pin window ran main-only startup commands: ${forbidden.join(", ")}`);
+    // Blob URL 卸载回收改由原生增量验证：跨文档导航不触发 React 卸载。
+    if (problems.length) throw new Error(problems.join("; "));
+  });
+}
+
 const FLOWS = [
   ["capture overlay selection flow", captureOverlayFlow],
   ["multi-pin session visibility rules", multiPinSessionFlow],
@@ -720,6 +792,7 @@ const FLOWS = [
   ["overlay save hides the window and restores it", overlaySaveVisibilityFlow],
   ["pinned image keeps transparent corners", pinAlphaFlow],
   ["#pin window transparency and startup", pinWindowFlow],
+  ["pin wheel zoom, close and cleanup", pinWheelFlow],
   ["capture_screen number[] fallback still decodes", captureFallbackFlow],
 ];
 

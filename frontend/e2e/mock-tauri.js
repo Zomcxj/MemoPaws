@@ -277,6 +277,12 @@
      invoke: function(command, payload) {
        if (command === "plugin:window|outer_position") return Promise.resolve({ x: 0, y: 0 });
        if (command === "plugin:window|outer_size") return Promise.resolve({ width: 1280, height: 720 });
+       if (command === "plugin:window|inner_size") { windowCalls.push({ command: command }); return Promise.resolve({ width: 800, height: 600 }); }
+       if (command === "plugin:window|scale_factor") return Promise.resolve(1);
+       if (command === "plugin:window|current_monitor") {
+         return Promise.resolve({ name: "Primary", position: { x: 0, y: 0 }, size: { width: 1280, height: 720 }, scaleFactor: 1, workArea: { position: { x: 0, y: 0 }, size: { width: 1280, height: 720 } } });
+       }
+       if (command === "plugin:window|start_dragging") { windowCalls.push({ command: command }); return Promise.resolve(); }
         if (command === "plugin:window|is_fullscreen") { windowCalls.push({ command: command }); return Promise.resolve(fullscreen); }
         if (command === "plugin:window|is_visible") { windowCalls.push({ command: command }); return Promise.resolve(visible); }
         if (command === "plugin:window|set_fullscreen") { windowCalls.push({ command: command, value: payload && payload.value }); fullscreen = Boolean(payload && payload.value); return Promise.resolve(); }
