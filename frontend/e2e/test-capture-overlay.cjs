@@ -4,9 +4,12 @@
 // Contract under test: capture_screen answers with the raw PNG bytes of the
 // screen (Tauri ipc Response), the frontend decodes them once into the overlay
 // background and crops on a native canvas — so no overlay action may call
-// image_crop, and a pending save hides the window until it settles.
+// image_crop, a pending save keeps the visible owner window up so the modal
+// dialog stays above the overlay, and pin sessions live in the Rust registry
+// (restore after the last pin closes).
 //
-// Usage: keep `npm --prefix frontend run dev` running on http://localhost:1420, then
+// Usage: keep `npm --prefix frontend run dev` running on http://localhost:1420
+// (or set MEMOPAWS_BASE_URL), then
 //   node frontend/e2e/test-capture-overlay.cjs
 //
 // Each flow runs in its own browser context and is reported separately, so a red
@@ -789,7 +792,7 @@ const FLOWS = [
   ["multi-pin session visibility rules", multiPinSessionFlow],
   ["toolbar/context save uses native save_image_as", nativeSaveFlow],
   ["overlay save busy and error on the overlay", overlaySaveFlow],
-  ["overlay save hides the window and restores it", overlaySaveVisibilityFlow],
+  ["overlay save keeps the window visible and restores selection", overlaySaveVisibilityFlow],
   ["pinned image keeps transparent corners", pinAlphaFlow],
   ["#pin window transparency and startup", pinWindowFlow],
   ["pin wheel zoom, close and cleanup", pinWheelFlow],

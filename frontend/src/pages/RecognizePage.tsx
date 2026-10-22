@@ -125,10 +125,12 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       // 会话登记在隐藏之前：Rust 端记录"首张钉图截图开始前主窗是否可见"。
       await invoke("capture_session_begin", { visible: windowGeometryRef.current.visible });
       captureSessionStartedRef.current = true;
+      // 全屏退出必须在 hide 之前：tao 在隐藏窗口上退全屏会把窗口重新显示
+      // 出来，截图就会拍到应用自己的全屏窗口（与 restoreCaptureWindow 同因）。
+      if (windowGeometryRef.current.fullscreen) await window.setFullscreen(false);
       await window.hide();
       // 等待 Windows 合成器播完隐藏动画，否则主窗口残影会留在截图里
       await new Promise((resolve) => setTimeout(resolve, 320));
-      if (windowGeometryRef.current.fullscreen) await window.setFullscreen(false);
       const display = displays.find((item) => item.index === selectedDisplay);
       if (display) {
         await window.setPosition(new PhysicalPosition(display.x, display.y));
@@ -159,10 +161,12 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     try {
       // 窗口隐藏时 WebView2 合成器不换帧，show() 会先呈现旧的整屏截图帧。
       // 因此在窗口仍可见时先用纯色遮罩盖住浮层，让合成器换上"干净帧"再隐藏。
+      // 全屏退出必须在 hide 之前：tao 在隐藏窗口上退出全屏会顺带把窗口重新
+      // 显示出来（原生诊断已复现），先退再隐藏才不会让钉图期间主窗"自己出现"。
       setCovering(true);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      await window.hide();
       if (await window.isFullscreen()) await window.setFullscreen(false);
+      await window.hide();
       await window.setPosition(geometry.position);
       await window.setSize(geometry.size);
       if (geometry.fullscreen) await window.setFullscreen(true);
