@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { type History, type Mark, type Tool, addMark, emptyHistory, imagePoint, redo, undo } from "../annotation/model";
+import { drawMarks } from "../annotation/render";
 import "./CaptureOverlay.css";
 
 export interface RegionCss { x: number; y: number; width: number; height: number }
@@ -18,19 +20,32 @@ export interface CaptureLabels {
   processing: string;
   panelTitle: string;
   resize: string;
+  toolMove: string;
+  toolArrow: string;
+  toolRectangle: string;
+  toolPen: string;
+  toolText: string;
+  toolMosaic: string;
+  strokeColor: string;
+  strokeWidth: string;
+  undo: string;
+  redo: string;
+  textCommit: string;
+  textCancel: string;
 }
 
 interface Props {
   background: string;
   hint: string;
   onConfirm: (result: { image: Uint8Array; ocrText: string; translation: string }) => Promise<void> | void;
-  onCrop: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<Uint8Array>;
+  // 统一合成入口：所有动作都先经它拿到"标注后的完整 PNG"，再分发。
+  onCrop: (region: RegionCss, scale: number, cornerRadius: number, marks: Mark[]) => Promise<Uint8Array>;
   onCancel: () => void;
-  onRecognize?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<string>;
-  onTranslate?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<{ ocrText: string; translation: string }>;
-   onPinImage?: (region: RegionCss, scale: number, cornerRadius: number) => Promise<void> | void;
-   onCopyImage?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<void> | void;
-   onSaveImage?: (region: RegionCss, scale: number, cornerRadius?: number) => Promise<void> | void;
+  onRecognize?: (image: Uint8Array) => Promise<string>;
+  onTranslate?: (image: Uint8Array) => Promise<{ ocrText: string; translation: string }>;
+  onPinImage?: (image: Uint8Array, cornerRadius: number) => Promise<void> | void;
+  onCopyImage?: (image: Uint8Array) => Promise<void> | void;
+  onSaveImage?: (image: Uint8Array) => Promise<void> | void;
   labels?: Partial<CaptureLabels>;
 }
 
@@ -56,7 +71,28 @@ const DEFAULT_LABELS: CaptureLabels = {
   processing: "Working…",
   panelTitle: "Result",
   resize: "Resize result window",
+  toolMove: "Move",
+  toolArrow: "Arrow",
+  toolRectangle: "Rectangle",
+  toolPen: "Pen",
+  toolText: "Text",
+  toolMosaic: "Mosaic",
+  strokeColor: "Stroke color",
+  strokeWidth: "Stroke width",
+  undo: "Undo",
+  redo: "Redo",
+  textCommit: "Commit text",
+  textCancel: "Discard text",
 };
+
+const TOOLS: { name: Exclude<Tool, "move"> | "move"; labelKey: keyof CaptureLabels }[] = [
+  { name: "move", labelKey: "toolMove" },
+  { name: "arrow", labelKey: "toolArrow" },
+  { name: "rectangle", labelKey: "toolRectangle" },
+  { name: "pen", labelKey: "toolPen" },
+  { name: "text", labelKey: "toolText" },
+  { name: "mosaic", labelKey: "toolMosaic" },
+];
 
 const toHex = (r: number, g: number, b: number) =>
   `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
@@ -81,6 +117,18 @@ export function CaptureOverlay({
   const magnifierRef = useRef<HTMLCanvasElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [cornerRadius, setCornerRadius] = useState(12);
+  // 标注状态：工具/历史/进行中的草稿/颜色线宽/文字草稿。
+  // 历史里的标记永不原地修改——undo/redo/addMark 全部返回新对象。
+  const [tool, setTool] = useState<Tool>("move");
+  const [history, setHistory] = useState<History>(emptyHistory);
+  const [draft, setDraft] = useState<Mark | null>(null);
+  const draftRef = useRef<Mark | null>(null);
+  const drawingRef = useRef(false);
+  const [penColor, setPenColor] = useState("#ff6565");
+  const [penWidth, setPenWidth] = useState(3);
+  const [textDraft, setTextDraft] = useState<{ image: { x: number; y: number }; left: number; top: number; value: string } | null>(null);
+  const [toolbarSize, setToolbarSize] = useState<{ width: number; height: number } | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [selection, setSelection] = useState<{ region: RegionCss; scale: number; rect: DragState } | null>(null);
   const [editing, setEditing] = useState(false);
   const editRef = useRef<SelectionEdit | null>(null);
@@ -220,6 +268,11 @@ export function CaptureOverlay({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // 文字编辑/取色/线宽输入期间，快捷键属于编辑器而非浮层；
+      // 输入法组合中（isComposing）的 Enter/Esc 也不能触发确认或取消。
+      if (event.isComposing) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       if (event.key === "Escape") {
         cancelSelection();
         return;
@@ -326,7 +379,8 @@ export function CaptureOverlay({
   }, [drag !== null, editing, layout, onCancel, regionFrom]);
 
   const beginSelectionEdit = (kind: SelectionEdit["kind"], event: ReactMouseEvent<HTMLDivElement | HTMLButtonElement>) => {
-    if (!selection || busy || event.button !== 0) return;
+    // 绘制模式下选区只作为画布：不移动、不缩放（把手也只在移动模式渲染）。
+    if (tool !== "move" || !selection || busy || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     editRef.current = { kind, startX: event.clientX, startY: event.clientY, rect: selection.rect };
@@ -334,7 +388,9 @@ export function CaptureOverlay({
   };
 
   const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (busy) return;
+    // 绘制按下后紧随的 mousedown 属于同一次按压，不得清掉选区。
+    // busy 不拦这里：动作挂起时仍可框新选区/绘制，随即令牌 +1 作废旧结果。
+    if (drawingRef.current) return;
     if (event.button !== 0) return;
       if ((event.target as HTMLElement).closest(".capture-result-window")) return;
     event.preventDefault();
@@ -349,6 +405,80 @@ export function CaptureOverlay({
     setDrag({ startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, width: 0, height: 0 });
   };
 
+  // 绘制入口：仅在标注工具激活且按下点落在选区内时开始一份草稿。
+  // 选区外的按下放行给 handleMouseDown —— "换个新选区"不清已画的标注。
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    // busy 不拦绘制：动作挂起时照样可以标注，绘制会作废挂起中的旧结果。
+    if (tool === "move" || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest(".capture-overlay-toolbar, .capture-result-window, .capture-overlay-text-editor, input, button, .capture-overlay-rect-radius")) return;
+    if (!selection) return;
+    const rect = selection.rect;
+    const left = Math.min(rect.startX, rect.x);
+    const top = Math.min(rect.startY, rect.y);
+    const right = Math.max(rect.startX, rect.x);
+    const bottom = Math.max(rect.startY, rect.y);
+    if (event.clientX < left || event.clientX > right || event.clientY < top || event.clientY > bottom) return;
+    event.preventDefault();
+    const bounds = layout();
+    const point = imagePoint(
+      { x: event.clientX, y: event.clientY },
+      { offsetX: bounds.offsetX, offsetY: bounds.offsetY, scale: bounds.scale, nw: bounds.nw, nh: bounds.nh },
+    );
+    if (tool === "text") {
+      // 文字工具：不拖拽起笔，在锚点放一个有界编辑器（视口内钳制）。
+      const left = Math.min(Math.max(4, event.clientX), Math.max(4, window.innerWidth - 288));
+      const top = Math.min(Math.max(4, event.clientY), Math.max(4, window.innerHeight - 160));
+      setTextDraft({ image: point, left, top, value: "" });
+      return;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drawingRef.current = true;
+    // 绘制即新操作：作废延迟回填的旧 OCR 结果，但不清标注历史。
+    operationTokenRef.current += 1;
+    setOcrText("");
+    setTranslation("");
+    setResultError("");
+    const mark: Mark = { tool: tool as Exclude<Tool, "move">, points: [point], color: penColor, width: penWidth };
+    draftRef.current = mark;
+    setDraft(mark);
+  };
+
+  // 草稿存在期间才挂窗口级指针监听：画笔逐点追加，其余工具以终点替换。
+  useEffect(() => {
+    if (!draft) return;
+    const onMove = (event: PointerEvent) => {
+      const current = draftRef.current;
+      if (!current) return;
+      const bounds = layout();
+      const point = imagePoint(
+        { x: event.clientX, y: event.clientY },
+        { offsetX: bounds.offsetX, offsetY: bounds.offsetY, scale: bounds.scale, nw: bounds.nw, nh: bounds.nh },
+      );
+      const next: Mark = current.tool === "pen"
+        ? { ...current, points: [...current.points, point] }
+        : { ...current, points: [current.points[0], point] };
+      draftRef.current = next;
+      setDraft(next);
+    };
+    const finish = (commit: boolean) => {
+      const current = draftRef.current;
+      draftRef.current = null;
+      drawingRef.current = false;
+      setDraft(null);
+      if (current && commit) setHistory((h) => addMark(h, current));
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+    };
+  }, [draft !== null, layout]);
+
   const active = drag ?? selection?.rect ?? null;
   const rectStyle = active
     ? {
@@ -359,7 +489,7 @@ export function CaptureOverlay({
       }
     : null;
 
-  const { scale: displayScale } = layout();
+  const { scale: displayScale, offsetX, offsetY, renderedW, renderedH } = layout();
   const info = active
     ? (() => {
         const resolved = regionFrom(active.startX, active.startY, active.x, active.y);
@@ -405,13 +535,19 @@ export function CaptureOverlay({
     };
   };
 
+  // 所有动作共用的取图口：同一选区、同一份标注 → 同一张 PNG。
+  const imageForSelection = () => {
+    if (!selection) throw new Error("没有截图选区");
+    return onCrop(selection.region, selection.scale, cornerRadius, history.marks);
+  };
+
   const confirmSelection = async () => {
     if (!selection || busy) return;
     const operationToken = ++operationTokenRef.current;
     setBusy(true);
     setResultError("");
     try {
-      const image = await onCrop(selection.region, selection.scale, cornerRadius);
+      const image = await imageForSelection();
       if (operationTokenRef.current === operationToken) await onConfirm({ image, ocrText, translation });
     } catch (reason) {
       setResultError(reason instanceof Error ? reason.message : String(reason));
@@ -427,7 +563,8 @@ export function CaptureOverlay({
     if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
     setBusy(true); setResultError("");
     try {
-      const result = await onRecognize(selection.region, selection.scale, cornerRadius);
+      const image = await imageForSelection();
+      const result = await onRecognize(image);
       if (operationTokenRef.current === operationToken) setOcrText(result);
     }
     catch (reason) { setResultError(reason instanceof Error ? reason.message : String(reason)); }
@@ -440,7 +577,8 @@ export function CaptureOverlay({
     if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
     setBusy(true); setResultError("");
     try {
-      const result = await onTranslate(selection.region, selection.scale, cornerRadius);
+      const image = await imageForSelection();
+      const result = await onTranslate(image);
       if (operationTokenRef.current === operationToken) {
         setOcrText(result.ocrText); setTranslation(result.translation);
       }
@@ -448,18 +586,62 @@ export function CaptureOverlay({
     finally { setBusy(false); }
   };
 
+  // 预览画布：底存储 = 原图像素尺寸，CSS 尺寸 = contain 布局矩形。
+  // 与导出共用 drawMarks（预览即导出），rAF 合并同帧的多次失效。
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const canvas = previewCanvasRef.current;
+      const img = imgRef.current;
+      if (!canvas || !img || !img.naturalWidth) return;
+      if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      drawMarks(ctx, history.marks);
+      if (draft) drawMarks(ctx, [draft]);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [background, history.marks, draft]);
+
+  // 工具条两行后的实际尺寸未知：测量后据此钳制左缘、贴底时上翻。
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = toolbarRef.current;
+    if (!node) return;
+    const measure = () => setToolbarSize({ width: node.offsetWidth, height: node.offsetHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [selection, resultWindow]);
+
+  const commitTextDraft = () => {
+    const current = textDraft;
+    if (!current || !current.value.trim()) return;
+    setHistory((h) => addMark(h, { tool: "text", points: [current.image], color: penColor, width: penWidth, text: current.value }));
+    setTextDraft(null);
+  };
+
+  const toolbarStyle = rectStyle
+    ? (() => {
+        const width = toolbarSize?.width ?? 420;
+        const height = toolbarSize?.height ?? 88;
+        const left = Math.min(Math.max(4, rectStyle.left), Math.max(4, window.innerWidth - width - 4));
+        const below = rectStyle.top + rectStyle.height + 8;
+        const top = below + height > window.innerHeight ? Math.max(4, rectStyle.top - height - 8) : below;
+        return { left, top };
+      })()
+    : undefined;
+
   const resultWindowStyle = resultWindow ? {
     left: resultWindow.left,
     top: resultWindow.top,
     width: resultWindow.width,
     height: resultWindow.height,
-  } : undefined;
-
-  const actionStyle = rectStyle ? {
-    left: Math.min(Math.max(4, rectStyle.left), Math.max(4, window.innerWidth - 420)),
-    top: rectStyle.top + rectStyle.height + 36 > window.innerHeight
-      ? Math.max(4, rectStyle.top - 36)
-      : rectStyle.top + rectStyle.height + 8,
   } : undefined;
 
   const beginResultWindowDrag = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -487,12 +669,13 @@ export function CaptureOverlay({
     if (resizingResultWindow?.pointerId === event.pointerId) setResizingResultWindow(null);
   };
 
-  const act = (handler?: (region: RegionCss, scale: number, cornerRadius: number) => Promise<void> | void) => async () => {
+  const act = (handler?: (image: Uint8Array, cornerRadius: number) => Promise<void> | void) => async () => {
     if (!selection || !handler || busy) return;
     setBusy(true);
     setResultError("");
     try {
-      await handler(selection.region, selection.scale, cornerRadius);
+      const image = await imageForSelection();
+      await handler(image, cornerRadius);
     } catch (reason) {
       setResultError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -501,11 +684,17 @@ export function CaptureOverlay({
   };
 
   return (
-    <div className="capture-overlay" role="dialog" aria-modal="true" onMouseDown={handleMouseDown}>
+    <div className="capture-overlay" role="dialog" aria-modal="true" onMouseDown={handleMouseDown} onPointerDown={handlePointerDown}>
       <img ref={imgRef} src={background} alt="" draggable={false} />
+      <canvas
+        ref={previewCanvasRef}
+        className="capture-overlay-annotations"
+        style={{ left: offsetX, top: offsetY, width: renderedW, height: renderedH }}
+        aria-hidden="true"
+      />
       <div className="capture-overlay-hint">{hint}</div>
 
-      {pointer && (
+      {pointer && !draft && !textDraft && (
         <div className="capture-overlay-magnifier" style={magnifierStyle} aria-hidden="true">
           <canvas ref={magnifierRef} width={MAGNIFIER_SIZE} height={MAGNIFIER_SIZE} />
           {color && (
@@ -544,16 +733,64 @@ export function CaptureOverlay({
       )}
 
       {selection && !resultWindow && (
-        <div className="capture-overlay-actions" style={actionStyle} onMouseDown={(event) => event.stopPropagation()}>
-          {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
-          {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
-          {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
-          {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
-           {onPinImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label="Pin image" onClick={act(onPinImage)} disabled={busy}>钉图</button>}
-          <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
-            <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
-           {resultError && <div className="capture-result-error" role="alert">{resultError}</div>}
-         </div>
+        <div className="capture-overlay-toolbar" style={toolbarStyle} ref={toolbarRef} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="capture-overlay-tools" role="toolbar" aria-label={text.panelTitle}>
+            {TOOLS.map(({ name, labelKey }) => (
+              <button
+                key={name}
+                type="button"
+                className={`capture-overlay-tool${tool === name ? " is-active" : ""}`}
+                aria-pressed={tool === name}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={() => setTool(name)}
+              >
+                {text[labelKey]}
+              </button>
+            ))}
+            <input type="color" className="capture-overlay-tool-color" aria-label={text.strokeColor} value={penColor} onChange={(event) => setPenColor(event.target.value)} />
+            <input type="range" className="capture-overlay-tool-width" aria-label={text.strokeWidth} min={1} max={20} value={penWidth} onChange={(event) => setPenWidth(Number(event.target.value))} />
+            <button type="button" className="capture-overlay-tool" aria-label={text.undo} disabled={!history.past.length} onMouseDown={(event) => event.stopPropagation()} onClick={() => setHistory((h) => undo(h))}>{text.undo}</button>
+            <button type="button" className="capture-overlay-tool" aria-label={text.redo} disabled={!history.future.length} onMouseDown={(event) => event.stopPropagation()} onClick={() => setHistory((h) => redo(h))}>{text.redo}</button>
+          </div>
+          <div className="capture-overlay-actions">
+            {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
+            {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
+            {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
+            {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
+             {onPinImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label="Pin image" onClick={act(onPinImage)} disabled={busy}>钉图</button>}
+            <button className="capture-overlay-action is-primary" type="button" aria-label={text.confirm} onClick={() => void confirmSelection()} disabled={busy}>✓</button>
+              <button className="capture-overlay-action" type="button" aria-label={text.cancel} onClick={cancelSelection} disabled={busy}>×</button>
+             {resultError && <div className="capture-result-error" role="alert">{resultError}</div>}
+           </div>
+        </div>
+      )}
+
+      {textDraft && (
+        <div className="capture-overlay-text-editor" style={{ left: textDraft.left, top: textDraft.top }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <textarea
+            autoFocus
+            aria-label={text.toolText}
+            value={textDraft.value}
+            style={{ fontSize: Math.max(12, penWidth * 6), lineHeight: 1.3 }}
+            onChange={(event) => setTextDraft({ ...textDraft, value: event.target.value })}
+            onKeyDown={(event) => {
+              // IME 组合中的按键属于输入法：Enter/Esc 都不能提交或丢弃。
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setTextDraft(null);
+              } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                commitTextDraft();
+              }
+            }}
+          />
+          <div className="capture-overlay-text-editor-actions">
+            <button type="button" className="capture-overlay-action" onClick={commitTextDraft} disabled={!textDraft.value.trim()}>{text.textCommit}</button>
+            <button type="button" className="capture-overlay-action" onClick={() => setTextDraft(null)}>{text.textCancel}</button>
+          </div>
+        </div>
       )}
 
       {rectStyle && Math.abs(active!.width) >= MIN_SIZE && Math.abs(active!.height) >= MIN_SIZE && (
@@ -562,7 +799,7 @@ export function CaptureOverlay({
             <div className="capture-overlay-rect-radius" onMouseDown={(e) => e.stopPropagation()}>
               <input type="range" min={0} max={40} value={cornerRadius} onChange={(e) => setCornerRadius(Number(e.target.value))} title="圆角" />
             </div>
-            {selection && (["n", "ne", "e", "se", "s", "sw", "w", "nw"] as ResizeHandle[]).map((handle) => (
+            {tool === "move" && selection && (["n", "ne", "e", "se", "s", "sw", "w", "nw"] as ResizeHandle[]).map((handle) => (
               <button
                 key={handle}
                 type="button"

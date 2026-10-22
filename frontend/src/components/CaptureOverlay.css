@@ -170,6 +170,113 @@
   background: transparent;
 }
 
+/* 标注预览画布：底存储为原图像素，CSS 尺寸对齐 contain 布局矩形，
+   纯展示不接收指针——绘制输入由浮层根节点接管。 */
+.capture-overlay-annotations {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* 两行工具条：第一行标注工具与属性，第二行沿用动作按钮。
+   位置由 ResizeObserver 实测尺寸决定（左缘钳制、贴底上翻）。 */
+.capture-overlay-toolbar {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: calc(100vw - 8px);
+}
+
+.capture-overlay-toolbar .capture-overlay-actions {
+  position: static;
+}
+
+.capture-overlay-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 4px 6px;
+  border-radius: var(--radius-10);
+  background: rgba(20, 20, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.capture-overlay-tool {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.capture-overlay-tool.is-active {
+  background: rgba(77, 163, 255, 0.85);
+  border-color: rgba(77, 163, 255, 0.95);
+}
+
+.capture-overlay-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.capture-overlay-tool-color {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.capture-overlay-tool-width {
+  width: 90px;
+}
+
+.capture-overlay-tool:focus-visible,
+.capture-overlay-tool-color:focus-visible,
+.capture-overlay-tool-width:focus-visible,
+.capture-overlay-action:focus-visible {
+  outline: 2px solid #4da3ff;
+  outline-offset: 1px;
+}
+
+.capture-overlay-text-editor {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-10);
+  background: rgba(20, 20, 20, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.capture-overlay-text-editor textarea {
+  width: 260px;
+  height: 96px;
+  resize: none;
+  font-family: sans-serif;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  padding: 4px 6px;
+  box-sizing: border-box;
+}
+
+.capture-overlay-text-editor-actions {
+  display: flex;
+  gap: var(--space-4);
+}
+
 .capture-result-window {
   position: absolute;
   z-index: 6;

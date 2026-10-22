@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import type { Lang } from "../i18n/lang";
 import { CaptureOverlay, type RegionCss } from "../components/CaptureOverlay";
+import { composePng } from "../annotation/render";
+import type { Mark } from "../annotation/model";
 import "./RecognizePage.css";
 
 type OcrLanguage = "zh" | "en" | "ja" | "ko" | "fr" | "de" | "es" | "ru";
@@ -17,8 +19,8 @@ const languages: { value: OcrLanguage; label: string }[] = [
   { value: "es", label: "Español" }, { value: "ru", label: "Русский" },
 ];
 const copy = {
-  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyHide: "收起", historyShow: "展开", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本" },
-  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyHide: "Collapse", historyShow: "Expand", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored" },
+  zh: { import: "导入", capture: "截图", gray: "灰度", binary: "二值化", mosaic: "马赛克", reset: "重置", clear: "清空", save: "保存图片", processing: "处理中...", punch: "One Punch", close: "关闭", empty: "导入图片开始识别", history: "操作历史", emptyHistory: "暂无成功记录", ocr: "AI识别", translate: "AI翻译", needImage: "请先导入图片", needKey: "请先添加 LLM 密钥", needText: "没有可翻译文本", file: "请选择图片文件", large: "图片不能超过 25 MiB", crop: "拖拽选择裁剪区域", overlay: "拖拽框选截图区域", clearHistory: "清空全部历史？", copy: "复制", copied: "已复制", clearText: "清空文本", copyFailed: "复制失败，请检查剪贴板权限", display: "显示器", copyImage: "复制图片", pasteImage: "粘贴图片", contextCopyImage: "复制图片", contextPasteImage: "粘贴图片", contextCopyText: "复制识别文本", contextSave: "保存图片", contextReset: "重置", historyDelete: "删除", historyClear: "清空", historyHide: "收起", historyShow: "展开", historyLoad: "载入画布", historyNoImage: "该记录无图片，已回填文本", toolMove: "移动", toolArrow: "箭头", toolRectangle: "矩形", toolPen: "画笔", toolText: "文字", strokeColor: "线条颜色", strokeWidth: "线宽", undo: "撤销", redo: "重做", textCommit: "提交文字", textCancel: "取消文字" },
+  en: { import: "Import", capture: "Capture", gray: "Gray", binary: "Binary", mosaic: "Mosaic", reset: "Reset", clear: "Clear", save: "Save image", processing: "Working...", punch: "One Punch", close: "Close", empty: "Import an image to start", history: "History", emptyHistory: "No records yet", ocr: "AI OCR", translate: "AI Translate", needImage: "Import an image first", needKey: "Add an LLM key first", needText: "No text to translate", file: "Choose an image file", large: "Image must be under 25 MiB", crop: "Drag to select crop", overlay: "Drag to select a capture region", clearHistory: "Clear all history?", copy: "Copy", copied: "Copied", clearText: "Clear text", copyFailed: "Copy failed. Check clipboard permissions", display: "Display", copyImage: "Copy image", pasteImage: "Paste image", contextCopyImage: "Copy image", contextPasteImage: "Paste image", contextCopyText: "Copy recognized text", contextSave: "Save image", contextReset: "Reset", historyDelete: "Delete", historyClear: "Clear all", historyHide: "Collapse", historyShow: "Expand", historyLoad: "Load to canvas", historyNoImage: "No image in record, text restored", toolMove: "Move", toolArrow: "Arrow", toolRectangle: "Rectangle", toolPen: "Pen", toolText: "Text", strokeColor: "Stroke color", strokeWidth: "Stroke width", undo: "Undo", redo: "Redo", textCommit: "Commit text", textCancel: "Discard text" },
 } as const;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
@@ -199,43 +201,18 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const exportImage = () => { if (image) void run(async () => { await exportImageBytes(image); }); };
   // Crop from the already-captured screenshot, avoiding re-capturing from the screen
   // (the overlay's dark backdrop would pollute a live re-capture).
-  const cropFromImage = async (region: RegionCss, scale: number, cornerRadius?: number): Promise<Uint8Array> => {
+  // 统一合成器：标注画在原图像素上，裁剪、圆角与导出走同一条管线。
+  const cropFromImage = async (region: RegionCss, scale: number, cornerRadius?: number, marks: Mark[] = []): Promise<Uint8Array> => {
     const screenshot = captureImageRef.current;
     if (!screenshot) throw new Error(t.needImage);
-    const f = scale || window.devicePixelRatio || 1;
-    const x = Math.max(0, Math.round(region.x * f));
-    const y = Math.max(0, Math.round(region.y * f));
-    const width = Math.min(Math.max(1, Math.round(region.width * f)), screenshot.naturalWidth - x);
-    const height = Math.min(Math.max(1, Math.round(region.height * f)), screenshot.naturalHeight - y);
-    if (width <= 0 || height <= 0) throw new Error("截图选区超出图片边界");
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("无法创建截图画布");
-    const r = Math.max(0, Math.min(Math.round((cornerRadius || 0) * f), width / 2, height / 2));
-    // Crop and round in one canvas pass; never send the full screen back over IPC.
-    ctx.beginPath();
-    ctx.moveTo(r, 0);
-    ctx.arcTo(canvas.width, 0, canvas.width, canvas.height, r);
-    ctx.arcTo(canvas.width, canvas.height, 0, canvas.height, r);
-    ctx.arcTo(0, canvas.height, 0, 0, r);
-    ctx.arcTo(0, 0, canvas.width, 0, r);
-    ctx.closePath();
-    ctx.clip();
-    ctx.drawImage(screenshot, x, y, width, height, 0, 0, width, height);
-    const blobOut = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blobOut) throw new Error("无法生成截图 PNG 图片");
-    return new Uint8Array(await blobOut.arrayBuffer());
+    return composePng(screenshot, region, scale || window.devicePixelRatio || 1, cornerRadius || 0, marks);
   };
-  const overlayRecognize = async (region: RegionCss, scale: number, cornerRadius?: number) => {
-    const bytes = await cropFromImage(region, scale, cornerRadius);
-    const result = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() });
+  const overlayRecognize = async (image: Uint8Array) => {
+    const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() });
     return result.text || "(无识别结果)";
   };
-  const overlayTranslate = async (region: RegionCss, scale: number, cornerRadius?: number) => {
-    const bytes = await cropFromImage(region, scale, cornerRadius);
-    const ocr = await invoke<TextResult>("ai_ocr", { image: Array.from(bytes), ...config() });
+  const overlayTranslate = async (image: Uint8Array) => {
+    const ocr = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() });
     const tr = await invoke<TextResult>("ai_translate", { text: ocr.text, target, source, ...config() });
     return { ocrText: ocr.text, translation: tr.text || "(翻译失败)" };
   };
@@ -246,21 +223,18 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     setTranslation(confirmedTranslation);
     await restoreCaptureWindow({ outcome: "confirm" });
   };
-  const overlayPinImage = async (region: RegionCss, scale: number, cornerRadius: number) => {
-      const bytes = await cropFromImage(region, scale, cornerRadius);
-      await invoke("pin_image", { image: Array.from(bytes), radius: cornerRadius });
+  const overlayPinImage = async (image: Uint8Array, cornerRadius: number) => {
+      await invoke("pin_image", { image: Array.from(image), radius: cornerRadius });
       // 钉图后主窗口不显示：会话以 "pin" 结算，浮层由 restoreCaptureWindow 统一摘除。
       await restoreCaptureWindow({ outcome: "pin" });
   };
-  const overlayCopyImage = async (region: RegionCss, scale: number, cornerRadius?: number) => {
-    const bytes = await cropFromImage(region, scale, cornerRadius);
-    const blob = new Blob([bytes.slice()], { type: "image/png" });
+  const overlayCopyImage = async (image: Uint8Array) => {
+    const blob = new Blob([image.slice()], { type: "image/png" });
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
   };
-  const overlaySaveImage = async (region: RegionCss, scale: number, cornerRadius?: number) => {
-    const bytes = await cropFromImage(region, scale, cornerRadius);
+  const overlaySaveImage = async (image: Uint8Array) => {
     // 保存框以主窗口为 owner 模态弹出，始终在截图浮层之上，无需隐藏窗口。
-    await exportImageBytes(bytes);
+    await exportImageBytes(image);
   };
 
   const exportImageBytes = (bytes: Uint8Array) => {
@@ -353,7 +327,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => captureRef.current())); 
       onPinImage={overlayPinImage}
       onCopyImage={overlayCopyImage}
        onSaveImage={overlaySaveImage}
-        labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX", resize: language === "zh" ? "调整结果窗口大小" : "Resize result window" }}
+        labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX", resize: language === "zh" ? "调整结果窗口大小" : "Resize result window", toolMove: t.toolMove, toolArrow: t.toolArrow, toolRectangle: t.toolRectangle, toolPen: t.toolPen, toolText: t.toolText, toolMosaic: t.mosaic, strokeColor: t.strokeColor, strokeWidth: t.strokeWidth, undo: t.undo, redo: t.redo, textCommit: t.textCommit, textCancel: t.textCancel }}
     />}
     {covering && <div className="capture-cover" aria-hidden="true" />}
   </section>;

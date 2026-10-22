@@ -117,6 +117,48 @@ async function closePin(pinPage) {
   throw new Error(`pin window ${pinPage.url()} did not close after 关闭钉图`);
 }
 
+// 读取浮层 contain 几何：把客户端拖拽坐标换算成原图像素坐标，
+// 用于在真机截图（内容不可知）上定位画下的标注。
+async function overlayGeometry(mainPage) {
+  return mainPage.evaluate(() => {
+    const img = document.querySelector('.capture-overlay img');
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cssScale = Math.min(vw / nw, vh / nh);
+    return { nw, nh, offsetX: (vw - nw * cssScale) / 2, offsetY: (vh - nh * cssScale) / 2, scale: 1 / cssScale };
+  });
+}
+
+const toImagePoint = (geometry, client) => ({
+  x: (client.x - geometry.offsetX) * geometry.scale,
+  y: (client.y - geometry.offsetY) * geometry.scale,
+});
+
+// 解码钉图窗口实际展示的 PNG 字节并采样若干坐标的像素。
+async function decodePinnedImage(pinPage, probePoints) {
+  return pinPage.evaluate(async ({ points }) => {
+    const img = document.querySelector('img[alt="pinned"]');
+    const response = await fetch(img.src);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      pixels: points.map(([x, y]) => Array.from(ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data)),
+    };
+  }, { points: probePoints });
+}
+
+const isStrokeRed = (pixel) => pixel[0] >= 200 && pixel[1] >= 60 && pixel[1] <= 150 && pixel[2] >= 60 && pixel[2] <= 150;
+
 async function windowSnapshot(mainPage) {
   const [visible, maximized, fullscreen, position, size] = await Promise.all([
     invokeOn(mainPage, 'plugin:window|is_visible'),
@@ -301,6 +343,114 @@ async function runTests() {
     // (close is never prevented for pin windows), so pin_close above already
     // exercises the destroy hook; a forced taskkill cannot target one window.
     console.log(`[${LABEL}] destroy hook exercised via Destroyed on every pin close`);
+
+    // Scenario C: annotations end-to-end in the real app — draw via the real
+    // pointer UI, pin, then decode the pinned PNG bytes and verify the drawn
+    // pixels (stroke color, mosaic uniformity, transparent corners), then
+    // confirm and require the same stroke on the main canvas.
+    await invokeOn(mainPage, 'plugin:window|show');
+    await waitForMainVisibility(mainPage, true);
+    await mainPage.evaluate(() => window.dispatchEvent(new CustomEvent('memopaws-capture')));
+    await mainPage.locator('.capture-overlay').waitFor({ state: 'visible', timeout: 20000 });
+    await drag(mainPage, { x: 80, y: 80 }, { x: 420, y: 320 });
+    const geometry = await overlayGeometry(mainPage);
+    const origin = toImagePoint(geometry, { x: 80, y: 80 });
+    const rectFrom = { x: 130, y: 130 };
+    const rectTo = { x: 300, y: 240 };
+    const mosaicFrom = { x: 180, y: 180 };
+    const mosaicTo = { x: 230, y: 220 };
+    const ia = toImagePoint(geometry, rectFrom);
+    const ib = toImagePoint(geometry, rectTo);
+    const im1 = toImagePoint(geometry, mosaicFrom);
+    const im2 = toImagePoint(geometry, mosaicTo);
+    await mainPage.locator('.capture-overlay-tools').getByRole('button', { name: /矩形|Rectangle/ }).click();
+    await drag(mainPage, rectFrom, rectTo);
+    await mainPage.locator('.capture-overlay-tools').getByRole('button', { name: /马赛克|Mosaic/ }).click();
+    await drag(mainPage, mosaicFrom, mosaicTo);
+    await mainPage.locator('.capture-overlay').getByRole('button', { name: 'Pin image' }).click();
+    const markedPinDeadline = Date.now() + 20000;
+    let markedPin = null;
+    while (Date.now() < markedPinDeadline) {
+      markedPin = browser.contexts()[0].pages().find((p) => !knownPages.has(p) && p !== mainPage && p.url().includes('#pin')) || null;
+      if (markedPin) break;
+      await sleep(300);
+    }
+    if (!markedPin) {
+      problems.push('marked pin window never appeared');
+    } else {
+      knownPages.add(markedPin);
+      await markedPin.waitForSelector('img[alt="pinned"]', { timeout: 15000 });
+      await mainPage.locator('.capture-overlay').waitFor({ state: 'detached', timeout: 20000 });
+      const size = await decodePinnedImage(markedPin, []);
+      // 描边：沿矩形四条边（选区相对坐标 = 原图坐标 − 选区原点）各取 30 点。
+      const strokePoints = [];
+      for (let index = 0; index < 30; index++) {
+        const t = index / 29;
+        const ax = ia.x - origin.x;
+        const ay = ia.y - origin.y;
+        const bx2 = ib.x - origin.x;
+        const by2 = ib.y - origin.y;
+        strokePoints.push([ax + (bx2 - ax) * t, ay]);
+        strokePoints.push([ax + (bx2 - ax) * t, by2]);
+        strokePoints.push([ax, ay + (by2 - ay) * t]);
+        strokePoints.push([bx2, ay + (by2 - ay) * t]);
+      }
+      const stroke = await decodePinnedImage(markedPin, strokePoints);
+      const redRatio = stroke.pixels.filter(isStrokeRed).length / stroke.pixels.length;
+      if (redRatio < 0.6) {
+        problems.push(`pinned PNG must carry the drawn rectangle stroke, red ratio ${redRatio.toFixed(2)}`);
+      }
+      // 马赛克：第一个块内两个采样点必须逐位相同（块平均）。
+      const block = Math.max(4, Math.round(3 * 4));
+      const bx = Math.floor(Math.min(im1.x, im2.x) - origin.x);
+      const by = Math.floor(Math.min(im1.y, im2.y) - origin.y);
+      const mosaic = await decodePinnedImage(markedPin, [[bx + 2, by + 2], [bx + block - 2, by + 2]]);
+      if (JSON.stringify(mosaic.pixels[0]) !== JSON.stringify(mosaic.pixels[1])) {
+        problems.push(`mosaic block must be averaged in the pinned PNG, saw ${JSON.stringify(mosaic.pixels)}`);
+      }
+      // 圆角：四角必须透明。
+      const corners = await decodePinnedImage(markedPin, [[0, 0], [size.width - 1, 0], [0, size.height - 1], [size.width - 1, size.height - 1]]);
+      if (corners.pixels.some((pixel) => pixel[3] !== 0)) {
+        problems.push(`pinned PNG corners must stay transparent, saw ${JSON.stringify(corners.pixels)}`);
+      }
+      await closePin(markedPin);
+      const afterMarkedPin = await waitForMainVisibility(mainPage, true, 5000).catch(() => false);
+      if (!afterMarkedPin) problems.push('closing the marked pin must restore the visible-origin main window');
+    }
+
+    // Confirm path: the same marks must reach the main canvas unchanged.
+    await mainPage.evaluate(() => window.dispatchEvent(new CustomEvent('memopaws-capture')));
+    await mainPage.locator('.capture-overlay').waitFor({ state: 'visible', timeout: 20000 });
+    await drag(mainPage, { x: 80, y: 80 }, { x: 420, y: 320 });
+    await mainPage.locator('.capture-overlay-tools').getByRole('button', { name: /矩形|Rectangle/ }).click();
+    await drag(mainPage, rectFrom, rectTo);
+    await mainPage.locator('.capture-overlay').getByRole('button', { name: /确认|Confirm/ }).click();
+    await mainPage.locator('.capture-overlay').waitFor({ state: 'detached', timeout: 20000 });
+    const confirmedStroke = await mainPage.evaluate(async ({ topY, x0, x1, regionX, regionY }) => {
+      const img = document.querySelector('.image-canvas img');
+      if (!img || !img.naturalWidth) return null;
+      const response = await fetch(img.src);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext('2d');
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      let count = 0;
+      for (let index = 0; index < 120; index++) {
+        const t = index / 119;
+        const pixel = context.getImageData(Math.round(x0 - regionX + (x1 - x0) * t), Math.round(topY - regionY), 1, 1).data;
+        if (pixel[0] >= 200 && pixel[1] >= 60 && pixel[1] <= 150 && pixel[2] >= 60 && pixel[2] <= 150) count += 1;
+      }
+      return { count, width: canvas.width, height: canvas.height };
+    }, { topY: ia.y, x0: ia.x, x1: ib.x, regionX: origin.x, regionY: origin.y });
+    if (!confirmedStroke) {
+      problems.push('confirmed capture did not reach the main canvas');
+    } else if (confirmedStroke.count < 60) {
+      problems.push(`confirmed main image must carry the same stroke, red samples ${confirmedStroke.count}/120 (${JSON.stringify(confirmedStroke)})`);
+    }
 
     if (problems.length) throw new Error(problems.join('; '));
     console.log(`[${LABEL}] Native multi-pin tests completed!`);

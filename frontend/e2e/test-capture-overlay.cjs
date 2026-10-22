@@ -145,6 +145,28 @@ async function readOcrImage(page) {
   });
 }
 
+// 解码 mock 已记录命令第 index 次调用的 PNG 字节，并采样若干输出坐标的像素。
+// samples 为导出图内的 [x,y] 列表；返回 width/height/pixels 供断言比对。
+async function decodeRecordedImage(page, command, index, samples = []) {
+  return page.evaluate(async ({ command: c, index: i, samples: s }) => {
+    const calls = window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === c);
+    if (calls.length <= i) throw new Error(`expected more than ${i} recorded ${c} calls`);
+    const bytes = new Uint8Array(calls[i].args.image);
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      pixels: s.map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data)),
+    };
+  }, { command, index, samples });
+}
+
 async function withPage(browser, initScripts, flow) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
@@ -459,6 +481,9 @@ async function overlaySaveVisibilityFlow(browser) {
     const selection = page.locator(".capture-overlay-rect");
     await selection.waitFor();
     const before = await selection.boundingBox();
+    // 先画一个标注：reject/cancel/success 全程都必须保留在导出字节里。
+    await page.locator(".capture-overlay-tools").getByRole("button", { name: "矩形" }).click();
+    await drag(page, { x: 150, y: 150 }, { x: 260, y: 210 });
 
     const problems = [];
     for (const outcome of ["reject", "cancel", "success"]) {
@@ -507,7 +532,70 @@ async function overlaySaveVisibilityFlow(browser) {
       if (!retryable) problems.push(`${outcome}: the save button stayed busy after the save settled`);
     }
 
+    // 三次保存（reject/cancel/success）的字节都必须带着同一份标注。
+    const marked = await decodeRecordedImage(page, "save_image_as", 2, [[50, 50]]);
+    if (marked.pixels[0][0] < 200 || marked.pixels[0][1] > 140) {
+      problems.push(`save bytes lost the drawn mark across outcomes: ${JSON.stringify(marked.pixels[0])}`);
+    }
+
     if (problems.length) throw new Error(problems.join("; "));
+  });
+}
+
+// 失败保持：钉图/复制图片被拒绝、OCR 延迟回填时，标注与选区必须原样保留，
+// 旧的 OCR 结果不得回填进已变化的选区（操作令牌失效）。
+async function annotationFailureRetentionFlow(browser) {
+  await withPage(browser, [MOCK_SCRIPT], async (page) => {
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "截图" }).click();
+    const overlay = await waitForOverlay(page);
+    await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+    const selectionBox = await page.locator(".capture-overlay-rect").boundingBox();
+    await page.locator(".capture-overlay-tools").getByRole("button", { name: "矩形" }).click();
+    await drag(page, { x: 150, y: 150 }, { x: 260, y: 210 });
+
+    // 钉图被拒绝：错误显示在浮层上，浮层与标注都保留。
+    await page.evaluate(() => window.__MOCK_TAURI_SET_PIN_REJECT__(true));
+    await overlay.getByRole("button", { name: "Pin image" }).click();
+    await overlay.locator(".capture-result-error").getByText("Mock pin rejected").waitFor({ timeout: 3000 });
+    if (await overlay.count() !== 1) throw new Error("overlay closed after a rejected pin");
+    await page.evaluate(() => window.__MOCK_TAURI_SET_PIN_REJECT__(false));
+
+    // 复制图片被拒绝：同样只报错，不破坏标注。
+    await page.evaluate(() => {
+      navigator.clipboard.write = () => Promise.reject(new Error("Mock clipboard rejected"));
+    });
+    await overlay.getByRole("button", { name: "复制图片" }).click();
+    await overlay.locator(".capture-result-error").getByText("Mock clipboard rejected").waitFor({ timeout: 3000 });
+
+    // 两次失败后导出：标注仍在，选区几何未变。
+    const afterFailures = await page.locator(".capture-overlay-rect").boundingBox();
+    if (!afterFailures || Math.round(afterFailures.x) !== Math.round(selectionBox.x) || Math.round(afterFailures.y) !== Math.round(selectionBox.y)) {
+      throw new Error(`failed actions must not move the selection: ${JSON.stringify({ selectionBox, afterFailures })}`);
+    }
+    await overlay.getByRole("button", { name: "保存图片" }).click();
+    await page.waitForTimeout(120);
+    const marked = await decodeRecordedImage(page, "save_image_as", 0, [[50, 50]]);
+    if (marked.pixels[0][0] < 200 || marked.pixels[0][1] > 140) {
+      throw new Error(`save bytes lost the drawn mark after failures: ${JSON.stringify(marked.pixels[0])}`);
+    }
+
+    // OCR 延迟回填：识别挂起时绘制新标注（令牌+1），旧结果不得回填。
+    await page.evaluate(() => window.__MOCK_TAURI_SET_OCR_DELAY__(350));
+    await overlay.getByRole("button", { name: "AI识别" }).click();
+    const resultWindow = page.locator(".capture-result-window");
+    await resultWindow.waitFor();
+    await page.mouse.move(300, 200);
+    await page.mouse.down();
+    await page.mouse.move(330, 220, { steps: 3 });
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+    const ocrValue = await resultWindow.locator("textarea").first().inputValue();
+    if (ocrValue !== "") throw new Error(`stale OCR result must not fill after the marks changed, saw ${JSON.stringify(ocrValue)}`);
+    if (await resultWindow.locator(".capture-result-error").count() !== 0) throw new Error("delayed OCR must not surface as an error");
+    await page.evaluate(() => window.__MOCK_TAURI_SET_OCR_DELAY__(0));
+    await page.keyboard.press("Escape");
+    await waitForDetach(page);
   });
 }
 
@@ -787,8 +875,225 @@ async function pinWheelFlow(browser) {
   });
 }
 
+// Annotation Task 1: pure model/history self-check via Vite module import.
+// Runs without any UI: model.ts must stay independent of React and Tauri.
+async function annotationModelFlow(browser) {
+  await withPage(browser, [MOCK_SCRIPT], async (page) => {
+    await page.goto(BASE_URL);
+    await page.evaluate(async () => {
+      const m = await import('/src/annotation/model.ts');
+      const mark = { tool: 'rectangle', points: [{ x: 1, y: 1 }, { x: 20, y: 10 }], color: '#ff0000', width: 3 };
+      let h = m.addMark(m.addMark(m.emptyHistory(), mark), { ...mark, color: '#00ff00' });
+      if (h.marks.length !== 2) throw new Error('two marks required');
+      if (h.past.length !== 2 || h.future.length) throw new Error('each addMark must push past and clear future');
+      h = m.undo(h);
+      if (h.marks.length !== 1) throw new Error('undo failed');
+      h = m.redo(h);
+      if (h.marks.length !== 2) throw new Error('redo failed');
+      h = m.addMark(m.undo(h), mark);
+      if (h.future.length) throw new Error('new mark must clear redo');
+      const p = m.imagePoint({ x: 15, y: 25 }, { offsetX: 5, offsetY: 5, scale: 2, nw: 100, nh: 100 });
+      if (p.x !== 20 || p.y !== 40) throw new Error('pixel conversion failed');
+      const clamped = m.imagePoint({ x: -50, y: 500 }, { offsetX: 5, offsetY: 5, scale: 2, nw: 100, nh: 100 });
+      if (clamped.x !== 0 || clamped.y !== 100) throw new Error('imagePoint must clamp to bounds');
+      const empty = m.emptyHistory();
+      if (m.undo(empty) !== empty || m.redo(empty) !== empty) throw new Error('undo/redo on empty history must be no-op');
+    });
+  });
+}
+
+// Annotation Task 2: the shared renderer must compose marks on ORIGINAL
+// screenshot pixels — export PNG pixels are asserted directly, no DOM preview.
+async function annotationRenderFlow(browser) {
+  await withPage(browser, [MOCK_SCRIPT], async (page) => {
+    await page.goto(BASE_URL);
+    await page.evaluate(async () => {
+      const { composePng } = await import('/src/annotation/render.ts');
+      const canvas = document.createElement('canvas');
+      canvas.width = 100; canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      for (let y = 0; y < 80; y++) for (let x = 0; x < 100; x++) { ctx.fillStyle = `rgb(${x},${y},64)`; ctx.fillRect(x, y, 1, 1); }
+      const img = new Image(); img.src = canvas.toDataURL('image/png'); await img.decode();
+      const rect = { tool: 'rectangle', points: [{ x: 12, y: 12 }, { x: 67, y: 47 }], color: '#ff0000', width: 3 };
+      const mosaic = { tool: 'mosaic', points: [{ x: 20, y: 20 }, { x: 44, y: 44 }], color: '#ff0000', width: 3 };
+      const bytes = await composePng(img, { x: 10, y: 10, width: 60, height: 40 }, 1, 8, [rect, mosaic]);
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const out = document.createElement('canvas'); out.width = bitmap.width; out.height = bitmap.height;
+      const c = out.getContext('2d'); c.drawImage(bitmap, 0, 0); bitmap.close();
+      const pixel = (x, y) => Array.from(c.getImageData(x, y, 1, 1).data);
+      if (out.width !== 60 || out.height !== 40) throw new Error('crop size regression');
+      if (pixel(0, 0)[3] !== 0) throw new Error('rounded corner must stay transparent');
+      if (pixel(2, 2)[0] < 200 || pixel(2, 2)[1] > 80) throw new Error('rectangle stroke must be red');
+      if (pixel(45, 15)[0] !== 55 || pixel(45, 15)[1] !== 25) throw new Error('background outside strokes must be unchanged');
+      if (JSON.stringify(pixel(11, 11)) !== JSON.stringify(pixel(12, 11))) throw new Error('mosaic did not average its block');
+      if (pixel(40, 20)[0] !== 50 || pixel(40, 20)[1] !== 30) throw new Error('mosaic changed unrelated pixels');
+      const sharp = await composePng(img, { x: 10, y: 10, width: 60, height: 40 }, 1, 0, [rect, mosaic]);
+      const sharpBitmap = await createImageBitmap(new Blob([sharp], { type: 'image/png' }));
+      const sharpOut = document.createElement('canvas'); sharpOut.width = sharpBitmap.width; sharpOut.height = sharpBitmap.height;
+      const sc = sharpOut.getContext('2d'); sc.drawImage(sharpBitmap, 0, 0); sharpBitmap.close();
+      if (sc.getImageData(0, 0, 1, 1).data[3] !== 255) throw new Error('radius 0 must keep sharp corners');
+      const doubled = await composePng(img, { x: 5, y: 5, width: 30, height: 20 }, 2, 0, []);
+      const doubledBitmap = await createImageBitmap(new Blob([doubled], { type: 'image/png' }));
+      if (doubledBitmap.width !== 60 || doubledBitmap.height !== 40) throw new Error('scale must grow the crop');
+      doubledBitmap.close();
+    });
+  });
+}
+
+// Annotation Task 4: drawing tools — one mark per drag, per-mark color/width,
+// undo/redo, export bytes carry the actual drawn pixels, loupe hidden mid-draw.
+async function annotationDrawFlow(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  await page.addInitScript(MOCK_SCRIPT);
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "截图" }).click();
+  const overlay = await waitForOverlay(page);
+  await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+  const toolbar = page.locator(".capture-overlay-tools");
+  await toolbar.waitFor();
+  const rectTool = toolbar.getByRole("button", { name: "矩形" });
+  await rectTool.click();
+  if ((await rectTool.getAttribute("aria-pressed")) !== "true") throw new Error("active tool button must set aria-pressed");
+  const selectionBox = await page.locator(".capture-overlay-rect").boundingBox();
+  if (!selectionBox) throw new Error("Selection disappeared before drawing");
+  await drag(page, { x: 150, y: 150 }, { x: 260, y: 210 });
+  const afterDrawBox = await page.locator(".capture-overlay-rect").boundingBox();
+  if (!afterDrawBox || Math.round(afterDrawBox.x) !== Math.round(selectionBox.x) || Math.round(afterDrawBox.y) !== Math.round(selectionBox.y)) {
+    throw new Error("Drawing inside the selection must not move the selection");
+  }
+  const mosaicTool = toolbar.getByRole("button", { name: "马赛克" });
+  await mosaicTool.click();
+  await drag(page, { x: 280, y: 180 }, { x: 340, y: 240 });
+  await overlay.getByRole("button", { name: "保存图片" }).click();
+  await page.waitForTimeout(120);
+  const first = await decodeRecordedImage(page, "save_image_as", 0, [[50, 50], [150, 60], [185, 85], [190, 85]]);
+  if (first.width !== 300 || first.height !== 200) throw new Error(`export must be the 300x200 selection, saw ${first.width}x${first.height}`);
+  // 默认画笔色 #ff6565：矩形描边像素必须是该红色，未标注处保持坐标色背景。
+  const stroke = first.pixels[0];
+  if (stroke[0] < 200 || stroke[1] > 140) throw new Error(`rectangle stroke must use the toolbar color, saw ${JSON.stringify(stroke)}`);
+  const untouched = first.pixels[1];
+  if (JSON.stringify(untouched) !== JSON.stringify([250, 160, 64, 255])) throw new Error(`untouched background changed: ${JSON.stringify(untouched)}`);
+  const m1 = first.pixels[2];
+  const m2 = first.pixels[3];
+  if (JSON.stringify(m1) !== JSON.stringify(m2)) throw new Error(`mosaic block pixels must be averaged: ${JSON.stringify({ m1, m2 })}`);
+  // 撤销只移除最后一个标记（马赛克），矩形描边必须保留；重做恢复马赛克。
+  await toolbar.getByRole("button", { name: "撤销" }).click();
+  await overlay.getByRole("button", { name: "保存图片" }).click();
+  await page.waitForTimeout(120);
+  const undone = await decodeRecordedImage(page, "save_image_as", 1, [[50, 50], [185, 85], [190, 85]]);
+  if (undone.pixels[0][0] < 200 || undone.pixels[0][1] > 140) throw new Error(`undo must keep earlier marks, stroke saw ${JSON.stringify(undone.pixels[0])}`);
+  if (JSON.stringify(undone.pixels[1]) === JSON.stringify(undone.pixels[2])) throw new Error(`undo must remove the mosaic averaging, saw ${JSON.stringify({ m1: undone.pixels[1], m2: undone.pixels[2] })}`);
+  await toolbar.getByRole("button", { name: "重做" }).click();
+  await overlay.getByRole("button", { name: "保存图片" }).click();
+  await page.waitForTimeout(120);
+  const redone = await decodeRecordedImage(page, "save_image_as", 2, [[50, 50], [185, 85], [190, 85]]);
+  if (redone.pixels[0][0] < 200 || redone.pixels[0][1] > 140) throw new Error(`redo must keep earlier marks, stroke saw ${JSON.stringify(redone.pixels[0])}`);
+  if (JSON.stringify(redone.pixels[1]) !== JSON.stringify(redone.pixels[2])) throw new Error(`redo must restore the mosaic averaging, saw ${JSON.stringify({ m1: redone.pixels[1], m2: redone.pixels[2] })}`);
+  // 绘制中放大镜必须隐藏。
+  const penTool = toolbar.getByRole("button", { name: "画笔" });
+  await penTool.click();
+  await page.mouse.move(200, 200);
+  if (await page.locator(".capture-overlay-magnifier").count() !== 1) throw new Error("loupe must be visible while hovering");
+  await page.mouse.down();
+  await page.mouse.move(220, 210, { steps: 4 });
+  if (await page.locator(".capture-overlay-magnifier").count() !== 0) throw new Error("loupe must hide while drawing");
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+  await waitForDetach(page);
+  await context.close();
+}
+
+// Annotation Task 4: text tool with IME-safe Enter semantics — Enter inserts a
+// newline, Ctrl+Enter commits one mark, Esc discards only the text draft.
+async function annotationTextFlow(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  await page.addInitScript(MOCK_SCRIPT);
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "截图" }).click();
+  const overlay = await waitForOverlay(page);
+  await drag(page, { x: 100, y: 100 }, { x: 500, y: 360 });
+  const toolbar = page.locator(".capture-overlay-tools");
+  await toolbar.waitFor();
+  await toolbar.getByRole("button", { name: "文字" }).click();
+  await page.mouse.click(200, 160);
+  const editor = page.locator(".capture-overlay-text-editor textarea");
+  await editor.waitFor();
+  await editor.click();
+  await page.keyboard.type("说明");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("第二行");
+  const value = await editor.inputValue();
+  if (value !== "说明\n第二行") throw new Error(`Enter must insert a newline, saw ${JSON.stringify(value)}`);
+  if (await page.locator(".capture-overlay").count() !== 1) throw new Error("Enter inside the text editor must not confirm or cancel the capture");
+  await page.keyboard.press("Escape");
+  if (await editor.count() !== 0) throw new Error("Esc must discard the text draft");
+  if (await page.locator(".capture-overlay").count() !== 1) throw new Error("Esc in the text editor must keep the capture alive");
+  await page.mouse.click(200, 160);
+  await editor.waitFor();
+  // 线宽 6 → 渲染字号 36px，字形覆盖足够密，像素断言稳定。
+  await toolbar.locator("input[type=range]").fill("6");
+  await editor.fill("hello");
+  await page.keyboard.press("Control+Enter");
+  if (await editor.count() !== 0) throw new Error("Ctrl+Enter must commit the text mark");
+  await overlay.getByRole("button", { name: "保存图片" }).click();
+  await page.waitForTimeout(120);
+  const textSamples = [];
+  for (let y = 58; y <= 78; y += 5) for (let x = 100; x <= 150; x += 5) textSamples.push([x, y]);
+  const saved = await decodeRecordedImage(page, "save_image_as", 0, textSamples);
+  // 文字锚点在选区内的输出坐标 (100,60) 附近：这一带必须出现与背景不同的像素。
+  const expected = textSamples.map(([x, y]) => [(x + 100) % 256, (y + 100) % 256, 64, 255]);
+  let changed = 0;
+  saved.pixels.forEach((p, i) => { if (p[0] !== expected[i][0] || p[1] !== expected[i][1]) changed += 1; });
+  if (changed < 8) throw new Error(`committed text must draw pixels near its anchor, only ${changed} changed`);
+  await page.keyboard.press("Escape");
+  await waitForDetach(page);
+  await context.close();
+}
+
+// Annotation Task 4: two-row toolbar must stay inside small viewports, keep
+// reachable hit targets and clamp near the right screen edge (2× DPR too).
+async function annotationToolbarFlow(browser) {
+  const context = await browser.newContext({ viewport: { width: 640, height: 480 }, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  await page.addInitScript(MOCK_SCRIPT);
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "截图" }).click();
+  await waitForOverlay(page);
+  await drag(page, { x: 380, y: 100 }, { x: 620, y: 260 });
+  const toolbar = page.locator(".capture-overlay-toolbar");
+  await toolbar.waitFor();
+  const box = await toolbar.boundingBox();
+  if (!box) throw new Error("toolbar has no bounding box");
+  if (box.x < 0 || box.x + box.width > 640 || box.y + box.height > 480) {
+    throw new Error(`toolbar must stay inside the viewport at 640px, saw ${JSON.stringify(box)}`);
+  }
+  for (const name of ["移动", "箭头", "矩形", "画笔", "文字", "马赛克", "撤销", "重做"]) {
+    const button = toolbar.getByRole("button", { name, exact: true });
+    if ((await button.count()) !== 1) throw new Error(`tool button ${name} missing`);
+    const buttonBox = await button.boundingBox();
+    if (!buttonBox || buttonBox.height < 28) throw new Error(`tool button ${name} hit target below 28px: ${JSON.stringify(buttonBox)}`);
+  }
+  const color = toolbar.locator("input[type=color]");
+  const width = toolbar.locator("input[type=range]");
+  if ((await color.count()) !== 1 || (await width.count()) !== 1) throw new Error("toolbar must expose stroke color and width controls");
+  if ((await color.getAttribute("aria-label")) !== "线条颜色" || (await width.getAttribute("aria-label")) !== "线宽") {
+    throw new Error("stroke controls must carry localized accessible names");
+  }
+  await page.keyboard.press("Escape");
+  await waitForDetach(page);
+  await context.close();
+}
+
 const FLOWS = [
   ["capture overlay selection flow", captureOverlayFlow],
+  ["annotation model history and pixel math", annotationModelFlow],
+  ["annotation renderer composes export pixels", annotationRenderFlow],
+  ["annotation drawing tools commit real pixels", annotationDrawFlow],
+  ["annotation text tool newline, commit and cancel", annotationTextFlow],
+  ["annotation toolbar wraps and clamps at 640px", annotationToolbarFlow],
+  ["annotation failures keep marks and invalidate stale OCR", annotationFailureRetentionFlow],
   ["multi-pin session visibility rules", multiPinSessionFlow],
   ["toolbar/context save uses native save_image_as", nativeSaveFlow],
   ["overlay save busy and error on the overlay", overlaySaveFlow],

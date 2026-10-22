@@ -12,6 +12,9 @@
   let apiTestMode = "success-vision";
   let fullscreen = false;
   let visible = true;
+  // 受控失败模式：钉图拒绝（失败保持断言）/ AI OCR 延迟回填（令牌失效断言）
+  let pinRejectMode = false;
+  let aiOcrDelay = 0;
   // 事件桩：eventHandlers 记录每个事件名注册的 handler id（plugin:event|listen 的返回值），
   // eventCallbacks 记录 transformCallback 分配的 id → 回调，emit 时按 id 取回调用
   const eventHandlers = {};
@@ -210,6 +213,8 @@
           resolve(capturePngBuffer());
         } else if (command === "pin_image") {
           // 镜像新后端：返回唯一 pin-N 标签并登记进会话状态。
+          // pinRejectMode：invoke 直接失败，用于断言浮层错误与标注保留。
+          if (pinRejectMode) { reject(new Error("Mock pin rejected")); return; }
           try { resolve(sessionInsert()); } catch (error) { reject(error); }
         } else if (command === "pin_close") {
           // 真实后端由销毁钩子恢复主窗；浏览器里关闭走 __MOCK_TAURI_CLOSE_PIN__。
@@ -223,6 +228,8 @@
           // image_crop 计数断言抓住，而不是在解码处抛错。
           resolve({ image: opaquePngBytes() });
         } else if (command === "ai_ocr") {
+          // aiOcrDelay > 0：延迟回填，验证操作令牌在标注/选区变化后作废旧结果。
+          if (aiOcrDelay > 0) { setTimeout(function() { resolve({ text: "Mock OCR text" }); }, aiOcrDelay); return; }
           resolve({ text: "Mock OCR text" });
         } else if (command === "ai_translate") {
           resolve({ text: "Mock translation" });
@@ -361,6 +368,8 @@
   window.__MOCK_TAURI_SET_LATEST_VERSION__ = function (value) { latestReleaseVersion = value; };
   // 切换 download_update 的结局：success（默认）/ error（事件报错）/ reject（invoke 立即失败）
   window.__MOCK_TAURI_SET_DOWNLOAD_MODE__ = function (mode) { downloadMode = mode === "error" || mode === "reject" ? mode : "success"; };
+  window.__MOCK_TAURI_SET_PIN_REJECT__ = function (value) { pinRejectMode = Boolean(value); };
+  window.__MOCK_TAURI_SET_OCR_DELAY__ = function (ms) { aiOcrDelay = Number(ms) || 0; };
 
   // Also set __TAURI__ for older compatibility
   window.__TAURI__ = {

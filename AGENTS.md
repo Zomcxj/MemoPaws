@@ -12,6 +12,7 @@
 - **Python 环境**：使用 `D:/software/miniforge3/envs/llm/python.exe`，不是系统 Python
 - **数据目录**：`%USERPROFILE%\.memopaws\`（setting.json 配置、keys.json 加密密钥库）；API Key 永不入 setting.json
 - **钉图状态归属**：钉图图片/会话可见性保存在 Rust `pinned_images` 注册表（按窗口标签隔离，按调用窗口身份取图/关闭）；前端不得保存恢复状态或传递任意标签，主窗恢复只由 Rust 销毁钩子在最后一张钉图关闭时执行
+- **标注坐标空间**：标注点一律存原图（截图）像素坐标（`frontend/src/annotation/model.ts`），与 CSS 显示缩放无关；预览与导出共用 `annotation/render.ts` 的同一合成器（drawMarks/composePng），所有浮层动作经 `imageForSelection()` 取同一张"标注后 PNG"再分发；旧标记的 color/width 随标记定格，回放时不得读当前工具栏状态
 - **测试隔离**：仅原生 E2E 子进程可设置 `MEMOPAWS_HOME` 指向临时目录；正常运行不设置时仍使用 `%USERPROFILE%\.memopaws\`
 - **构建命令**：必须 `RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2`（大栈/全量并行会打爆 Windows 提交内存）
 - **Git 规范**：变更通过全部测试（Rust + e2e）后直接提交本地，不推送远程（用户明确要求时除外）。已装 pre-commit 钩子（`.githooks/pre-commit`），提交时自动跑 `cargo test --workspace` + 静态契约，勿用 `--no-verify` 绕过，除非已手动验证
