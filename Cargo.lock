@@ -3061,6 +3061,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-shell",
+ "windows 0.62.2",
  "windows-sys 0.59.0",
  "xcap",
  "zeroize",

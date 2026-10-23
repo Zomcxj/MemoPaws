@@ -55,6 +55,101 @@ fn white_bgra(pixels: &mut image::RgbaImage) {
     }
 }
 
+/// 一台机器上已安装的 OCR 语言能力。
+#[derive(serde::Serialize)]
+pub struct LocalLanguage { pub tag: String, pub name: String }
+
+/// 已安装语言列表 + 系统偏好中的首选（列表为空时 preferred 为空串）。
+#[derive(serde::Serialize)]
+pub struct LocalLanguages { pub languages: Vec<LocalLanguage>, pub preferred: String }
+
+#[cfg(not(windows))]
+pub fn languages() -> Result<LocalLanguages, String> { Err("offline OCR is only available on Windows".into()) }
+
+#[cfg(not(windows))]
+pub fn recognize(_: &[u8], _: &str) -> Result<String, String> { Err("offline OCR is only available on Windows".into()) }
+
+#[cfg(windows)]
+mod win {
+    use super::*;
+    use windows::{
+        core::HSTRING,
+        Globalization::Language,
+        Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap},
+        Media::Ocr::OcrEngine,
+        Storage::Streams::DataWriter,
+        System::UserProfile::GlobalizationPreferences,
+        Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
+    };
+
+    // 每个阻塞工作线程自带 WinRT 单元初始化，作用域结束即反初始化；
+    // 不泄漏初始化、不持裸指针、不建任何网络客户端。
+    struct Apartment;
+    impl Apartment {
+        fn new() -> Result<Self, String> {
+            unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.map_err(|e| format!("Windows OCR initialization failed: {e}"))?;
+            Ok(Self)
+        }
+    }
+    impl Drop for Apartment {
+        fn drop(&mut self) { unsafe { RoUninitialize(); } }
+    }
+
+    fn available() -> windows::core::Result<Vec<LocalLanguage>> {
+        let langs = OcrEngine::AvailableRecognizerLanguages()?;
+        let mut result = Vec::new();
+        for i in 0..langs.Size()? {
+            let lang = langs.GetAt(i)?;
+            result.push(LocalLanguage { tag: lang.LanguageTag()?.to_string(), name: lang.DisplayName()?.to_string() });
+        }
+        Ok(result)
+    }
+
+    pub fn languages() -> Result<LocalLanguages, String> {
+        let _apartment = Apartment::new()?;
+        let languages = available().map_err(|e| format!("Cannot list installed OCR languages: {e}"))?;
+        let mut preferred = languages.first().map(|l| l.tag.clone()).unwrap_or_default();
+        let profile = GlobalizationPreferences::Languages().map_err(|e| e.to_string())?;
+        for i in 0..profile.Size().map_err(|e| e.to_string())? {
+            let tag = profile.GetAt(i).map_err(|e| e.to_string())?.to_string();
+            if let Some(found) = languages.iter().find(|l| l.tag.eq_ignore_ascii_case(&tag)) {
+                preferred = found.tag.clone();
+                break;
+            }
+        }
+        Ok(LocalLanguages { languages, preferred })
+    }
+
+    pub fn recognize(bytes: &[u8], tag: &str) -> Result<String, String> {
+        let _apartment = Apartment::new()?;
+        let installed = available().map_err(|e| e.to_string())?;
+        if !installed.iter().any(|l| l.tag == tag) {
+            // 明确报错：不自动安装语言包、不静默回退到云 OCR。
+            return Err("Selected Windows OCR language is not installed; install its OCR language capability first".into());
+        }
+        let max = OcrEngine::MaxImageDimension().map_err(|e| e.to_string())?;
+        let mut pixels = prepare(bytes, max)?;
+        white_bgra(&mut pixels);
+        let writer = DataWriter::new().map_err(|e| e.to_string())?;
+        writer.WriteBytes(pixels.as_raw()).map_err(|e| e.to_string())?;
+        let buffer = writer.DetachBuffer().map_err(|e| e.to_string())?;
+        let bitmap = SoftwareBitmap::CreateCopyFromBuffer(&buffer, BitmapPixelFormat::Bgra8, pixels.width() as i32, pixels.height() as i32)
+            .map_err(|e| e.to_string())?;
+        let language = Language::CreateLanguage(&HSTRING::from(tag)).map_err(|e| e.to_string())?;
+        let engine = OcrEngine::TryCreateFromLanguage(&language).map_err(|e| format!("Cannot create installed Windows OCR engine: {e}"))?;
+        let result = engine.RecognizeAsync(&bitmap).map_err(|e| e.to_string())?.join().map_err(|e| format!("Windows OCR failed: {e}"))?;
+        let lines = result.Lines().map_err(|e| e.to_string())?;
+        let mut text = Vec::new();
+        for i in 0..lines.Size().map_err(|e| e.to_string())? {
+            text.push(lines.GetAt(i).map_err(|e| e.to_string())?.Text().map_err(|e| e.to_string())?.to_string());
+        }
+        Ok(text.join("\n").trim().to_string())
+    }
+}
+
+#[cfg(windows)]
+pub use win::{languages, recognize};
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1086,6 +1086,138 @@ async function annotationToolbarFlow(browser) {
   await context.close();
 }
 
+// 增量③：离线 OCR（主页面路径）——挂载查询语言、默认系统偏好；
+// 点击只调 local_ocr 且携带当前图片字节；空结果不覆盖旧文本；
+// 失败与无语言能力都按契约表现；AI 命令不受影响；zh/en 文案齐全。
+async function offlineOcrMainFlow(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  await page.addInitScript(MOCK_SCRIPT);
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+
+  const languageSelect = page.getByRole("combobox", { name: "离线 OCR 语言" });
+  await languageSelect.waitFor({ timeout: 5000 });
+  if ((await languageSelect.inputValue()) !== "zh-Hans-CN") {
+    throw new Error(`preferred language must default to zh-Hans-CN, saw ${await languageSelect.inputValue()}`);
+  }
+  const optionTags = await languageSelect.locator("option").evaluateAll((options) => options.map((option) => option.value));
+  if (JSON.stringify(optionTags) !== JSON.stringify(["en-US", "zh-Hans-CN"])) {
+    throw new Error(`language options must mirror the query result, saw ${JSON.stringify(optionTags)}`);
+  }
+
+  // 导入图片 → AI 识别 + 翻译制造旧结果 → 清空调用记录。
+  const sample = fs.readFileSync(path.join(__dirname, "screenshots", "01-recognize.png"));
+  await page.locator(".recognize-toolbar input[type=\"file\"]").setInputFiles({ name: "sample.png", mimeType: "image/png", buffer: sample });
+  await page.locator(".image-canvas img").waitFor({ timeout: 5000 });
+  const ocrControls = page.locator(".ocr-controls");
+  await ocrControls.nth(0).getByRole("button", { name: "AI识别" }).click();
+  await ocrControls.nth(1).getByRole("button", { name: "AI翻译" }).click();
+  await page.waitForTimeout(200);
+  await page.evaluate(() => { window.__MOCK_TAURI_COMMAND_CALLS__.length = 0; });
+
+  // 离线 OCR 成功：只记 local_ocr（携带原样图片字节），结果回填，旧翻译清空。
+  await ocrControls.nth(0).getByRole("button", { name: "离线 OCR" }).click();
+  await page.waitForTimeout(200);
+  const offlineCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command));
+  if (JSON.stringify(offlineCalls) !== JSON.stringify(["local_ocr"])) {
+    throw new Error(`offline click must invoke only local_ocr, saw ${JSON.stringify(offlineCalls)}`);
+  }
+  const sampleWidth = sample.readUInt32BE(16);
+  const sampleHeight = sample.readUInt32BE(20);
+  const recorded = await decodeRecordedImage(page, "local_ocr", 0, []);
+  if (recorded.width !== sampleWidth || recorded.height !== sampleHeight) {
+    throw new Error(`local_ocr must receive the imported image, expected ${sampleWidth}x${sampleHeight}, saw ${recorded.width}x${recorded.height}`);
+  }
+  const ocrArea = page.locator("textarea[aria-label='AI识别']");
+  const translateArea = page.locator("textarea[aria-label='AI翻译']");
+  if ((await ocrArea.inputValue()) !== "Local OCR example text") {
+    throw new Error(`offline result must fill the OCR area, saw ${JSON.stringify(await ocrArea.inputValue())}`);
+  }
+  if ((await translateArea.inputValue()) !== "") throw new Error("nonempty offline result must clear the stale translation");
+
+  // 空结果：报告“未识别到文字”，不覆盖已有内容。
+  await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("empty"));
+  await ocrControls.nth(0).getByRole("button", { name: "离线 OCR" }).click();
+  await page.waitForTimeout(200);
+  await page.locator(".recognize-error").getByText("未识别到文字").waitFor({ timeout: 3000 });
+  if ((await ocrArea.inputValue()) !== "Local OCR example text") throw new Error("empty offline result must not overwrite existing OCR text");
+  await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("error"));
+
+  // 识别失败：错误可见，图片与旧文本保留，无 AI 命令。
+  await page.evaluate(() => { window.__MOCK_TAURI_COMMAND_CALLS__.length = 0; });
+  await ocrControls.nth(0).getByRole("button", { name: "离线 OCR" }).click();
+  await page.waitForTimeout(200);
+  await page.locator(".recognize-error").getByText("Mock offline OCR failed").waitFor({ timeout: 3000 });
+  if ((await ocrArea.inputValue()) !== "Local OCR example text") throw new Error("failed offline OCR must keep the previous OCR text");
+  const failureCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command));
+  if (JSON.stringify(failureCalls) !== JSON.stringify(["local_ocr"])) throw new Error(`failed offline OCR must not touch AI commands, saw ${JSON.stringify(failureCalls)}`);
+  await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("success"));
+
+  // AI 识别仍走原命令（离线功能加入后不得被改道）。
+  await page.evaluate(() => { window.__MOCK_TAURI_COMMAND_CALLS__.length = 0; });
+  await ocrControls.nth(0).getByRole("button", { name: "AI识别" }).click();
+  await page.waitForTimeout(200);
+  if (!(await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === "ai_ocr")))) {
+    throw new Error("AI识别 must keep invoking ai_ocr after the offline feature landed");
+  }
+
+  // 无已安装语言：重载后无下拉、按钮禁用、出现能力提示，不产生任何调用。
+  await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_LANGUAGES_MODE__("nolangs"));
+  await page.reload({ waitUntil: "networkidle" });
+  if ((await page.getByRole("combobox", { name: "离线 OCR 语言" }).count()) !== 0) throw new Error("language select must be hidden when no language is installed");
+  await page.getByText("未检测到已安装的离线 OCR 语言").waitFor({ timeout: 5000 });
+  const offlineButton = page.locator(".ocr-controls").nth(0).getByRole("button", { name: "离线 OCR" });
+  if (!(await offlineButton.isDisabled())) throw new Error("offline OCR must be disabled without installed languages");
+  await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_LANGUAGES_MODE__("success"));
+
+  // en 文案：切换语言后按钮/下拉标签随之变化。
+  await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("set_language", { language: "en" }));
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Offline OCR" }).waitFor({ timeout: 5000 });
+  await page.getByRole("combobox", { name: "Offline OCR language" }).waitFor({ timeout: 5000 });
+  await context.close();
+}
+
+// 增量③：离线 OCR（浮层路径）——与 AI 相同的合成图回调；记录的字节带真实
+// 马赛克块；失败只报错不回退到 AI；结果进既有结果窗。
+async function offlineOcrOverlayFlow(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  await page.addInitScript(MOCK_SCRIPT);
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "截图" }).click();
+  const overlay = await waitForOverlay(page);
+  await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+  await page.locator(".capture-overlay-tools").getByRole("button", { name: "马赛克" }).click();
+  await drag(page, { x: 150, y: 150 }, { x: 210, y: 210 });
+  await overlay.getByRole("button", { name: "离线 OCR" }).click();
+  const resultWindow = page.locator(".capture-result-window");
+  await resultWindow.waitFor();
+  await page.waitForTimeout(200);
+  const aiCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command).filter((command) => ["local_ocr", "ai_ocr", "ai_translate"].includes(command)));
+  if (JSON.stringify(aiCalls) !== JSON.stringify(["local_ocr"])) {
+    throw new Error(`overlay offline OCR must invoke only local_ocr, saw ${JSON.stringify(aiCalls)}`);
+  }
+  const marked = await decodeRecordedImage(page, "local_ocr", 0, [[52, 52], [58, 52]]);
+  if (JSON.stringify(marked.pixels[0]) !== JSON.stringify(marked.pixels[1])) {
+    throw new Error(`overlay offline OCR must carry the composed mosaic block, saw ${JSON.stringify(marked.pixels)}`);
+  }
+  const overlayOcrArea = resultWindow.locator("textarea[aria-label='AI识别']");
+  if ((await overlayOcrArea.inputValue()) !== "Local OCR example text") {
+    throw new Error(`overlay offline result must fill the result window, saw ${JSON.stringify(await overlayOcrArea.inputValue())}`);
+  }
+  // 浮层失败：只报错，不回退到 AI。
+  await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("error"));
+  await resultWindow.getByRole("button", { name: "离线 OCR" }).click();
+  await page.waitForTimeout(200);
+  await resultWindow.locator(".capture-result-error").getByText("Mock offline OCR failed").waitFor({ timeout: 3000 });
+  if (!(await overlay.count())) throw new Error("overlay must stay open after a failed offline OCR");
+  await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("success"));
+  await page.keyboard.press("Escape");
+  await waitForDetach(page);
+  await context.close();
+}
+
 const FLOWS = [
   ["capture overlay selection flow", captureOverlayFlow],
   ["annotation model history and pixel math", annotationModelFlow],
@@ -1094,6 +1226,8 @@ const FLOWS = [
   ["annotation text tool newline, commit and cancel", annotationTextFlow],
   ["annotation toolbar wraps and clamps at 640px", annotationToolbarFlow],
   ["annotation failures keep marks and invalidate stale OCR", annotationFailureRetentionFlow],
+  ["offline OCR main page language and fallback rules", offlineOcrMainFlow],
+  ["offline OCR overlay uses the composed image", offlineOcrOverlayFlow],
   ["multi-pin session visibility rules", multiPinSessionFlow],
   ["toolbar/context save uses native save_image_as", nativeSaveFlow],
   ["overlay save busy and error on the overlay", overlaySaveFlow],

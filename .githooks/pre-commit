@@ -13,6 +13,10 @@ set -e
 export RUST_MIN_STACK=67108864
 export CARGO_BUILD_JOBS=1
 
+# 用户级全局环境变量 REMOVE_UNUSED_COMMANDS 指向 Verta 的 src-tauri，会让
+# tauri 按它的命令清单在编译期剥离 MemoPaws 的窗口命令。任何 cargo 调用都必须去掉。
+unset REMOVE_UNUSED_COMMANDS
+
 echo "[pre-commit] cargo test --workspace"
 RUST_MIN_STACK=67108864 CARGO_BUILD_JOBS=2 cargo test --workspace
 

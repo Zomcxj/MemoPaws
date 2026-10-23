@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use memopaws_keys::{KeyEntry, KeyVault};
 use memopaws_ocr::{ApiConfig, Client, Language, OcrResult, TranslateResult};
+use memopaws_config::history::HistoryManager;
 use zeroize::Zeroizing;
 
 
@@ -435,6 +436,39 @@ pub async fn ai_translate(
     Ok(result)
 }
 
+/// 离线 OCR 的历史落库规则：非空文本记为 local_ocr（带原文），空文本不入库。
+/// 命令与测试共用，保证"识别成功但历史失败"时结果不受影响由调用方 `let _=` 保证。
+fn record_offline_result(manager: &mut HistoryManager, text: &str) {
+    if !text.trim().is_empty() {
+        let _ = manager.add_success("local_ocr", text, Some(text), None);
+    }
+}
+
+#[tauri::command]
+pub async fn local_ocr_languages() -> Result<crate::local_ocr::LocalLanguages, String> {
+    tauri::async_runtime::spawn_blocking(crate::local_ocr::languages)
+        .await
+        .map_err(|e| format!("OCR language task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn local_ocr(
+    image: Vec<u8>,
+    language: String,
+    history: tauri::State<'_, HistoryState>,
+) -> Result<OcrResult, String> {
+    // 识别跑在阻塞线程池上：WinRT 初始化与识别都不该卡命令执行器。
+    let text = tauri::async_runtime::spawn_blocking(move || crate::local_ocr::recognize(&image, &language))
+        .await
+        .map_err(|e| format!("Offline OCR task failed: {e}"))??;
+    // 历史是次要记录：写入失败不应把已成功的识别结果误报为失败
+    let _ = history_mut(history, |manager| {
+        record_offline_result(manager, &text);
+        Ok(())
+    });
+    Ok(OcrResult { text })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,6 +482,76 @@ mod tests {
         let error = super::classify_api_error("API returned HTTP 401: secret response");
         assert_eq!(error, "unauthorized");
         assert!(!error.contains("secret"));
+    }
+
+    #[test]
+    fn offline_history_records_nonempty_text_as_local_ocr() {
+        let mut manager = isolated_history("local-ocr-history.json");
+        record_offline_result(&mut manager, "识别结果");
+        let records = manager.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].typ, "local_ocr");
+        assert_eq!(records[0].text, "识别结果");
+        assert_eq!(records[0].ocr_text.as_deref(), Some("识别结果"));
+        assert!(records[0].translate_text.is_none());
+    }
+
+    #[test]
+    fn offline_history_skips_blank_text() {
+        let mut manager = isolated_history("local-ocr-blank.json");
+        record_offline_result(&mut manager, "   ");
+        assert!(manager.records().is_empty());
+    }
+
+    #[test]
+    fn offline_history_truncates_to_field_limit() {
+        let mut manager = isolated_history("local-ocr-truncate.json");
+        let long = "字".repeat(6000);
+        record_offline_result(&mut manager, &long);
+        assert_eq!(manager.records()[0].text.chars().count(), 5000);
+    }
+
+    #[test]
+    fn offline_history_still_deserializes_old_records() {
+        let path = temp_dir().join("local-ocr-old.json");
+        std::fs::write(
+            &path,
+            r#"[{"time":"1700000000","type":"ocr","text":"旧记录","ocr_text":"旧记录"},{"time":"1700000001","type":"local_ocr","text":"新记录","ocr_text":"新记录"}]"#,
+        )
+        .unwrap();
+        let manager = HistoryManager::with_path(&path, 100).expect("old records deserialize");
+        let records = manager.records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].typ, "ocr");
+        assert_eq!(records[1].typ, "local_ocr");
+    }
+
+    #[test]
+    fn offline_history_save_failure_keeps_recognized_text_intact() {
+        // 先按有效路径加载（读跳过），再在目标路径上放一个同名目录：
+        // 临时文件写得进去但 persist 必然失败；内存中的识别文本不受影响，
+        // 命令层用 `let _ =` 吞掉该错误后仍返回 Ok(OcrResult)。
+        let dir = temp_dir().join("local-ocr-blocked");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.json");
+        let mut manager = HistoryManager::with_path(&path, 100).expect("loads empty");
+        std::fs::create_dir_all(&path).unwrap();
+        // add_success 内部的 save 会因 persist 到目录而失败，被 `let _` 吞掉。
+        record_offline_result(&mut manager, "识别文本");
+        assert!(manager.save().is_err(), "persisting onto a directory must fail");
+        assert_eq!(manager.records()[0].text, "识别文本");
+    }
+
+    fn temp_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("memopaws-ocr-tests-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn isolated_history(name: &str) -> HistoryManager {
+        let path = temp_dir().join(name);
+        let _ = std::fs::remove_file(&path);
+        HistoryManager::with_path(&path, 100).expect("isolated history")
     }
 
     #[test]

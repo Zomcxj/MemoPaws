@@ -15,6 +15,14 @@
   // 受控失败模式：钉图拒绝（失败保持断言）/ AI OCR 延迟回填（令牌失效断言）
   let pinRejectMode = false;
   let aiOcrDelay = 0;
+  // 离线 OCR 受控模式：success（默认）/ error（识别失败）/ empty（空文本）
+  // / nolangs（无已安装语言能力）/ langerror（语言查询失败）。
+  // 经 sessionStorage 持久化，跨 reload 保持（无语言场景需要重载后仍生效）。
+  const LOCAL_OCR_MODE_KEY = "memopaws-mock-local-ocr";
+  const clampLocalOcrMode = (mode) => (["error", "empty"].includes(mode) ? mode : "success");
+  const clampLanguagesMode = (mode) => (["error", "nolangs"].includes(mode) ? mode : "success");
+  let localOcrMode = clampLocalOcrMode(sessionStorage.getItem(LOCAL_OCR_MODE_KEY + ":ocr") || "success");
+  let localOcrLanguagesMode = clampLanguagesMode(sessionStorage.getItem(LOCAL_OCR_MODE_KEY + ":langs") || "success");
   // 事件桩：eventHandlers 记录每个事件名注册的 handler id（plugin:event|listen 的返回值），
   // eventCallbacks 记录 transformCallback 分配的 id → 回调，emit 时按 id 取回调用
   const eventHandlers = {};
@@ -175,9 +183,14 @@
           }
            resolve();
         } else if (command === "set_language") {
-          MOCK_DATA.get_config.language = args && args.language === "en" ? "en" : "zh"; resolve();
+          const nextLanguage = args && args.language === "en" ? "en" : "zh";
+          MOCK_DATA.get_config.language = nextLanguage;
+          // 真实后端把语言写进配置持久化：mock 用 sessionStorage 镜像，跨 reload 保持。
+          sessionStorage.setItem("memopaws-mock-language", nextLanguage);
+          resolve();
         } else if (command === "get_config") {
-          resolve(Object.assign({}, MOCK_DATA.get_config, { theme: backendTheme }));
+          const persistedLanguage = sessionStorage.getItem("memopaws-mock-language");
+          resolve(Object.assign({}, MOCK_DATA.get_config, { theme: backendTheme }, persistedLanguage ? { language: persistedLanguage } : {}));
         } else if (command === "test_api_connection") {
           if (apiTestMode === "timeout") return setTimeout(function() { resolve({ error: "timeout", elapsed_ms: 10000 }); }, 120);
           if (apiTestMode === "connect") return resolve({ error: "connect", elapsed_ms: 32 });
@@ -231,6 +244,14 @@
           // aiOcrDelay > 0：延迟回填，验证操作令牌在标注/选区变化后作废旧结果。
           if (aiOcrDelay > 0) { setTimeout(function() { resolve({ text: "Mock OCR text" }); }, aiOcrDelay); return; }
           resolve({ text: "Mock OCR text" });
+        } else if (command === "local_ocr_languages") {
+          if (localOcrLanguagesMode === "error") { reject(new Error("Mock language query failed")); return; }
+          if (localOcrLanguagesMode === "nolangs") { resolve({ languages: [], preferred: "" }); return; }
+          resolve({ languages: [{ tag: "en-US", name: "English" }, { tag: "zh-Hans-CN", name: "中文" }], preferred: "zh-Hans-CN" });
+        } else if (command === "local_ocr") {
+          if (localOcrMode === "error") { reject(new Error("Mock offline OCR failed")); return; }
+          if (localOcrMode === "empty") { resolve({ text: "" }); return; }
+          resolve({ text: "Local OCR example text" });
         } else if (command === "ai_translate") {
           resolve({ text: "Mock translation" });
         } else if (command === "latest_release_version") {
@@ -370,6 +391,8 @@
   window.__MOCK_TAURI_SET_DOWNLOAD_MODE__ = function (mode) { downloadMode = mode === "error" || mode === "reject" ? mode : "success"; };
   window.__MOCK_TAURI_SET_PIN_REJECT__ = function (value) { pinRejectMode = Boolean(value); };
   window.__MOCK_TAURI_SET_OCR_DELAY__ = function (ms) { aiOcrDelay = Number(ms) || 0; };
+  window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__ = function (mode) { localOcrMode = clampLocalOcrMode(mode); sessionStorage.setItem(LOCAL_OCR_MODE_KEY + ":ocr", localOcrMode); };
+  window.__MOCK_TAURI_SET_LOCAL_OCR_LANGUAGES_MODE__ = function (mode) { localOcrLanguagesMode = clampLanguagesMode(mode); sessionStorage.setItem(LOCAL_OCR_MODE_KEY + ":langs", localOcrLanguagesMode); };
 
   // Also set __TAURI__ for older compatibility
   window.__TAURI__ = {

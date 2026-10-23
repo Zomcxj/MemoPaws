@@ -32,6 +32,8 @@ export interface CaptureLabels {
   redo: string;
   textCommit: string;
   textCancel: string;
+  localOcr: string;
+  localOcrLanguage: string;
 }
 
 interface Props {
@@ -43,6 +45,10 @@ interface Props {
   onCancel: () => void;
   onRecognize?: (image: Uint8Array) => Promise<string>;
   onTranslate?: (image: Uint8Array) => Promise<{ ocrText: string; translation: string }>;
+  onLocalRecognize?: (image: Uint8Array) => Promise<string>;
+  localLanguages?: { tag: string; name: string }[];
+  localLanguage?: string;
+  onLocalLanguageChange?: (tag: string) => void;
   onPinImage?: (image: Uint8Array, cornerRadius: number) => Promise<void> | void;
   onCopyImage?: (image: Uint8Array) => Promise<void> | void;
   onSaveImage?: (image: Uint8Array) => Promise<void> | void;
@@ -83,6 +89,8 @@ const DEFAULT_LABELS: CaptureLabels = {
   redo: "Redo",
   textCommit: "Commit text",
   textCancel: "Discard text",
+  localOcr: "Offline OCR",
+  localOcrLanguage: "Offline OCR language",
 };
 
 const TOOLS: { name: Exclude<Tool, "move"> | "move"; labelKey: keyof CaptureLabels }[] = [
@@ -105,6 +113,10 @@ export function CaptureOverlay({
   onCancel,
   onRecognize,
   onTranslate,
+  onLocalRecognize,
+  localLanguages,
+  localLanguage,
+  onLocalLanguageChange,
   onPinImage,
   onCopyImage,
   onSaveImage,
@@ -586,6 +598,33 @@ export function CaptureOverlay({
     finally { setBusy(false); }
   };
 
+  // 离线 OCR：同一张合成图、同一个操作令牌；语言未就绪时按钮被禁用，
+  // 失败只报错，绝不回退到 AI 识别/翻译。
+  const runLocalRecognize = async () => {
+    if (!selection || !onLocalRecognize || busy || !localLanguage) return;
+    const operationToken = ++operationTokenRef.current;
+    if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
+    setBusy(true); setResultError("");
+    try {
+      const image = await imageForSelection();
+      const result = await onLocalRecognize(image);
+      if (operationTokenRef.current === operationToken) setOcrText(result);
+    } catch (reason) { setResultError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+
+  const localLanguagePicker = (onLocalRecognize && localLanguages && localLanguages.length > 0 && (
+    <select
+      className="capture-overlay-local-language"
+      aria-label={text.localOcrLanguage}
+      value={localLanguage}
+      onMouseDown={(event) => event.stopPropagation()}
+      onChange={(event) => onLocalLanguageChange?.(event.target.value)}
+    >
+      {localLanguages.map((item) => <option key={item.tag} value={item.tag}>{item.name}</option>)}
+    </select>
+  )) || null;
+
   // 预览画布：底存储 = 原图像素尺寸，CSS 尺寸 = contain 布局矩形。
   // 与导出共用 drawMarks（预览即导出），rAF 合并同帧的多次失效。
   useEffect(() => {
@@ -722,6 +761,8 @@ export function CaptureOverlay({
           <div className="capture-result-actions">
             {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
             {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
+            {onLocalRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.localOcr} onClick={() => void runLocalRecognize()} disabled={busy || !localLanguages?.length}>{text.localOcr}</button>}
+            {localLanguagePicker}
             {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
             {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
              {onPinImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label="Pin image" onClick={act(onPinImage)} disabled={busy}>钉图</button>}
@@ -755,6 +796,8 @@ export function CaptureOverlay({
           <div className="capture-overlay-actions">
             {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
             {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
+            {onLocalRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.localOcr} onClick={() => void runLocalRecognize()} disabled={busy || !localLanguages?.length}>{text.localOcr}</button>}
+            {localLanguagePicker}
             {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
             {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
              {onPinImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label="Pin image" onClick={act(onPinImage)} disabled={busy}>钉图</button>}

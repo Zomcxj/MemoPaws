@@ -452,6 +452,103 @@ async function runTests() {
       problems.push(`confirmed main image must carry the same stroke, red samples ${confirmedStroke.count}/120 (${JSON.stringify(confirmedStroke)})`);
     }
 
+    // Scenario D: offline OCR on the real Windows engine — generate a
+    // high-contrast text PNG in the browser, import it, run local_ocr with an
+    // actually installed language and require nonempty text with spaces.
+    // 无已安装语言能力时报告环境不支持，绝不安装语言包或假装通过。
+    const installedLanguages = await invokeOn(mainPage, 'local_ocr_languages');
+    const languageTag = installedLanguages.preferred || (installedLanguages.languages && installedLanguages.languages[0]?.tag) || "";
+    if (!languageTag) {
+      console.log(`[${LABEL}] offline OCR skipped: no installed OCR language capability on this machine`);
+    } else {
+      console.log(`[${LABEL}] offline OCR language: ${languageTag}`);
+      const textPng = await mainPage.evaluate(() => new Promise((resolve, reject) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 800;
+        canvas.height = 220;
+        const context = canvas.getContext('2d');
+        if (!context) { reject(new Error('no 2d context')); return; }
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, 800, 220);
+        context.fillStyle = '#000000';
+        context.font = 'bold 64px sans-serif';
+        context.textBaseline = 'middle';
+        context.fillText('MemoPaws offline OCR example', 20, 110);
+        canvas.toBlob((blob) => {
+          if (!blob) { reject(new Error('toBlob failed')); return; }
+          const reader = new FileReader();
+          reader.onload = () => resolve(Array.from(new Uint8Array(reader.result)));
+          reader.onerror = () => reject(new Error('reader failed'));
+          reader.readAsArrayBuffer(blob);
+        }, 'image/png');
+      }));
+      await mainPage.locator('.recognize-toolbar input[type="file"]').setInputFiles({ name: 'offline-ocr-text.png', mimeType: 'image/png', buffer: Buffer.from(textPng) });
+      await mainPage.locator('.image-canvas img').waitFor({ timeout: 15000 });
+      // 语言查询完成前按钮被禁用：等待其可用再点。
+      await mainPage.waitForFunction(() => {
+        const offline = Array.from(document.querySelectorAll('.ocr-controls button'))
+          .find((button) => button.textContent === '离线 OCR' || button.textContent === 'Offline OCR');
+        return Boolean(offline && !offline.disabled);
+      }, null, { timeout: 15000 });
+      await mainPage.locator('.ocr-controls').nth(0).getByRole('button', { name: /离线 OCR|Offline OCR/ }).click();
+      await mainPage.waitForFunction(() => {
+        const area = document.querySelector("textarea[aria-label='AI识别']");
+        return Boolean(area && area.value.trim().length > 0);
+      }, null, { timeout: 30000 });
+      const offlineText = await mainPage.locator("textarea[aria-label='AI识别']").inputValue();
+      if (!/[a-z]{3,}/i.test(offlineText) || !offlineText.includes(' ')) {
+        problems.push(`offline OCR must return nonempty text with retained spaces, saw ${JSON.stringify(offlineText)}`);
+      }
+      // IPC 观察：离线路径不得触碰 AI/密钥命令，且必须有 local_ocr 调用。
+      const ipcCommands = await mainPage.evaluate(() => (window.__INVOKE_LOG__ || [])
+        .map((entry) => {
+          let text = entry.url || entry.body || "";
+          try { text = decodeURIComponent(text); } catch { /* 保留原文 */ }
+          return text;
+        }));
+      const aiHits = ipcCommands.filter((text) => /ai_ocr|ai_translate|get_value/.test(text));
+      if (aiHits.length) problems.push(`offline OCR must never touch AI/vault IPC, saw ${JSON.stringify(aiHits)}`);
+      if (!ipcCommands.some((text) => text.includes('local_ocr'))) problems.push('offline OCR click must record a local_ocr IPC call');
+      // 成功文本按 local_ocr 入既有历史（序列化键是 type，不是 typ）。
+      const history = await invokeOn(mainPage, 'history_list');
+      if (!history.some((record) => record.type === 'local_ocr' && record.text === offlineText)) {
+        problems.push(`successful offline text must enter history as local_ocr, saw ${JSON.stringify(history.slice(0, 2))}`);
+      }
+      // 未安装语言：明确报错，不回退、不安装。
+      const missingLanguageError = await mainPage.evaluate(async () => {
+        try {
+          await window.__TAURI_INTERNALS__.invoke('local_ocr', { image: [137, 80, 78, 71], language: 'zz-ZZ' });
+          return null;
+        } catch (error) {
+          return String((error && error.message) || error);
+        }
+      });
+      if (!missingLanguageError || !/not installed/i.test(missingLanguageError)) {
+        problems.push(`missing language must fail explicitly without fallback, saw ${JSON.stringify(missingLanguageError)}`);
+      }
+      // 畸形图片：解码失败只报错，不崩溃。
+      await mainPage.locator('.recognize-toolbar input[type="file"]').setInputFiles({ name: 'corrupt.png', mimeType: 'image/png', buffer: Buffer.from('this is definitely not an image') });
+      await mainPage.waitForTimeout(400);
+      await mainPage.locator('.ocr-controls').nth(0).getByRole('button', { name: /离线 OCR|Offline OCR/ }).click();
+      await mainPage.waitForFunction(() => {
+        const element = document.querySelector('.recognize-error');
+        return Boolean(element && element.textContent.trim().length > 0);
+      }, null, { timeout: 20000 });
+      // 隔离主目录（不含 WebView 配置目录）不得出现任何 OCR 图片文件。
+      const imageFiles = [];
+      const walk = (directory) => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          const full = path.join(directory, entry.name);
+          if (entry.isDirectory()) {
+            if (full !== WEBVIEW_DATA) walk(full);
+          } else if (/\.(png|jpe?g|bmp|gif|webp)$/i.test(entry.name)) imageFiles.push(full);
+        }
+      };
+      walk(TEST_HOME);
+      if (imageFiles.length) problems.push(`offline OCR must not write image files into the data home, saw ${JSON.stringify(imageFiles)}`);
+      await mainPage.screenshot({ path: path.join(SCREENSHOTS_DIR, '03-offline-ocr.png') });
+    }
+
     if (problems.length) throw new Error(problems.join('; '));
     console.log(`[${LABEL}] Native multi-pin tests completed!`);
   } finally {
