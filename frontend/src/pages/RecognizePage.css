@@ -199,7 +199,7 @@
   animation: result-glow 1.8s ease-in-out infinite;
 }
 
-/* 豁免：截图选区功能色，与 CaptureOverlay 保持一致。 */
+/* Exemption: screenshot-selection feature colors, kept consistent with CaptureOverlay. */
 @keyframes result-glow {
   0%, 100% {
     border-color: var(--border-subtle);
@@ -615,8 +615,8 @@
   }
 }
 
-/* 豁免：防旧帧闪现的过渡遮罩，固定深色以匹配截图覆盖层。 */
-/* 截图确认后恢复窗口期间的纯色过渡遮罩，防止旧截图帧闪现 */
+/* Exemption: the transition mask that prevents stale-frame flashes, fixed dark to match the capture overlay. */
+/* Solid-color transition mask while the window is restored after a confirmed capture, preventing stale screenshot frames from flashing. */
 .capture-cover {
   position: fixed;
   inset: 0;
@@ -630,7 +630,7 @@
   gap: var(--space-6);
 }
 
-/* 默认展示约 4 行，超出滚动 */
+/* Shows about 4 lines by default; scrolls beyond that. */
 .history-list {
   max-height: 132px;
   overflow-y: auto;

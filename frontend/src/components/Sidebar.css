@@ -131,7 +131,7 @@
   }
 }
 
-/* 设置入口的更新角标：绝对定位右上角，颜色复用主题 --error 变量以适配明暗主题 */
+/* Update badge for the settings entry: absolutely positioned top-right; the color reuses the theme's --error variable to fit both themes. */
 .sidebar-update-dot {
   position: absolute;
   top: 10px;

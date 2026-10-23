@@ -679,7 +679,7 @@ mod tests {
         assert!(format!("{err}").contains("locked"));
     }
 
-    // ── 4. 加密性：JSON 不含明文 ─────────────────────────────────────
+    // ── 4. Encryption: JSON contains no plaintext ─────────────────────────────────────
 
     #[test]
     fn add_with_master_hidden_value_not_in_json() {
@@ -771,7 +771,7 @@ mod tests {
         assert!(vault.reorder("llm", &[]).is_err());
     }
 
-    // ── 6. 持久化 save/load 往返 ─────────────────────────────────────
+    // ── 6. Persistence save/load round trip ─────────────────────────────────────
 
     #[test]
     fn save_load_roundtrip_without_master() {
@@ -818,7 +818,7 @@ mod tests {
         assert!(vault.list().is_empty());
     }
 
-    // ── 7. settings_api_key 幂等保存语义 ──────────────────────────────
+    // ── 7. settings_api_key idempotent save semantics ──────────────────────────────
 
     #[test]
     fn settings_api_key_idempotent_add_same_name() {
@@ -846,7 +846,7 @@ mod tests {
         assert_eq!(vault.get_value(e.id).unwrap(), "second");
     }
 
-    // ── 8. 损坏 JSON load 容错 ────────────────────────────────────────
+    // ── 8. Corrupt JSON load tolerance ────────────────────────────────
 
     #[test]
     fn load_corrupt_json_returns_load_failed() {
@@ -897,7 +897,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), original);
     }
 
-    // ── 额外覆盖：save_failure_for_test 回滚 ──────────────────────────
+    // ── Extra coverage: save_failure_for_test rollback ──────────────────────────
 
     #[test]
     fn save_failure_reverts_memory_state() {

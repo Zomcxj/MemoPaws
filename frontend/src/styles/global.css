@@ -1,16 +1,16 @@
 :root {
-  /* 间距：值与名字一致（--space-8 = 8px） */
+  /* Spacing: values match their names (--space-8 = 8px) */
   --space-2: 2px;   --space-3: 3px;   --space-4: 4px;   --space-5: 5px;
   --space-6: 6px;   --space-7: 7px;   --space-8: 8px;   --space-9: 9px;
   --space-10: 10px; --space-12: 12px; --space-13: 13px; --space-14: 14px;
   --space-16: 16px; --space-18: 18px; --space-20: 20px; --space-22: 22px; --space-24: 24px;
   --space-28: 28px; --space-32: 32px; --space-36: 36px;
 
-  /* 圆角 */
+  /* Corner radius */
   --radius-3: 3px;  --radius-4: 4px;  --radius-6: 6px;  --radius-7: 7px;  --radius-8: 8px;
   --radius-10: 10px; --radius-12: 12px; --radius-14: 14px; --radius-full: 999px;
 
-  /* 字号与字重 */
+  /* Font sizes and weights */
   --font-size-10: 10px; --font-size-11: 11px; --font-size-12: 12px; --font-size-13: 13px; --font-size-14: 14px;
   --font-size-15: 15px; --font-size-16: 16px; --font-size-18: 18px; --font-size-22: 22px;
   --font-weight-500: 500; --font-weight-600: 600;
@@ -66,8 +66,7 @@
 html[data-glass="on"] .app-shell,
 html[data-glass="on"] .app-layout,
 html[data-glass="on"] .app-content,
-/* 页面根容器也要透明：留给 DWM 磨砂自由透出，否则每个页面都是一块
-   直切到窗口边缘的矩形，组件缝隙处露出整齐的直角条 */
+/* The page root container must also be transparent: leave room for the DWM blur to show through freely, otherwise every page is a rectangle cut straight to the window edge with neat right-angle strips showing in component seams. */
 html[data-glass="on"] .memo-page,
 html[data-glass="on"] .keys-page,
 html[data-glass="on"] .recognize-page,
@@ -176,7 +175,7 @@ html[data-window="pin"] #root {
   background: var(--text-muted);
 }
 
-/* 主题切换期间的临时过渡；由 useTheme 挂载并在 250ms 后移除，避免常驻通配过渡的性能开销 */
+/* Temporary transition during theme switches; mounted by useTheme and removed after 250ms to avoid the performance cost of a permanent wildcard transition. */
 .theme-transitioning,
 .theme-transitioning *,
 .theme-transitioning *::before,

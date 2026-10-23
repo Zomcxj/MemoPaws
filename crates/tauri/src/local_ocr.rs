@@ -1,9 +1,10 @@
-// Windows 离线 OCR：语言枚举、有界图片准备与 WinRT 识别。
-// 本模块不访问网络、不下载语言包、不落任何图片文件；识别文本走既有历史。
-// 纯函数（尺寸换算/资源上限检查/透明像素白底化）放在 Windows 模块外以便单测。
+// Windows offline OCR: language enumeration, bounded image preparation and WinRT recognition.
+// This module never touches the network, never downloads language packs and never writes image
+// files; recognized text goes through the existing history. Pure functions (size scaling, resource
+// limit checks, transparent-pixel whitening) live outside the Windows module for unit testing.
 use memopaws_ocr::image_util::decode_limited_with_rgba_limit;
 
-/// 本地 OCR 的解码内存上限：宽×高×4 字节。
+/// Local OCR decode memory budget: width × height × 4 bytes.
 const MAX_RGBA: u64 = 128 * 1024 * 1024;
 
 fn check_rgba_size(w: u32, h: u32) -> Result<(), String> {
@@ -26,7 +27,7 @@ fn scaled_size(w: u32, h: u32, max: u32) -> Result<(u32, u32), String> {
     Ok(((w as f64 * f).round().max(1.0) as u32, (h as f64 * f).round().max(1.0) as u32))
 }
 
-// 有界解码 → 资源上限复核 → 按引擎上限等比缩小（只缩不放）→ RGBA。
+// Bounded decode → resource-limit recheck → engine-max proportional downscale (shrink only) → RGBA.
 fn prepare(bytes: &[u8], max: u32) -> Result<image::RgbaImage, String> {
     let decoded = decode_limited_with_rgba_limit(bytes, MAX_RGBA).map_err(|e| e.to_string())?;
     check_rgba_size(decoded.width(), decoded.height())?;
@@ -42,8 +43,8 @@ fn prepare(bytes: &[u8], max: u32) -> Result<image::RgbaImage, String> {
     Ok(resized.into_rgba8())
 }
 
-// WinRT SoftwareBitmap(Bgra8) 需要：透明像素混到白底（OCR 对透明处吐垃圾），
-// RGBA→BGRA 通道互换，alpha 强制 255。
+// WinRT SoftwareBitmap(Bgra8) requires: transparent pixels blended onto white (OCR hallucinates on
+// transparency), RGBA→BGRA channel swap, alpha forced to 255.
 fn white_bgra(pixels: &mut image::RgbaImage) {
     for pixel in pixels.pixels_mut() {
         let alpha = u16::from(pixel[3]);
@@ -55,11 +56,11 @@ fn white_bgra(pixels: &mut image::RgbaImage) {
     }
 }
 
-/// 一台机器上已安装的 OCR 语言能力。
+/// An OCR language capability installed on this machine.
 #[derive(serde::Serialize)]
 pub struct LocalLanguage { pub tag: String, pub name: String }
 
-/// 已安装语言列表 + 系统偏好中的首选（列表为空时 preferred 为空串）。
+/// Installed language list plus the system-preferred one (preferred is empty when the list is empty).
 #[derive(serde::Serialize)]
 pub struct LocalLanguages { pub languages: Vec<LocalLanguage>, pub preferred: String }
 
@@ -82,8 +83,8 @@ mod win {
         Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
     };
 
-    // 每个阻塞工作线程自带 WinRT 单元初始化，作用域结束即反初始化；
-    // 不泄漏初始化、不持裸指针、不建任何网络客户端。
+    // Every blocking worker initializes its own WinRT apartment and uninitializes it when the scope
+    // ends: no leaked initialization, no raw buffer pointers, no network clients.
     struct Apartment;
     impl Apartment {
         fn new() -> Result<Self, String> {
@@ -124,7 +125,7 @@ mod win {
         let _apartment = Apartment::new()?;
         let installed = available().map_err(|e| e.to_string())?;
         if !installed.iter().any(|l| l.tag == tag) {
-            // 明确报错：不自动安装语言包、不静默回退到云 OCR。
+            // Explicit error: never auto-install language packs, never silently fall back to cloud OCR.
             return Err("Selected Windows OCR language is not installed; install its OCR language capability first".into());
         }
         let max = OcrEngine::MaxImageDimension().map_err(|e| e.to_string())?;
@@ -178,14 +179,14 @@ mod tests {
 
     #[test]
     fn prepare_rejects_oversized_input() {
-        // 6000×6000×4 = 144MiB > 128MiB：有界解码必须拒绝。
+        // 6000×6000×4 = 144MiB > 128MiB: the bounded decode must reject it.
         let oversized = sample_png_bytes(6000, 6000);
         assert!(prepare(&oversized, 2000).is_err());
     }
 
     #[test]
     fn prepare_downscales_only_beyond_engine_max() {
-        // 2000×1000 在 max=2000 内保持原尺寸；4000×2000 缩到 2000×1000。
+        // 2000×1000 stays at its size within max=2000; 4000×2000 shrinks to 2000×1000.
         let within = prepare(&sample_png_bytes(2000, 1000), 2000).expect("within limit prepares");
         assert_eq!(within.dimensions(), (2000, 1000));
         let downscaled = prepare(&sample_png_bytes(4000, 2000), 2000).expect("downscale prepares");

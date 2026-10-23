@@ -738,7 +738,7 @@ mod tests {
             super::save_config_at(&path, serde_json::json!({"clipboard_max_items": 5})).is_err()
         );
         assert!(super::save_config_at(&path, serde_json::json!({"api_url": "not a url"})).is_err());
-        // 旧版配置缺字段时前端会回传 null，校验必须跳过而非报错
+        // Old configs miss fields and the frontend sends back null; validation must skip rather than error.
         assert!(
             super::save_config_at(&path, serde_json::json!({"history_max_items": null})).is_ok()
         );

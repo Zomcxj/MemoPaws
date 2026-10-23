@@ -112,7 +112,7 @@ impl AppConfig {
         if path.exists() {
             let raw = fs::read_to_string(&path)?;
             let mut cfg: AppConfig = serde_json::from_str(&raw)?;
-            // 旧默认模型 glm-4-flash 不支持图片识别，迁移到多模态默认值
+            // The old default model glm-4-flash does not support image recognition; migrate to the multimodal default.
             if cfg.api_model.as_deref() == Some(LEGACY_TEXT_ONLY_MODEL) {
                 cfg.api_model = Some(DEFAULT_MODEL.into());
             }

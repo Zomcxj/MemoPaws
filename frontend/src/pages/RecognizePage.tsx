@@ -27,7 +27,7 @@ const errorText = (reason: unknown) => reason instanceof Error ? reason.message 
 
 interface ContextMenuState { x: number; y: number }
 
-// 离线 OCR 的已安装语言查询结果（local_ocr_languages 命令响应）。
+// Query result of installed offline OCR languages (the local_ocr_languages command response).
 interface LocalLanguages { languages: { tag: string; name: string }[]; preferred: string }
 
 export function RecognizePage({ language = "zh" }: { language?: Lang }) {
@@ -66,7 +66,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const captureRef = useRef<() => void>(() => {});
 
   const urlFor = (bytes: Uint8Array) => URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
-  // 离线 OCR 的操作令牌：图片变化、新主识别请求、卸载都会作废挂起中的离线结果。
+  // Offline OCR operation token: image changes, new main OCR requests and unmount all invalidate pending offline results.
   const localOperation = useRef(0);
   const setBytes = (bytes: Uint8Array, keepHistory = true) => {
     localOperation.current += 1;
@@ -113,8 +113,9 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const recognize = () => { localOperation.current += 1; void run(async () => { if (!image) throw new Error(t.needImage); setRecognizing(true); try { const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() }); setOcrText(result.text); setTranslation(""); } finally { setRecognizing(false); } }); };
   const translate = () => void run(async () => { if (!ocrText.trim()) throw new Error(t.needText); setTranslating(true); try { const result = await invoke<TextResult>("ai_translate", { text: ocrText, target, source, ...config() }); setTranslation(result.text); } finally { setTranslating(false); } });
   const onePunch = () => { localOperation.current += 1; void run(async () => { if (!image) throw new Error(t.needImage); const result = await invoke<TextResult>("ai_ocr", { image: Array.from(image), ...config() }); setOcrText(result.text); const translated = await invoke<TextResult>("ai_translate", { text: result.text, target, source, ...config() }); setTranslation(translated.text); }); };
-  // 离线 OCR：用当前图片字节 + 当前所选语言；令牌失效或图片已变时不回填。
-  // 非空成功清掉过期翻译；空成功提示"未识别到文字"且不覆盖已有内容。
+  // Offline OCR: current image bytes + currently selected language; no fill when the token is stale or
+  // the image changed. Nonempty success clears the stale translation; empty success reports
+  // "未识别到文字" without overwriting existing content.
   const localRecognize = () => {
     if (!localLanguages.languages.length || !localLanguage) return;
     const token = ++localOperation.current;
@@ -145,14 +146,15 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
         fullscreen: await window.isFullscreen(),
         visible: await window.isVisible(),
       };
-      // 会话登记在隐藏之前：Rust 端记录"首张钉图截图开始前主窗是否可见"。
+      // The session registers before hiding: Rust records whether the main window was visible before the first pin's screenshot began.
       await invoke("capture_session_begin", { visible: windowGeometryRef.current.visible });
       captureSessionStartedRef.current = true;
-      // 全屏退出必须在 hide 之前：tao 在隐藏窗口上退全屏会把窗口重新显示
-      // 出来，截图就会拍到应用自己的全屏窗口（与 restoreCaptureWindow 同因）。
+      // Fullscreen exit must happen before hide: tao re-shows a window that exits fullscreen while
+      // hidden, and the screenshot would capture the app's own fullscreen window (same cause as
+      // restoreCaptureWindow).
       if (windowGeometryRef.current.fullscreen) await window.setFullscreen(false);
       await window.hide();
-      // 等待 Windows 合成器播完隐藏动画，否则主窗口残影会留在截图里
+      // Wait for the Windows compositor to finish the hide animation, otherwise the main window leaves a ghost in the screenshot.
       await new Promise((resolve) => setTimeout(resolve, 320));
       const display = displays.find((item) => item.index === selectedDisplay);
       if (display) {
@@ -182,10 +184,12 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     const window = getCurrentWindow();
     let restoreSucceeded = false;
     try {
-      // 窗口隐藏时 WebView2 合成器不换帧，show() 会先呈现旧的整屏截图帧。
-      // 因此在窗口仍可见时先用纯色遮罩盖住浮层，让合成器换上"干净帧"再隐藏。
-      // 全屏退出必须在 hide 之前：tao 在隐藏窗口上退出全屏会顺带把窗口重新
-      // 显示出来（原生诊断已复现），先退再隐藏才不会让钉图期间主窗"自己出现"。
+      // While the window is hidden the WebView2 compositor does not swap frames, so show() would
+      // present the stale fullscreen screenshot frame. Cover the overlay with a solid mask while the
+      // window is still visible so the compositor swaps to a "clean frame" before hiding. The
+      // fullscreen exit must also happen before hide: tao re-shows a window that exits fullscreen
+      // while hidden (reproduced by native diagnostics) — exiting first keeps the main window from
+      // "appearing by itself" during pin sessions.
       setCovering(true);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       if (await window.isFullscreen()) await window.setFullscreen(false);
@@ -198,9 +202,9 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     } finally {
       setCovering(false);
       try {
-        // 会话只结算一次：先 finish 拿到"是否恢复显示"。浮层摘除放在结算和
-        // geometry 释放之后——浮层消失即代表恢复全部完成，此后的新截图/快捷键
-        // 不会被 windowGeometry guard 拦下。
+        // The session settles exactly once: finish first to learn "whether to re-show". Overlay teardown
+        // happens after the settle and geometry release — the overlay disappearing means the restore is
+        // fully complete, so later captures/shortcuts are not blocked by the windowGeometry guard.
         let showAfterRestore = true;
         if (restoreSucceeded && captureSessionStartedRef.current) {
           showAfterRestore = await invoke<boolean>("capture_session_finish", { outcome: options.outcome ?? "cancel" });
@@ -222,7 +226,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const exportImage = () => { if (image) void run(async () => { await exportImageBytes(image); }); };
   // Crop from the already-captured screenshot, avoiding re-capturing from the screen
   // (the overlay's dark backdrop would pollute a live re-capture).
-  // 统一合成器：标注画在原图像素上，裁剪、圆角与导出走同一条管线。
+  // Unified compositor: marks are drawn on original pixels; crop, rounding and export share one pipeline.
   const cropFromImage = async (region: RegionCss, scale: number, cornerRadius?: number, marks: Mark[] = []): Promise<Uint8Array> => {
     const screenshot = captureImageRef.current;
     if (!screenshot) throw new Error(t.needImage);
@@ -250,7 +254,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   };
   const overlayPinImage = async (image: Uint8Array, cornerRadius: number) => {
       await invoke("pin_image", { image: Array.from(image), radius: cornerRadius });
-      // 钉图后主窗口不显示：会话以 "pin" 结算，浮层由 restoreCaptureWindow 统一摘除。
+      // After pinning the main window stays hidden: the session settles as "pin" and the overlay is torn down by restoreCaptureWindow.
       await restoreCaptureWindow({ outcome: "pin" });
   };
   const overlayCopyImage = async (image: Uint8Array) => {
@@ -258,7 +262,7 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
   };
   const overlaySaveImage = async (image: Uint8Array) => {
-    // 保存框以主窗口为 owner 模态弹出，始终在截图浮层之上，无需隐藏窗口。
+    // The save dialog is app-modal over the main window, always above the capture overlay; no need to hide the window.
     await exportImageBytes(image);
   };
 
@@ -279,9 +283,10 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
   const contextSave = () => { closeContextMenu(); void exportImage(); };
   const contextReset = () => { closeContextMenu(); reset(); };
 
-  useEffect(() => { let active = true; Promise.all([invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([records, disp]) => { if (active) { setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); if ((window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture) { (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = false; // 等新页面绘制完成再隐藏窗口：刚挂载就 hide 会拖长 DWM 隐藏过渡，320ms 内拍不到干净画面（主界面半透明残影）
+  useEffect(() => { let active = true; Promise.all([invoke<HistoryRecord[]>("history_list"), invoke<DisplayInfo[]>("list_displays").catch(() => [] as DisplayInfo[])]).then(([records, disp]) => { if (active) { setHistory(records); setDisplays(disp); const primary = disp.findIndex((d) => d.is_primary); setSelectedDisplay(primary >= 0 ? primary : 0); if ((window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture) { (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = false; // Wait for the new page to finish painting before hiding: hiding right after mount stretches the DWM hide transition, and a clean frame cannot be captured within 320ms (semi-transparent main-UI ghost).
 requestAnimationFrame(() => requestAnimationFrame(() => captureRef.current())); } } }).catch((reason) => active && setError(errorText(reason))); return () => { active = false; if (previewRef.current) URL.revokeObjectURL(previewRef.current); }; }, []);
-  // 离线 OCR 语言只查询一次：失败显示能力错误，但不破坏历史/显示器初始化。
+  // Offline OCR languages are queried exactly once: a failure shows the capability error without
+  // breaking history/display initialization.
   useEffect(() => {
     let active = true;
     void invoke<LocalLanguages>("local_ocr_languages").then((result) => {

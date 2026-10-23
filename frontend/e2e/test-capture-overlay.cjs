@@ -145,8 +145,8 @@ async function readOcrImage(page) {
   });
 }
 
-// 解码 mock 已记录命令第 index 次调用的 PNG 字节，并采样若干输出坐标的像素。
-// samples 为导出图内的 [x,y] 列表；返回 width/height/pixels 供断言比对。
+// Decodes the PNG bytes of the mock's index-th recorded command call and samples pixels at several
+// output coordinates. samples is a list of [x,y] inside the exported image; returns width/height/pixels for assertions.
 async function decodeRecordedImage(page, command, index, samples = []) {
   return page.evaluate(async ({ command: c, index: i, samples: s }) => {
     const calls = window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === c);
@@ -481,7 +481,7 @@ async function overlaySaveVisibilityFlow(browser) {
     const selection = page.locator(".capture-overlay-rect");
     await selection.waitFor();
     const before = await selection.boundingBox();
-    // 先画一个标注：reject/cancel/success 全程都必须保留在导出字节里。
+    // Draw a mark first: it must survive reject/cancel/success in the exported bytes.
     await page.locator(".capture-overlay-tools").getByRole("button", { name: "矩形" }).click();
     await drag(page, { x: 150, y: 150 }, { x: 260, y: 210 });
 
@@ -532,7 +532,7 @@ async function overlaySaveVisibilityFlow(browser) {
       if (!retryable) problems.push(`${outcome}: the save button stayed busy after the save settled`);
     }
 
-    // 三次保存（reject/cancel/success）的字节都必须带着同一份标注。
+    // All three saves (reject/cancel/success) must carry the same mark in their bytes.
     const marked = await decodeRecordedImage(page, "save_image_as", 2, [[50, 50]]);
     if (marked.pixels[0][0] < 200 || marked.pixels[0][1] > 140) {
       problems.push(`save bytes lost the drawn mark across outcomes: ${JSON.stringify(marked.pixels[0])}`);
@@ -542,8 +542,8 @@ async function overlaySaveVisibilityFlow(browser) {
   });
 }
 
-// 失败保持：钉图/复制图片被拒绝、OCR 延迟回填时，标注与选区必须原样保留，
-// 旧的 OCR 结果不得回填进已变化的选区（操作令牌失效）。
+// Failure retention: rejected pin/clipboard writes and a delayed OCR response must keep marks and the
+// selection intact; a stale OCR result must never fill into a changed selection (operation token invalidated).
 async function annotationFailureRetentionFlow(browser) {
   await withPage(browser, [MOCK_SCRIPT], async (page) => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
@@ -554,21 +554,21 @@ async function annotationFailureRetentionFlow(browser) {
     await page.locator(".capture-overlay-tools").getByRole("button", { name: "矩形" }).click();
     await drag(page, { x: 150, y: 150 }, { x: 260, y: 210 });
 
-    // 钉图被拒绝：错误显示在浮层上，浮层与标注都保留。
+    // Rejected pin: the error shows on the overlay; overlay and marks both stay.
     await page.evaluate(() => window.__MOCK_TAURI_SET_PIN_REJECT__(true));
     await overlay.getByRole("button", { name: "Pin image" }).click();
     await overlay.locator(".capture-result-error").getByText("Mock pin rejected").waitFor({ timeout: 3000 });
     if (await overlay.count() !== 1) throw new Error("overlay closed after a rejected pin");
     await page.evaluate(() => window.__MOCK_TAURI_SET_PIN_REJECT__(false));
 
-    // 复制图片被拒绝：同样只报错，不破坏标注。
+    // Rejected clipboard write: error only again, marks untouched.
     await page.evaluate(() => {
       navigator.clipboard.write = () => Promise.reject(new Error("Mock clipboard rejected"));
     });
     await overlay.getByRole("button", { name: "复制图片" }).click();
     await overlay.locator(".capture-result-error").getByText("Mock clipboard rejected").waitFor({ timeout: 3000 });
 
-    // 两次失败后导出：标注仍在，选区几何未变。
+    // Export after both failures: marks still present, selection geometry unchanged.
     const afterFailures = await page.locator(".capture-overlay-rect").boundingBox();
     if (!afterFailures || Math.round(afterFailures.x) !== Math.round(selectionBox.x) || Math.round(afterFailures.y) !== Math.round(selectionBox.y)) {
       throw new Error(`failed actions must not move the selection: ${JSON.stringify({ selectionBox, afterFailures })}`);
@@ -580,7 +580,7 @@ async function annotationFailureRetentionFlow(browser) {
       throw new Error(`save bytes lost the drawn mark after failures: ${JSON.stringify(marked.pixels[0])}`);
     }
 
-    // OCR 延迟回填：识别挂起时绘制新标注（令牌+1），旧结果不得回填。
+    // Delayed OCR: draw a new mark while recognition is pending (token+1); the old result must not fill.
     await page.evaluate(() => window.__MOCK_TAURI_SET_OCR_DELAY__(350));
     await overlay.getByRole("button", { name: "AI识别" }).click();
     const resultWindow = page.locator(".capture-result-window");
@@ -657,10 +657,10 @@ async function pinAlphaFlow(browser) {
     }
     if (problems.length) throw new Error(problems.join("; "));
 
-    // 钉图后主窗口必须保持隐藏（"不要出现主界面"），关闭钉图窗口再恢复。
+    // After pinning, the main window must stay hidden ("no main UI"), restoring when the pin window closes.
     const hiddenAgain = await page.waitForFunction(() => !window.__MOCK_TAURI_IS_VISIBLE__(), null, { timeout: 5000 }).then(() => true).catch(() => false);
     if (!hiddenAgain) problems.push("main window must stay hidden while the pin is up (no main UI during pin)");
-    // 新会话模型：销毁由 __MOCK_TAURI_CLOSE_PIN__ 模拟原生 destroyed 钩子恢复主窗。
+    // New session model: destruction is simulated by __MOCK_TAURI_CLOSE_PIN__, mirroring the native destroyed hook that restores the main window.
     await page.evaluate(() => window.__MOCK_TAURI_CLOSE_PIN__(window.__MOCK_TAURI_PIN_LABELS__()[0]));
     const mainRestored = await page.waitForFunction(() => window.__MOCK_TAURI_IS_VISIBLE__(), null, { timeout: 3000 }).then(() => true).catch(() => false);
     if (!mainRestored) problems.push("main window did not come back after the pin was closed");
@@ -816,7 +816,7 @@ const PIN_WHEEL_SCRIPT = `
     const readSize = (payload) => {
       const value = payload && payload.value;
       if (!value) return null;
-      // Size 实例的原型 getter 过不了 jsonValue 序列化，落盘前拍成纯对象。
+      // A Size instance's prototype getters do not survive jsonValue serialization; flatten to a plain object before recording.
       if (typeof value.width === "number") return { width: value.width, height: value.height };
       if (value.size && typeof value.size.width === "number") return { width: value.size.width, height: value.size.height };
       if (value.data && typeof value.data.width === "number") return { width: value.data.width, height: value.data.height };
@@ -867,10 +867,10 @@ async function pinWheelFlow(browser) {
     await page.waitForFunction(() => window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "pin_close").length >= 2, null, { timeout: 3000 }).catch(() => {});
     const escClose = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "pin_close").length);
     if (escClose < 2) problems.push(`Escape must close the pin, saw ${escClose} pin_close call(s)`);
-    // 必须仍在 #pin 页上检查：导航回主页面后 App 合法调用这些命令。
+    // The check must run on the #pin page: after navigating back to main, App legitimately calls these commands.
     const forbidden = await page.evaluate(() => ["show_main_window_when_ready", "set_glass_effect", "latest_release_version", "get_config"].filter((command) => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === command)));
     if (forbidden.length) problems.push(`pin window ran main-only startup commands: ${forbidden.join(", ")}`);
-    // Blob URL 卸载回收改由原生增量验证：跨文档导航不触发 React 卸载。
+    // Blob-URL unmount revocation is verified by the native increment instead: cross-document navigation never unmounts React.
     if (problems.length) throw new Error(problems.join("; "));
   });
 }
@@ -969,7 +969,7 @@ async function annotationDrawFlow(browser) {
   await page.waitForTimeout(120);
   const first = await decodeRecordedImage(page, "save_image_as", 0, [[50, 50], [150, 60], [185, 85], [190, 85]]);
   if (first.width !== 300 || first.height !== 200) throw new Error(`export must be the 300x200 selection, saw ${first.width}x${first.height}`);
-  // 默认画笔色 #ff6565：矩形描边像素必须是该红色，未标注处保持坐标色背景。
+  // Default pen color #ff6565: the rectangle stroke pixel must be that red; unmarked areas keep the coordinate-color background.
   const stroke = first.pixels[0];
   if (stroke[0] < 200 || stroke[1] > 140) throw new Error(`rectangle stroke must use the toolbar color, saw ${JSON.stringify(stroke)}`);
   const untouched = first.pixels[1];
@@ -977,7 +977,7 @@ async function annotationDrawFlow(browser) {
   const m1 = first.pixels[2];
   const m2 = first.pixels[3];
   if (JSON.stringify(m1) !== JSON.stringify(m2)) throw new Error(`mosaic block pixels must be averaged: ${JSON.stringify({ m1, m2 })}`);
-  // 撤销只移除最后一个标记（马赛克），矩形描边必须保留；重做恢复马赛克。
+  // Undo removes only the LAST mark (the mosaic); the rectangle stroke must survive, redo restores the mosaic.
   await toolbar.getByRole("button", { name: "撤销" }).click();
   await overlay.getByRole("button", { name: "保存图片" }).click();
   await page.waitForTimeout(120);
@@ -990,7 +990,7 @@ async function annotationDrawFlow(browser) {
   const redone = await decodeRecordedImage(page, "save_image_as", 2, [[50, 50], [185, 85], [190, 85]]);
   if (redone.pixels[0][0] < 200 || redone.pixels[0][1] > 140) throw new Error(`redo must keep earlier marks, stroke saw ${JSON.stringify(redone.pixels[0])}`);
   if (JSON.stringify(redone.pixels[1]) !== JSON.stringify(redone.pixels[2])) throw new Error(`redo must restore the mosaic averaging, saw ${JSON.stringify({ m1: redone.pixels[1], m2: redone.pixels[2] })}`);
-  // 绘制中放大镜必须隐藏。
+  // The loupe must hide while drawing.
   const penTool = toolbar.getByRole("button", { name: "画笔" });
   await penTool.click();
   await page.mouse.move(200, 200);
@@ -1032,7 +1032,7 @@ async function annotationTextFlow(browser) {
   if (await page.locator(".capture-overlay").count() !== 1) throw new Error("Esc in the text editor must keep the capture alive");
   await page.mouse.click(200, 160);
   await editor.waitFor();
-  // 线宽 6 → 渲染字号 36px，字形覆盖足够密，像素断言稳定。
+  // Width 6 → 36px rendered font: glyph coverage is dense enough for stable pixel assertions.
   await toolbar.locator("input[type=range]").fill("6");
   await editor.fill("hello");
   await page.keyboard.press("Control+Enter");
@@ -1042,7 +1042,7 @@ async function annotationTextFlow(browser) {
   const textSamples = [];
   for (let y = 58; y <= 78; y += 5) for (let x = 100; x <= 150; x += 5) textSamples.push([x, y]);
   const saved = await decodeRecordedImage(page, "save_image_as", 0, textSamples);
-  // 文字锚点在选区内的输出坐标 (100,60) 附近：这一带必须出现与背景不同的像素。
+  // The text anchor sits near output coordinate (100,60) inside the selection: pixels different from the background must appear around there.
   const expected = textSamples.map(([x, y]) => [(x + 100) % 256, (y + 100) % 256, 64, 255]);
   let changed = 0;
   saved.pixels.forEach((p, i) => { if (p[0] !== expected[i][0] || p[1] !== expected[i][1]) changed += 1; });
@@ -1086,9 +1086,10 @@ async function annotationToolbarFlow(browser) {
   await context.close();
 }
 
-// 增量③：离线 OCR（主页面路径）——挂载查询语言、默认系统偏好；
-// 点击只调 local_ocr 且携带当前图片字节；空结果不覆盖旧文本；
-// 失败与无语言能力都按契约表现；AI 命令不受影响；zh/en 文案齐全。
+// Increment 3: offline OCR (main page path) — languages queried on mount, system-preferred default;
+// clicking invokes only local_ocr carrying the current image bytes; an empty result does not overwrite
+// existing text; failures and missing language capability follow the contract; AI commands unaffected;
+// both zh/en labels covered.
 async function offlineOcrMainFlow(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
@@ -1105,7 +1106,7 @@ async function offlineOcrMainFlow(browser) {
     throw new Error(`language options must mirror the query result, saw ${JSON.stringify(optionTags)}`);
   }
 
-  // 导入图片 → AI 识别 + 翻译制造旧结果 → 清空调用记录。
+  // Import an image → AI recognize + translate to create stale results → clear the call log.
   const sample = fs.readFileSync(path.join(__dirname, "screenshots", "01-recognize.png"));
   await page.locator(".recognize-toolbar input[type=\"file\"]").setInputFiles({ name: "sample.png", mimeType: "image/png", buffer: sample });
   await page.locator(".image-canvas img").waitFor({ timeout: 5000 });
@@ -1115,7 +1116,7 @@ async function offlineOcrMainFlow(browser) {
   await page.waitForTimeout(200);
   await page.evaluate(() => { window.__MOCK_TAURI_COMMAND_CALLS__.length = 0; });
 
-  // 离线 OCR 成功：只记 local_ocr（携带原样图片字节），结果回填，旧翻译清空。
+  // Offline OCR success: only local_ocr recorded (carrying the exact image bytes), result filled, stale translation cleared.
   await ocrControls.nth(0).getByRole("button", { name: "离线 OCR" }).click();
   await page.waitForTimeout(200);
   const offlineCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command));
@@ -1135,7 +1136,7 @@ async function offlineOcrMainFlow(browser) {
   }
   if ((await translateArea.inputValue()) !== "") throw new Error("nonempty offline result must clear the stale translation");
 
-  // 空结果：报告“未识别到文字”，不覆盖已有内容。
+  // Empty result: report "未识别到文字" without overwriting existing content.
   await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("empty"));
   await ocrControls.nth(0).getByRole("button", { name: "离线 OCR" }).click();
   await page.waitForTimeout(200);
@@ -1143,7 +1144,7 @@ async function offlineOcrMainFlow(browser) {
   if ((await ocrArea.inputValue()) !== "Local OCR example text") throw new Error("empty offline result must not overwrite existing OCR text");
   await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("error"));
 
-  // 识别失败：错误可见，图片与旧文本保留，无 AI 命令。
+  // Recognition failure: error visible, image and previous text kept, no AI commands.
   await page.evaluate(() => { window.__MOCK_TAURI_COMMAND_CALLS__.length = 0; });
   await ocrControls.nth(0).getByRole("button", { name: "离线 OCR" }).click();
   await page.waitForTimeout(200);
@@ -1153,7 +1154,7 @@ async function offlineOcrMainFlow(browser) {
   if (JSON.stringify(failureCalls) !== JSON.stringify(["local_ocr"])) throw new Error(`failed offline OCR must not touch AI commands, saw ${JSON.stringify(failureCalls)}`);
   await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("success"));
 
-  // AI 识别仍走原命令（离线功能加入后不得被改道）。
+  // AI recognize still uses the original command (it must not be rerouted now that offline exists).
   await page.evaluate(() => { window.__MOCK_TAURI_COMMAND_CALLS__.length = 0; });
   await ocrControls.nth(0).getByRole("button", { name: "AI识别" }).click();
   await page.waitForTimeout(200);
@@ -1161,7 +1162,7 @@ async function offlineOcrMainFlow(browser) {
     throw new Error("AI识别 must keep invoking ai_ocr after the offline feature landed");
   }
 
-  // 无已安装语言：重载后无下拉、按钮禁用、出现能力提示，不产生任何调用。
+  // No installed languages: after reload there is no select, the button is disabled, guidance appears, and no calls happen.
   await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_LANGUAGES_MODE__("nolangs"));
   await page.reload({ waitUntil: "networkidle" });
   if ((await page.getByRole("combobox", { name: "离线 OCR 语言" }).count()) !== 0) throw new Error("language select must be hidden when no language is installed");
@@ -1170,7 +1171,7 @@ async function offlineOcrMainFlow(browser) {
   if (!(await offlineButton.isDisabled())) throw new Error("offline OCR must be disabled without installed languages");
   await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_LANGUAGES_MODE__("success"));
 
-  // en 文案：切换语言后按钮/下拉标签随之变化。
+  // en labels: after switching the language, button/select labels follow.
   await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("set_language", { language: "en" }));
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Offline OCR" }).waitFor({ timeout: 5000 });
@@ -1178,8 +1179,9 @@ async function offlineOcrMainFlow(browser) {
   await context.close();
 }
 
-// 增量③：离线 OCR（浮层路径）——与 AI 相同的合成图回调；记录的字节带真实
-// 马赛克块；失败只报错不回退到 AI；结果进既有结果窗。
+// Increment 3: offline OCR (overlay path) — the same composited-image callback as AI; the recorded
+// bytes carry a real mosaic block; failures report errors only and never fall back to AI; results go
+// into the existing result window.
 async function offlineOcrOverlayFlow(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
@@ -1206,7 +1208,7 @@ async function offlineOcrOverlayFlow(browser) {
   if ((await overlayOcrArea.inputValue()) !== "Local OCR example text") {
     throw new Error(`overlay offline result must fill the result window, saw ${JSON.stringify(await overlayOcrArea.inputValue())}`);
   }
-  // 浮层失败：只报错，不回退到 AI。
+  // Overlay failure: error only, no AI fallback.
   await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("error"));
   await resultWindow.getByRole("button", { name: "离线 OCR" }).click();
   await page.waitForTimeout(200);

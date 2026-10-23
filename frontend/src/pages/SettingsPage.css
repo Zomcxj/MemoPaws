@@ -334,7 +334,7 @@
   .settings-replacement-row { grid-template-columns: 1fr; }
 }
 
-/* 更新卡片：版本信息 + 下载操作/进度 + 结果提示 */
+/* Update card: version info + download actions/progress + result hint */
 .settings-update-card {
   display: flex;
   flex-direction: column;
@@ -360,8 +360,8 @@
   flex: 1 1 auto;
   width: 100%;
   height: 8px;
-  /* accent-color 是 Chromium 原生控件的主题色通道（WebView2 支持）；
-     ::-webkit-progress-value 伪元素方案真机验证仍显示灰色，弃用 */
+  /* accent-color is Chromium's theme-color channel for native controls (WebView2 supports it);
+     a ::-webkit-progress-value pseudo-element approach still showed gray on a real machine — dropped. */
   accent-color: var(--accent);
 }
 

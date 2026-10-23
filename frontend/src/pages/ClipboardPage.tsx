@@ -16,7 +16,7 @@ interface ClipboardItem {
 
 const errorText = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
 
-// 兼容三种历史格式：毫秒时间戳（新）、秒时间戳（旧）、格式化字符串（更早的遗留数据）
+// Supports three historical formats: millisecond timestamps (new), second timestamps (old), formatted strings (older legacy data).
 const formatClipboardTime = (time: string) => {
   const value = Number(time);
   if (Number.isNaN(value)) return time;
@@ -130,8 +130,8 @@ export function ClipboardPage({ language = "zh" }: Props) {
     try { await operation(); } catch (reason) { setError(errorText(reason)); }
   };
 
-  // 按倍率缩放，锚点为相对 stage 中心的偏移（默认 stage 中心）。
-  // 锚点在缩放前后保持贴合同一图像位置，因此缩放平滑不跳变。
+  // Scale by the factor, anchored at the offset relative to the stage center (defaults to the stage center).
+  // The anchor keeps mapping to the same image position across the zoom, so zooming stays smooth without jumps.
   const zoomBy = useCallback((factor: number, anchorX = 0, anchorY = 0) => {
     setPreviewView((current) => {
       const zoom = clampZoom(current.zoom * factor);
@@ -159,19 +159,19 @@ export function ClipboardPage({ language = "zh" }: Props) {
     setPreviewId(id);
   };
 
-  // 切换记录或关闭预览时重置缩放与位移
+  // Reset zoom and pan when switching records or closing the preview.
   useEffect(() => {
     setPreviewView(IDLE_VIEW);
     dragRef.current = null;
     setDragging(false);
   }, [previewId]);
 
-  // 预览的记录被删除 / 过滤掉时自动关闭
+  // Auto-close when the previewed record is deleted or filtered out.
   useEffect(() => {
     if (previewId !== null && !items.some((item) => item.id === previewId)) closePreview();
   }, [items, previewId, closePreview]);
 
-  // 滚轮缩放：需要 passive:false 才能 preventDefault 阻止页面滚动
+  // Wheel zoom: needs passive:false so preventDefault can stop the page from scrolling.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || previewId === null) return;
@@ -180,14 +180,14 @@ export function ClipboardPage({ language = "zh" }: Props) {
       const rect = stage.getBoundingClientRect();
       const anchorX = event.clientX - rect.left - rect.width / 2;
       const anchorY = event.clientY - rect.top - rect.height / 2;
-      // 指数映射：不同设备的 deltaY 幅度差异不会造成跳变
+      // Exponential mapping: deltaY magnitude differences across devices never cause jumps.
       zoomBy(Math.exp(-event.deltaY * 0.0015), anchorX, anchorY);
     };
     stage.addEventListener("wheel", onWheel, { passive: false });
     return () => stage.removeEventListener("wheel", onWheel);
   }, [previewId, zoomBy]);
 
-  // 键盘可用性：Esc 关闭、+/- 缩放、0 复位、方向键平移
+  // Keyboard support: Esc closes, +/- zoom, 0 resets, arrow keys pan.
   useEffect(() => {
     if (previewId === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -195,7 +195,7 @@ export function ClipboardPage({ language = "zh" }: Props) {
         closePreview();
         return;
       }
-      // 焦点仍在输入框时不劫持字符/方向键
+      // Do not hijack character/arrow keys while focus is still in an input.
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
@@ -309,7 +309,7 @@ export function ClipboardPage({ language = "zh" }: Props) {
     window.localStorage.setItem("clipboard_view_mode", next);
   };
 
-  // 仅在卸载时释放 object URL：依赖 imageUrls 会在新增图片时提前吊销已有 URL
+  // Revoke object URLs only on unmount: depending on imageUrls would revoke existing URLs early when new images arrive.
   const imageUrlsRef = useRef<Record<number, string>>({});
   imageUrlsRef.current = imageUrls;
   useEffect(() => {

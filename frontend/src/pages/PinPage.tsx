@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { currentMonitor, getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 
-// 钉图窗口：显示截图片段，左键拖动、滚轮等比缩放；右上角×、右键或 Esc 只关闭当前实例。
-// 圆角在截图前已确定，这里不接受调整；滚轮只改窗口显示尺寸，不改原始图片像素。
+// Pin window: shows a screenshot fragment, left-drag to move, wheel to zoom proportionally; the × in
+// the top-right, right-click or Esc closes only this instance.
+// The corner radius is decided before the screenshot and not adjustable here; the wheel only changes
+// the window display size, never the original image pixels.
 export function PinPage() {
   const [url, setUrl] = useState("");
   const [radius, setRadius] = useState(12);
@@ -30,8 +32,9 @@ export function PinPage() {
     };
   }, []);
 
-  // 滚轮等比缩放：请求串行化避免乱序，比例始终取自图片自然尺寸，
-  // 并按当前显示器工作区与最小 32 物理像素约束夹取。
+  // Proportional wheel zoom: requests are serialized to avoid reordering, the ratio always comes from
+  // the image's natural size, and is clamped by the current monitor's work area and a minimum of 32
+  // physical pixels.
   const enqueueResize = (multiplier: number) => {
     resizeQueue.current = resizeQueue.current.then(async () => {
       const win = getCurrentWindow();
@@ -52,7 +55,7 @@ export function PinPage() {
     });
   };
 
-  // url 就绪后容器才渲染，监听需在容器出现后重新挂载。
+  // The listener must re-attach once the container renders (it only exists after the url is ready).
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
@@ -65,8 +68,9 @@ export function PinPage() {
     return () => element.removeEventListener("wheel", onWheel);
   }, [url]);
 
-  // 系统缩放/非等比调整后按图片自然比例纠偏；偏差 ≤1 物理像素不动，
-  // 避免与自身 setSize 形成循环。组件卸载时注销监听（含迟到注册）。
+  // Ratio correction after system scaling or non-proportional resizes; deviations ≤1 physical pixel
+  // are left alone to avoid a feedback loop with our own setSize. Listeners unregister on unmount
+  // (including late registrations).
   useEffect(() => {
     const win = getCurrentWindow();
     let stopped = false;
@@ -87,7 +91,7 @@ export function PinPage() {
         if (Math.abs(expected - size.height) <= 1) return;
         await win.setSize(new PhysicalSize(size.width, expected));
       } catch {
-        // 纠偏失败不影响钉图显示
+        // Correction failures do not affect the pin display.
       }
     };
     track(win.onScaleChanged(() => { void correct(); }));

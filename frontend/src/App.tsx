@@ -20,14 +20,14 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const { theme, resolvedTheme, setTheme } = useTheme();
 
-  // 液态玻璃开关：独立于 dark/light/auto，铺在已有主题上。本地持久化即可，
-  // 后端配置无字段可收（纯展示层偏好）。
+  // Liquid-glass toggle: independent of dark/light/auto, layered on top of the existing theme.
+  // Local persistence is enough; the backend config has no field for it (a pure display preference).
   const [glass, setGlass] = useState(() => window.localStorage.getItem("memopaws-glass") === "on");
   useEffect(() => {
     document.documentElement.setAttribute("data-glass", glass ? "on" : "off");
     window.localStorage.setItem("memopaws-glass", glass ? "on" : "off");
-    // DWM 层的亚克力必须跟随开关同步：静态挂在 tauri.conf.json 里时关掉开关，
-    // 标题栏等 CSS 达不到的区域还会一直是玻璃态
+    // The DWM acrylic layer must follow the toggle in sync: when statically set in tauri.conf.json,
+    // turning the toggle off leaves title-bar areas unreachable by CSS permanently glassy.
     void invoke("set_glass_effect", { enabled: glass }).catch(() => {});
   }, [glass]);
 
@@ -72,7 +72,8 @@ export default function App() {
     const unlisten = listen<string>("global-shortcut", (event) => {
       switch (event.payload) {
         case "capture":
-          // 页面切换是异步的，此时监听器未挂载会丢事件；用待办标记让识别页挂载后补触发
+          // Page switches are asynchronous and the listener may not be mounted yet, which would drop
+          // the event; a pending flag lets the recognize page re-trigger after mount.
           (window as unknown as { __memoPendingCapture?: boolean }).__memoPendingCapture = true;
           navigateRef.current("recognize");
           window.dispatchEvent(new CustomEvent("memopaws-capture"));
@@ -97,7 +98,7 @@ export default function App() {
     };
   }, []);
 
-  // 更新通知：后端轮询发现新版本时 emit update-available，仅记录版本号供角标显示
+  // Update notifications: the backend poll emits update-available when it finds a newer version; only the version is recorded for badge display.
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -110,9 +111,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // update-available 每进程只 emit 一次（后端 notified 去重）：冷启动 15s 首检若在
-    // 监听器注册前发生，事件被丢弃，角标整场缺失。挂载时补一次主动查询闭合角标链路；
-    // 返回 null（无更新/检查失败）或 invoke 失败时静默，不打扰无网络的用户。
+    // update-available is emitted once per process (the backend dedupes via notified): if the 15s
+    // cold-start first check happens before the listener registers, the event is dropped and the
+    // badge is missing for the whole session. A proactive mount query closes the badge chain; silent
+    // on null (no update/check failed) or invoke failure, so offline users are not disturbed.
     void invoke<{ latestVersion: string | null; hasUpdate: boolean }>("latest_release_version")
       .then((check) => {
         if (check?.hasUpdate && check.latestVersion) setLatestVersion(check.latestVersion);

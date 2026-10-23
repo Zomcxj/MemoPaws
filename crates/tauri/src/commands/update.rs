@@ -9,8 +9,8 @@ pub(crate) const RELEASE_API: &str =
     "https://api.github.com/repos/Zomcxj/MemoPaws/releases/latest";
 pub(crate) const USER_AGENT: &str = concat!("MemoPaws/", env!("CARGO_PKG_VERSION"));
 
-/// 发布页解析结果：版本号与两类资产的 (url, size)。资产缺失时为 None，
-/// 允许只提供其一。
+/// Parsed release page: the version plus (url, size) for two asset kinds. `None` when an asset is
+/// missing; either one alone is allowed.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LatestRelease {
     pub version: String,
@@ -18,9 +18,10 @@ pub(crate) struct LatestRelease {
     pub offline: Option<(String, u64)>,
 }
 
-/// 按点分数字段比较版本（"0.0.10" > "0.0.9"），忽略可选的 v 前缀。
-/// 缺失字段按 0 处理；任一段非数字（含预发布后缀、超范围整数）时整串视为无法比较，
-/// 按相等处理——宁可漏报升级也不误报。
+/// Compares versions by dot-separated numeric fields ("0.0.10" > "0.0.9"), ignoring an optional `v`
+/// prefix. Missing fields count as 0; if any field is non-numeric (prerelease suffix, out-of-range
+/// integer) the whole string counts as incomparable and is handled as equal — better to miss an
+/// upgrade than to report a false one.
 pub(crate) fn compare_versions(current: &str, latest: &str) -> Ordering {
     fn segments(value: &str) -> Option<Vec<u64>> {
         value
@@ -30,7 +31,7 @@ pub(crate) fn compare_versions(current: &str, latest: &str) -> Ordering {
             .map(|part| part.trim().parse().ok())
             .collect()
     }
-    // 出现非数字字段时无法判断大小，按相等处理以免误报升级。
+    // A non-numeric field makes ordering undecidable; treat as equal to avoid false upgrade reports.
     let (Some(current), Some(latest)) = (segments(current), segments(latest)) else {
         return Ordering::Equal;
     };
@@ -46,15 +47,15 @@ pub(crate) fn compare_versions(current: &str, latest: &str) -> Ordering {
     Ordering::Equal
 }
 
-/// 只接受 GitHub 发行页与其 CDN 域名的 https 下载地址。
+/// Accepts only https download URLs from GitHub release pages and their CDN domains.
 pub(crate) fn safe_download_url(url: &str) -> bool {
     url.starts_with("https://github.com/")
         || url.starts_with("https://objects.githubusercontent.com/")
 }
 
-/// 替换正在运行的 exe：Windows 允许改名运行中的文件，先把当前 exe 改名为
-/// `.bak` 再把新 exe 写到原路径。复制失败或写入字节数与源文件不符时回滚，
-/// 避免应用变成不可运行。
+/// Replaces the running exe: Windows allows renaming a running file, so the current exe is renamed to
+/// `.bak` first and the new exe is written to the original path. Rolls back when the copy fails or the
+/// written byte count does not match the source, so the app never ends up unrunnable.
 pub(crate) fn replace_executable(current_exe: &Path, downloaded: &Path) -> std::io::Result<PathBuf> {
     let backup = backup_path(current_exe);
     std::fs::rename(current_exe, &backup)?;
@@ -75,9 +76,10 @@ pub(crate) fn replace_executable(current_exe: &Path, downloaded: &Path) -> std::
     }
 }
 
-/// 把 `.bak` 改名回原位，回滚本身也失败时两个错误一起带出去。没有 logging 依赖，
-/// 错误字符串是唯一通道：丢掉回滚错误会让调用方把"半个新 exe 挡在原位、旧程序躺在
-/// `.bak` 里"误报成下载失败，用户重试多少次都是坏的。
+/// Renames `.bak` back to its original place; when the rollback itself fails, both errors are carried
+/// along. There is no logging dependency and the error string is the only channel: dropping the
+/// rollback error would let callers misreport "half of the new exe blocking the original path while
+/// the old program sits in `.bak`" as a plain download failure, and every retry stays broken.
 fn rollback(backup: &Path, current_exe: &Path, error: std::io::Error) -> std::io::Error {
     match std::fs::rename(backup, current_exe) {
         Ok(()) => error,
@@ -91,11 +93,12 @@ fn rollback(backup: &Path, current_exe: &Path, error: std::io::Error) -> std::io
     }
 }
 
-/// 上次更新遗留的 .bak 必须在启动时清掉，否则磁盘上永远留一份旧程序。
+/// A `.bak` left behind by the previous update must be cleaned up at startup, otherwise an old copy of
+/// the program stays on disk forever.
 ///
-/// 只能在**下一个进程**里调用：`.bak` 是上一个进程正在运行的映像，进程存活期间
-/// Windows 拒绝删除它（实测 AccessDenied），而下面的 `let _ =` 会让这个失败永久
-/// 静默，磁盘上就永远留一份旧程序。
+/// Must only be called from the **next process**: `.bak` is the image the previous process was running
+/// from, and while that process is alive Windows refuses to delete it (observed AccessDenied); the
+/// `let _ =` below would silence that failure forever, leaving an old copy on disk forever.
 pub(crate) fn remove_stale_backup(current_exe: &Path) {
     let backup = backup_path(current_exe);
     if backup.exists() {
@@ -137,19 +140,21 @@ pub(crate) fn parse_latest_release(body: &str) -> Option<LatestRelease> {
 pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
 pub(crate) const FIRST_CHECK_DELAY: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// 起手出口由 PREFER_PROXY 粘滞状态决定（见 fetch_response），失败再换另一条。
-/// 开发者环境里 GitHub 常需代理，但直连可用时不应多绕一跳。reqwest 默认自动
-/// 读取环境变量与 Windows 注册表中的系统代理（system-proxy feature），所以代理
-/// client 就是默认构造。
+/// The starting exit is decided by the PREFER_PROXY sticky state (see fetch_response); on failure the
+/// next one is tried. GitHub often needs a proxy in developer environments, but direct connections
+/// should not pay an extra hop when they work. reqwest reads proxies from environment variables and
+/// the Windows registry (system-proxy feature) by default, so the proxy client is the default build.
 ///
-/// API 检查与文件下载必须分开设超时：reqwest 的 client 级 `timeout` 覆盖
-/// "从建连到响应体读完"全程，29MB 离线包走 20s 总超时需要 ≥12Mbps，慢速用户的
-/// 应用内更新会永远失败。所以：
-/// - API 路径传 `Some(20s)`——JSON 只有几 KB，20s 足够；
-/// - 下载路径传 `None`——不设总超时，只靠 connect_timeout(20s) 挡死连接。
-///   不设 3600s 兜底是因为真正的 56kbps 边缘用户下 29MB 要 70 分钟；下载线程
-///   卡在 read 上时 TCP 重传/保活最终会报错释放线程，代价只是 DOWNLOADING 互斥
-///   多占一会儿，可接受。
+/// API checks and file downloads need separate timeouts: reqwest's client-level `timeout` covers
+/// everything from connection setup to the end of the response body; a 29MB offline package over a
+/// 20s total timeout requires ≥12Mbps, so in-app updates would fail forever for slow users.
+/// Therefore:
+/// - the API path passes `Some(20s)` — the JSON is a few KB, 20s is plenty;
+/// - the download path passes `None` — no total timeout, only connect_timeout(20s) cuts dead
+///   connections. No 3600s fallback because a real 56kbps edge user needs 70 minutes for 29MB; when
+///   the download thread is stuck in read, TCP retransmission/keepalive eventually errors out and
+///   releases the thread — the cost is only the DOWNLOADING mutex being held a bit longer, which is
+///   acceptable.
 fn client(exit: Exit, total_timeout: Option<std::time::Duration>) -> Option<reqwest::blocking::Client> {
     let mut builder = reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
@@ -168,26 +173,27 @@ fn client(exit: Exit, total_timeout: Option<std::time::Duration>) -> Option<reqw
     builder.build().ok()
 }
 
-/// 更新请求可用的网络出口。
+/// Network exits available to update requests.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Exit {
-    /// 不走任何代理（reqwest no_proxy）
+    /// No proxy at all (reqwest no_proxy)
     Direct,
-    /// 系统代理（注册表 ProxyEnable 开启时才生效；真机实测用户机器上常是关的，
-    /// 此时与 Direct 等价）
+    /// System proxy (only applies when ProxyEnable is on in the registry; on real machines it is
+    /// commonly off, in which case this equals Direct)
     System,
-    /// 本机常见代理端口的 HTTP 代理。系统代理没开但 Clash/v2rayN 在跑是常态，
-    /// 主动探测端口比指望用户开系统代理可靠（端口拒绝连接时毫秒级失败，无超时代价）
+    /// HTTP proxy on a common local proxy port. System proxy off while Clash/v2rayN runs is the norm;
+    /// probing the port proactively is more reliable than hoping the system proxy is on (a refused
+    /// port fails in milliseconds, with no timeout cost)
     Local(u16),
 }
 
-/// 本机 HTTP 代理端口探测清单：Clash 7890 / Clash Verge 7897 / v2rayN 10809
+/// Local HTTP proxy probe list: Clash 7890 / Clash Verge 7897 / v2rayN 10809
 const LOCAL_PROXY_PORTS: [u16; 3] = [7890, 7897, 10809];
 const EXIT_COUNT: usize = 2 + LOCAL_PROXY_PORTS.len();
 
-/// 固定出口顺序，每次请求都按此尝试：本地代理端口优先（拒绝连接是毫秒级
-/// 失败，几乎零代价），然后直连，最后系统代理（没开系统代理时它与直连等价，
-/// 会白等一个超时，所以殿后）。
+/// Fixed exit order, tried in sequence per request: local proxy ports first (refused connections fail
+/// in milliseconds, nearly zero cost), then direct, then the system proxy last (without a system
+/// proxy enabled it equals direct and would waste a timeout, so it goes last).
 const EXITS: [Exit; EXIT_COUNT] = [
     Exit::Local(7890),
     Exit::Local(7897),
@@ -209,16 +215,18 @@ fn fetch_response(url: &str, total_timeout: Option<std::time::Duration>) -> Opti
         if response.status().is_success() {
             return Some(response);
         }
-        // 非 2xx：换下一个出口。不同出口（直连被墙页 / 代理出口限流）会给出
-        // 不同答案，"服务器已答复就定案"只对同一出口成立。
+        // Non-2xx: try the next exit. Different exits (direct hitting a blocked page / a rate-limited
+        // proxy exit) give different answers; "the server answered, so it is final" only holds per exit.
     }
     None
 }
 
-/// 最近一次成功抓取的 release 与抓取时间。真机实测：卡片刚显示完新版本，
-/// 点下载时重新打 API 却赶上失败/限流（共享代理出口 IP 的 60 次/小时配额），
-/// 白白把下载挡在门外。成功结果缓存 10 分钟，下载与手动检查共用；
-/// 代价是发布新 release 后最多 10 分钟内手动检查仍看到旧缓存，可接受。
+/// The latest successful release fetch and its timestamp. Observed on a real machine: the card had
+/// just shown the new version, but re-hitting the API on download ran into failure/rate limiting
+/// (the 60 requests/hour quota of a shared proxy exit IP) and blocked the download for nothing.
+/// Successful results are cached for 10 minutes and shared between download and manual checks; the
+/// cost is that a manual check may see the old cache for up to 10 minutes after a new release, which
+/// is acceptable.
 fn fetch_latest_release() -> Option<LatestRelease> {
     const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
     static CACHE: std::sync::Mutex<Option<(std::time::Instant, LatestRelease)>> =
@@ -238,15 +246,15 @@ fn fetch_latest_release() -> Option<LatestRelease> {
     Some(release)
 }
 
-/// latest 比 current 新时返回 latest，否则 None。调用方传进来的 latest 应是已剥掉
-/// v 前缀的版本号（parse_latest_release 的输出），本函数原样返回。
-/// 版本号无法比较时返回 None：宁可漏报也不误报升级。
+/// Returns latest when it is newer than current, otherwise None. The caller passes latest already
+/// stripped of the v prefix (parse_latest_release output) and this returns it as-is.
+/// Returns None when versions cannot be compared: better to miss an upgrade than to misreport one.
 pub(crate) fn newer_version(current: &str, latest: &str) -> Option<String> {
     (compare_versions(current, latest) == Ordering::Less).then(|| latest.to_string())
 }
 
-/// 后台轮询：新版本比当前版本新时向窗口推一次事件。窗口关到托盘时前端不运行，
-/// 所以轮询必须在后端。
+/// Background polling: pushes one event to the window when a newer version exists. The frontend does
+/// not run while the window is closed to tray, so polling must happen in the backend.
 pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         if let Ok(current_exe) = std::env::current_exe() {
@@ -275,28 +283,31 @@ pub(crate) fn spawn_update_poller(app: tauri::AppHandle) {
     });
 }
 
-/// 手动/挂载查询的检查结果。对齐参考实现（agent2api update-panel）的 UpdateInfo：
-/// 检测到的最新版本号即使不比当前新也原样返回——否则前端没东西可显示
-/// "当前已是最新版本（x.y.z）"，只能说一句空泛的"未发现新版本"。
+/// Check result for manual/mount queries. Mirrors the reference implementation's (agent2api
+/// update-panel) UpdateInfo: the detected latest version is returned as-is even when it is not newer
+/// than current — otherwise the frontend has nothing to show for "already on the latest version
+/// (x.y.z)" and could only say a vague "no new version found".
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCheck {
-    /// GitHub 仓库的最新 release 版本号；仓库没有 release 时为 None
+    /// Latest release version of the GitHub repo; None when the repo has no releases
     pub latest_version: Option<String>,
     pub current_version: String,
     pub has_update: bool,
 }
 
-/// 供前端主动拉取：轮询事件可能在监听器注册前就被丢弃，挂载时必须能问一次。
-/// 返回 `Ok(_)` 才是"查到了"；检查失败（无网络、被限流、仓库不可访问）以 `Err` 传出
-/// ——调用方必须能区分这两种情况，否则手动检查会在卡片已显示新版本时
-/// 谎报"未发现新版本"（真机实测踩过）。
+/// For the frontend to pull actively: poll events can be dropped before a listener registers, so the
+/// mount must be able to ask once. `Ok(_)` means "checked"; check failures (no network, rate-limited,
+/// repo unreachable) come back as `Err` — callers must be able to tell the two apart, otherwise a
+/// manual check would falsely report "no new version found" while the card is already showing one
+/// (hit on a real machine).
 ///
-/// `async` 是必需的：函数体是同步 HTTP（直连失败再走代理，两个 20s 超时），而 Tauri 的
-/// 同步 command 直接跑在 WebView2 的 IPC 协议线程上，也就是 UI 线程——GitHub 不通时
-/// 窗口会无响应约 40s。宏属性把整个函数体丢进 async_runtime，不再占住 UI 线程。
-/// 函数体保持同步 `fn`：里面用的是 reqwest blocking client，改 `async fn` 反而要重写
-/// 整个网络层（blocking client 在 async 上下文里只是阻塞一个 worker，不会 panic）。
+/// `async` is required: the body is synchronous HTTP (direct first, then proxy, two 20s timeouts), and
+/// Tauri's synchronous commands run directly on WebView2's IPC handler thread — the UI thread — so an
+/// unreachable GitHub would freeze the window for ~40s. The macro attribute moves the whole body onto
+/// async_runtime instead of the UI thread. The body stays a synchronous `fn`: it uses reqwest's
+/// blocking client; converting to `async fn` would mean rewriting the whole network layer (a blocking
+/// client in an async context just parks one worker, it does not panic).
 #[tauri::command(async)]
 pub fn latest_release_version(app: tauri::AppHandle) -> Result<UpdateCheck, String> {
     let release = fetch_latest_release().ok_or_else(|| "检查更新失败，请稍后再试".to_string())?;
@@ -309,7 +320,7 @@ pub fn latest_release_version(app: tauri::AppHandle) -> Result<UpdateCheck, Stri
     })
 }
 
-/// 下载临时目录：每次落盘前清空，避免失败残留占磁盘。
+/// Download temp directory: emptied before every write so failed leftovers do not pile up on disk.
 fn download_dir() -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir().join("memopaws-update");
     if dir.exists() {
@@ -319,13 +330,16 @@ fn download_dir() -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-/// 下载互斥。临时目录是固定路径且落盘前清空，两个下载并发就会互删对方的 setup.exe：
-/// Windows 拒绝删除正在运行的映像，删除失败被吞掉后目录没清，后一个再写同名文件就撞上
-/// 运行中映像报 AccessDenied——用户看到"更新失败"，而第一次其实已经装好了。
-/// 命令层必须自己挡：devtools invoke、快捷键、渲染竞态都能绕过前端的按钮禁用。
+/// Download mutex. The temp dir is a fixed path emptied before each write, so two concurrent
+/// downloads would delete each other's setup.exe: Windows refuses to delete a running image, the
+/// swallowed deletion failure leaves the dir uncleaned, and the next download writing the same name
+/// hits the running image with AccessDenied — the user sees "update failed" although the first one
+/// actually installed. The command layer must guard this itself: devtools invoke, shortcuts and
+/// render races all bypass the frontend's button disabling.
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 
-/// 抢到互斥才允许开线程。Drop 放行，下载失败/线程 panic 都不会把更新永久锁死。
+/// The thread may only start after acquiring the mutex. Drop releases it; download failure or a
+/// thread panic never permanently locks updates.
 struct DownloadGuard;
 
 impl DownloadGuard {
@@ -352,7 +366,7 @@ pub fn download_update(app: tauri::AppHandle, kind: String) -> Result<(), String
     let Some(guard) = DownloadGuard::acquire() else {
         return Err("已有更新正在下载，请稍候".to_string());
     };
-    // 下载 8-30MB 不能占住命令线程，交给独立线程，进度用事件回报。
+    // An 8-30MB download must not occupy the command thread; run it on a dedicated thread and report progress via events.
     std::thread::spawn(move || run_download(app, &kind, guard));
     Ok(())
 }
@@ -374,7 +388,7 @@ fn download_and_apply(app: &tauri::AppHandle, kind: &str) -> Result<(), String> 
         return Err("下载地址不受信任".to_string());
     }
     let bytes = download_with_progress(app, &url, expected_size)?;
-    // rsplit 在 URL 以 / 结尾时给出空串而不是 None，空名字会拼成目录本身（"Is a directory"）。
+    // rsplit yields empty strings (not None) when the URL ends with /; an empty name would join into the directory itself ("Is a directory").
     let file_name = url
         .rsplit('/')
         .find(|part| !part.is_empty())
@@ -387,18 +401,21 @@ fn download_and_apply(app: &tauri::AppHandle, kind: &str) -> Result<(), String> 
     }
 }
 
-/// 进度事件的节流间隔（毫秒）。按时间而非字节节流：快网下 256KB 一跳显得卡顿，
-/// 100ms 一帧就是肉眼流畅的实时进度；慢网下 64KB 读块本来就远小于 256KB，
-/// 按字节节流可能几十秒才跳一格。
+/// Progress event throttle interval (milliseconds). Throttled by time, not bytes: on fast connections
+/// a 256KB jump feels choppy, and 100ms frames look like smooth real-time progress; on slow ones the
+/// 64KB read blocks are far below 256KB anyway, so byte throttling could jump once every tens of
+/// seconds.
 const PROGRESS_INTERVAL_MS: u128 = 100;
 
-/// 该不该上报进度。抽成纯函数是为了能离线测：网络读循环里的判断没法在测试里驱动。
+/// Whether progress should be reported. Extracted as a pure function so it can be tested offline: the
+/// checks inside the network read loop cannot be driven from tests.
 ///
-/// - `total == 0`（既没有 Content-Length 也没有 API 的 size）一律不上报：字节阈值
-///   失效后 `received > last_reported` 恒真会把节流完全短路，而且 payload 的
-///   `total: 0` 会让前端算出 NaN、永远等不到 100%。完成信号由末尾的 `update-ready` 承担。
-/// - 其余情况：距上次上报满 `PROGRESS_INTERVAL_MS` 且有新字节就报一次；
-///   已读满 `total` 时无条件补报，保证末尾一定有一条 100%。
+/// - `total == 0` (no Content-Length and no API size) never reports: with the byte threshold broken,
+///   `received > last_reported` is always true and would bypass throttling entirely, and a payload
+///   `total: 0` makes the frontend compute NaN and never reach 100%. The trailing `update-ready`
+///   event carries the completion signal.
+/// - Otherwise: report when `PROGRESS_INTERVAL_MS` has elapsed since the last report and there are
+///   new bytes; when `total` has been read, report unconditionally so the stream always ends at 100%.
 fn progress_event(total: u64, received: u64, last_reported: u64, elapsed_ms: u128) -> Option<(u64, u64)> {
     if total == 0 {
         return None;
@@ -412,8 +429,8 @@ fn download_with_progress(
     url: &str,
     expected_size: u64,
 ) -> Result<Vec<u8>, String> {
-    // blocking 的 Response 没有 chunk()（那是 async 的 API），它实现的是 std::io::Read。
-    // 下载 client 不设总超时（理由见 client 的注释），只靠 connect_timeout 挡死连接。
+    // blocking Response has no chunk() (that is the async API); it implements std::io::Read.
+    // The download client has no total timeout (see the client() comment); only connect_timeout cuts dead connections.
     let mut response = fetch_response(url, None).ok_or("下载请求失败")?;
     let total = response.content_length().unwrap_or(expected_size);
     let mut bytes: Vec<u8> = Vec::with_capacity(total.min(64 * 1024 * 1024) as usize);
@@ -439,8 +456,9 @@ fn download_with_progress(
             );
         }
     }
-    // with_capacity 只封顶预分配，extend_from_slice 是无条件追加：错配的 CDN 端点能在
-    // 20 秒内灌进几百 MB 直到 OOM。总量已知时直接拒收超量数据（不另设上限体系）。
+    // with_capacity only caps the preallocation; extend_from_slice appends unconditionally: a
+    // mismatched CDN endpoint could push hundreds of MB in 20 seconds until OOM. When the total is
+    // known, oversized data is rejected outright (no separate limit system).
     if total > 0 && bytes.len() as u64 > total {
         return Err(format!("下载字节数超出预期: {} / {} 字节", bytes.len(), total));
     }
@@ -450,23 +468,25 @@ fn download_with_progress(
     Ok(bytes)
 }
 
-/// 安装包：NSIS 静默安装（/S）。安装器必须能覆写 memopaws.exe，所以当前进程
-/// 必须在安装器完成前退出——先启动安装器再退出。
-/// （app.exit(0) 会结束本进程，因此不能像离线包那样"等安装完再自己启动"。）
+/// Installer package: NSIS silent install (/S). The installer must be able to overwrite memopaws.exe,
+/// so the current process must exit before the installer finishes — start the installer, then exit.
+/// (app.exit(0) ends this process, so unlike the offline package we cannot "wait for the install and
+/// then start it ourselves".)
 ///
-/// 以下事实取证自本仓库自己生成的安装器脚本 `target/release/nsis/x64/installer.nsi`，
-/// 改动这里之前请先读它，不要靠推测：
+/// The facts below are taken from this repo's own generated installer script
+/// `target/release/nsis/x64/installer.nsi`; read it before changing anything here, do not guess:
 ///
-/// 1. 脚本里没有任何拉起主程序的 `Exec`（只有卸载器与 WebView2 的 `ExecWait`），
-///    所以 `/S` 静默装完**不会**自动拉起新版程序。
-/// 2. `installer.nsi:635` 插入的 `CheckIfAppIsRunning` 在静默模式下
-///    （`utils.nsh:40` 的 `IfSilent kill_${UniqueID} 0`）会直接 KillProcess 掉
-///    memopaws.exe，不必等弹窗确认。因此本进程**立即 exit(0) 是正确且更快的**：
-///    早退只是把"被杀"提前，装完结果一样。
-/// 3. 自动拉起新版是待办。真要做时注意卸载项的键是 `...\Uninstall\MemoPaws`
-///    （`installer.nsi:60`，`UNINSTKEY` 用的是 `${PRODUCTNAME}`，不是 BUNDLEID），
-///    且 `installer.nsi:675` 写入的 `InstallLocation` 值自带一对引号
-///    （`"$\"$INSTDIR$\""`），必须先剥掉再拼 `memopaws.exe`，然后轮询等新 exe 出现再 spawn。
+/// 1. The script has no `Exec` that launches the main program (only the uninstaller and WebView2 use
+///    `ExecWait`), so a `/S` silent install does **not** auto-start the new version.
+/// 2. `CheckIfAppIsRunning`, inserted at `installer.nsi:635`, in silent mode
+///    (`utils.nsh:40`'s `IfSilent kill_${UniqueID} 0`) KillProcesses memopaws.exe directly without
+///    waiting for a dialog. Therefore exiting this process **immediately via exit(0) is correct and
+///    faster**: exiting early just moves the "being killed" moment up; the install result is the same.
+/// 3. Auto-starting the new version is a TODO. If it is ever done, note the uninstall registry key is
+///    `...\Uninstall\MemoPaws` (`installer.nsi:60`; `UNINSTKEY` uses `${PRODUCTNAME}`, not
+///    BUNDLEID), and the `InstallLocation` value written at `installer.nsi:675` comes wrapped in a
+///    pair of quotes (`"$\"$INSTDIR$\""`), which must be stripped before joining `memopaws.exe`; then
+///    poll for the new exe to appear before spawning it.
 fn run_installer(app: &tauri::AppHandle, setup: &Path) -> Result<(), String> {
     let spawned = std::process::Command::new(setup)
         .arg("/S")
@@ -474,18 +494,18 @@ fn run_installer(app: &tauri::AppHandle, setup: &Path) -> Result<(), String> {
         .map_err(|error| format!("无法启动安装程序: {error}"));
     match spawned {
         Ok(_) => {
-            // 见上方第 2 条：安装器自己会杀本进程，这里立即退出即可。
+            // See fact 2 above: the installer kills this process itself, so exiting here is fine.
             app.exit(0);
             Ok(())
         }
-        // 启动失败时不能退出，否则用户连旧版本都用不了。
+        // Do not exit when spawning fails, otherwise the user loses even the old version.
         Err(error) => Err(error.to_string()),
     }
 }
 
-/// 离线包：替换 exe 后由前端调用既有 restart_app 完成切换。
-/// 错误文本取 io::Error 的完整 Display——回滚失败时它带着"旧程序在 <路径>"，
-/// 只取 ErrorKind 会让用户看到毫不相干的"磁盘空间不足"。
+/// Offline package: after replacing the exe the frontend calls the existing restart_app to finish the
+/// switch. The error text uses io::Error's full Display — when the rollback fails it carries "old
+/// program at <path>"; taking only ErrorKind would show users an unrelated "disk full".
 fn apply_offline(app: &tauri::AppHandle, downloaded: &Path) -> Result<(), String> {
     let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
     replace_executable(&current_exe, downloaded)
@@ -557,18 +577,18 @@ mod tests {
         assert!(!safe_download_url("http://github.com/a"));
         assert!(!safe_download_url("https://github.com.evil.test/a"));
         assert!(!safe_download_url("https://evil.test/github.com/a"));
-        // 尾斜杠挡住 userinfo 绕过与后缀欺骗，删掉尾斜杠这两条会挂。
+        // The trailing slash blocks userinfo bypass and suffix spoofing; removing the slash breaks these two.
         assert!(!safe_download_url("https://github.com@evil.test/a"));
         assert!(!safe_download_url("https://github.com.evil.test"));
-        // 路径段里的 @ 不是 userinfo，主机确实是 github.com
+        // The @ inside a path segment is not userinfo; the host really is github.com
         assert!(safe_download_url("https://github.com/@evil.test/"));
-        // GitHub 永不返回大写 URL，大小写敏感是刻意的 fail-closed
+        // GitHub never returns uppercase URLs; case sensitivity is deliberate fail-closed
         assert!(!safe_download_url("HTTPS://GITHUB.COM/a"));
     }
 
     #[test]
     fn newer_version_reports_only_a_strictly_newer_release() {
-        // 原样返回入参：真实调用方传的是 parse_latest_release 已剥掉 v 前缀的版本号。
+        // Returns the input as-is: the real caller passes versions already stripped of the v prefix by parse_latest_release.
         assert_eq!(newer_version("0.0.9", "0.0.10"), Some("0.0.10".to_string()));
         assert_eq!(newer_version("0.0.9", "v0.0.10"), Some("v0.0.10".to_string()));
         assert_eq!(newer_version("0.0.10", "0.0.10"), None);
@@ -629,14 +649,15 @@ mod tests {
         let error = replace_executable(&current, &dir.join("missing.exe")).unwrap_err();
         assert!(error.kind() == std::io::ErrorKind::NotFound);
         assert_eq!(std::fs::read(&current).unwrap(), b"old", "复制失败必须把旧 exe 放回原位");
-        // 回滚走的是 rename 而非 copy：备份名必须被搬空，不能留下第二份旧程序。
+        // Rollback uses rename, not copy: the backup name must be moved away, never leaving a second old copy.
         assert!(!dir.join("memopaws.exe.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 按 64KB 分块喂一遍 progress_event，返回实际上报的 (received, total) 序列。
-    /// 模拟 download_with_progress 的读循环，但不碰网络；每块之间经过的毫秒数
-    /// 由 elapsed_ms 给出（默认每块都已满节流间隔，模拟慢速流）。
+    /// Feeds progress_event in 64KB chunks and returns the (received, total) sequence actually reported.
+    /// Simulates download_with_progress's read loop without touching the network; the milliseconds
+    /// elapsed between chunks are given by elapsed_ms (defaults to a full throttle interval per chunk,
+    /// simulating a slow stream).
     fn drain_progress_timed(total: u64, chunk: u64, elapsed_ms: u128) -> Vec<(u64, u64)> {
         let mut events = Vec::new();
         let mut received = 0u64;
@@ -657,7 +678,7 @@ mod tests {
 
     #[test]
     fn progress_reports_every_chunk_once_the_interval_has_elapsed() {
-        // 8MB 安装包按 64KB 读：128 块全部到点上报，末次 received == total
+        // 8MB installer read in 64KB chunks: all 128 chunks report on time, last received == total
         let events = drain_progress(8 * 1024 * 1024, 64 * 1024);
         assert_eq!(events.len(), 128, "每 64KB 一报，不得合并");
         assert_eq!(events.last(), Some(&(8 * 1024 * 1024, 8 * 1024 * 1024)));
@@ -665,7 +686,7 @@ mod tests {
 
     #[test]
     fn progress_reports_the_offline_package_stream_in_real_time() {
-        // 29MB 离线包：445 个整块 + 4096 字节余块 = 446 次上报，末尾恰好报满
+        // 29MB offline package: 445 full chunks + a 4096-byte remainder = 446 reports, ending exactly at total
         let total = 29_167_616u64;
         let events = drain_progress(total, 64 * 1024);
         assert_eq!(events.len(), total.div_ceil(64 * 1024) as usize);
@@ -674,21 +695,21 @@ mod tests {
 
     #[test]
     fn progress_stays_quiet_between_intervals_and_reports_the_end_unconditionally() {
-        // 读取快于节流间隔（elapsed < 100ms）时中间不上报，只有末尾 100% 必报
+        // Reads faster than the throttle interval (elapsed < 100ms) skip interim reports; only the trailing 100% is mandatory
         let events = drain_progress_timed(300 * 1024, 64 * 1024, 0);
         assert_eq!(events, vec![(300 * 1024, 300 * 1024)]);
     }
 
     #[test]
     fn progress_reports_a_small_file_exactly_once() {
-        // 100KB 小文件两个 64KB 块，到点即报：两次都发
+        // A 100KB file is two 64KB chunks, both due on time: both are sent
         let events = drain_progress(100 * 1024, 64 * 1024);
         assert_eq!(events, vec![(64 * 1024, 100 * 1024), (100 * 1024, 100 * 1024)]);
     }
 
     #[test]
     fn progress_stays_silent_when_the_total_is_unknown() {
-        // total == 0 时前端会算出 NaN，0/0 对 UI 没有信息量
+        // With total == 0 the frontend would compute NaN; 0/0 carries no information for the UI
         assert_eq!(progress_event(0, 0, 0, PROGRESS_INTERVAL_MS), None);
         assert_eq!(progress_event(0, 64 * 1024, 0, PROGRESS_INTERVAL_MS), None);
         assert_eq!(progress_event(0, u64::MAX, 0, PROGRESS_INTERVAL_MS), None);

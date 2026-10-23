@@ -143,7 +143,7 @@ impl ClipboardManager {
     pub fn add_text(&mut self, text: &str) -> Result<(), String> {
         let text = text.chars().take(MAX_TEXT_LENGTH).collect::<String>();
         if text.trim().is_empty() { return Ok(()); }
-        // 同内容只保存一条；重复复制旧记录时刷新时间并置顶
+        // Only one entry per identical content; re-copying an older record refreshes its time and moves it to the top.
         if let Some(pos) = self.items.iter().position(|i| i.text.as_deref() == Some(&text)) {
             return self.promote(pos, None);
         }
@@ -178,7 +178,7 @@ impl ClipboardManager {
         })
     }
 
-    /// 按内容哈希查找已存的同图记录；旧记录缺哈希时读文件惰性补算
+    /// Finds the stored record with the same image by content hash; when an old record lacks a hash, the file is read to compute it lazily.
     fn find_image(&self, hash: u64) -> Result<Option<usize>, String> {
         for (pos, item) in self.items.iter().enumerate() {
             if item.content_type != "image" { continue; }
@@ -198,7 +198,7 @@ impl ClipboardManager {
         Ok(None)
     }
 
-    /// 刷新时间并移到列表顶部；顺带回填旧记录缺失的哈希
+    /// Refreshes the time, moves the record to the top of the list, and backfills the hash missing from old records.
     fn promote(&mut self, pos: usize, backfill_hash: Option<u64>) -> Result<(), String> {
         let mut item = self.items.remove(pos);
         item.time = now_str();
@@ -281,11 +281,11 @@ impl ClipboardManager {
 }
 
 fn now_str() -> String {
-    // 毫秒粒度：同一秒内的多次复制也能区分先后；前端渲染按数量级自动识别秒/毫秒
+    // Millisecond granularity: several copies within the same second stay distinguishable; the frontend renders by magnitude and auto-detects seconds vs milliseconds.
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis().to_string()).unwrap_or_default()
 }
 
-/// 图片内容哈希，用于识别重复复制的同图
+/// Image content hash, used to detect duplicated copies of the same image.
 fn bytes_hash(bytes: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -497,7 +497,7 @@ mod tests {
         m.add_text("old").unwrap();
         m.add_text("new").unwrap();
         assert_eq!(m.items[0].text.as_deref(), Some("new"));
-        m.items[0].time = "1".into(); // 人为把顶部记录时间拨旧，确保断言不靠运气
+        m.items[0].time = "1".into(); // Deliberately age the top record so the assertion does not rely on luck.
         std::thread::sleep(std::time::Duration::from_millis(1100));
         m.add_text("old").unwrap();
         assert_eq!(m.items.len(), 2, "重复复制旧文本不应新增记录");
@@ -525,7 +525,7 @@ mod tests {
         let dir = unique_dir();
         let mut m = manager(&dir.join("clipboard.json"));
         m.add_image(b"legacy-image").unwrap();
-        // 模拟旧版记录：清掉哈希字段
+        // Simulate a legacy record: strip the hash field.
         m.items[0].hash = None;
         m.save().unwrap();
         let mut m = ClipboardManager::load_from(

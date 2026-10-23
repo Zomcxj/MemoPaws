@@ -1,7 +1,7 @@
-// 截图标注渲染核心：drawMarks 在任意 2D 上下文上按原图像素坐标绘制标注，
-// composePng 用同一渲染器把"原图 + 标注 → 选区裁剪 → 圆角透明"合成一张 PNG。
-// 预览与导出共用这条管线，保证"所见即所得导出"。
-// 马赛克按已绘制像素做块平均（不是 DOM 叠加），因此先画的标注会被一并打码。
+// Annotation rendering core: drawMarks draws marks in original pixel coordinates on any 2D context;
+// composePng uses the same renderer to compose "image + marks → selection crop → rounded transparency"
+// into one PNG. Preview and export share this pipeline, guaranteeing what you see is what you export.
+// Mosaic block-averages already-drawn pixels (not a DOM overlay), so earlier marks get pixelated too.
 import type { Mark } from "./model";
 
 export function drawMarks(ctx: CanvasRenderingContext2D, marks: Mark[]) {
@@ -29,7 +29,7 @@ export function drawMarks(ctx: CanvasRenderingContext2D, marks: Mark[]) {
         for (let x = left; x < right; x += block) {
           const w = Math.min(block, right - x);
           const h = Math.min(block, bottom - y);
-          // 标注坐标 → 画布设备像素：预览画布带缩放变换时取样的也是真实像素。
+          // Mark coordinates → canvas device pixels: when the preview canvas has a scale transform, sampling still hits real pixels.
           const sx = Math.round(x * transform.a + transform.e);
           const sy = Math.round(y * transform.d + transform.f);
           const sw = Math.max(1, Math.round(w * transform.a));
@@ -83,7 +83,8 @@ export async function composePng(
   const w = Math.min(Math.round(region.width * scale), image.naturalWidth - x);
   const h = Math.min(Math.round(region.height * scale), image.naturalHeight - y);
   if (w <= 0 || h <= 0) throw new Error("截图选区超出图片边界");
-  // 标注画在整张原图上再裁剪：部分越出选区的标注（含马赛克块）与导出一致。
+  // Marks are drawn on the full original image and then cropped: marks (and mosaic blocks) partially
+  // outside the selection stay consistent with the export.
   const full = document.createElement("canvas");
   full.width = image.naturalWidth;
   full.height = image.naturalHeight;

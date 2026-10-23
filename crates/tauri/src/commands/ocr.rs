@@ -405,7 +405,8 @@ pub async fn ai_ocr(
         .ocr(&image)
         .await
         .map_err(|error| safe_ai_command_error(&error.to_string()))?;
-    // 历史是次要记录：写入失败不应把已成功的识别结果误报为失败
+    // History is a secondary record: a write failure must never misreport an already-successful
+    // recognition as a failure.
     let _ = history_mut(history, |manager| {
         manager.add_success("ocr", &result.text, Some(&result.text), None)
     });
@@ -429,15 +430,17 @@ pub async fn ai_translate(
         .translate(&text, target, source)
         .await
         .map_err(|error| safe_ai_command_error(&error.to_string()))?;
-    // 历史是次要记录：写入失败不应把已成功的翻译结果误报为失败
+    // History is a secondary record: a write failure must never misreport an already-successful
+    // translation as a failure.
     let _ = history_mut(history, |manager| {
         manager.add_success("translate", &result.text, Some(&text), Some(&result.text))
     });
     Ok(result)
 }
 
-/// 离线 OCR 的历史落库规则：非空文本记为 local_ocr（带原文），空文本不入库。
-/// 命令与测试共用，保证"识别成功但历史失败"时结果不受影响由调用方 `let _=` 保证。
+/// Offline OCR history rules: nonempty text is recorded as local_ocr (with the source text), empty
+/// text is not recorded. Shared by the command and tests; the caller's `let _ =` guarantees that a
+/// history failure never affects an already-successful recognition result.
 fn record_offline_result(manager: &mut HistoryManager, text: &str) {
     if !text.trim().is_empty() {
         let _ = manager.add_success("local_ocr", text, Some(text), None);
@@ -457,11 +460,13 @@ pub async fn local_ocr(
     language: String,
     history: tauri::State<'_, HistoryState>,
 ) -> Result<OcrResult, String> {
-    // 识别跑在阻塞线程池上：WinRT 初始化与识别都不该卡命令执行器。
+    // Recognition runs on the blocking thread pool: WinRT initialization and recognition must never
+    // stall the command executor.
     let text = tauri::async_runtime::spawn_blocking(move || crate::local_ocr::recognize(&image, &language))
         .await
         .map_err(|e| format!("Offline OCR task failed: {e}"))??;
-    // 历史是次要记录：写入失败不应把已成功的识别结果误报为失败
+    // History is a secondary record: a write failure must never misreport an already-successful
+    // recognition as a failure.
     let _ = history_mut(history, |manager| {
         record_offline_result(manager, &text);
         Ok(())
@@ -528,15 +533,16 @@ mod tests {
 
     #[test]
     fn offline_history_save_failure_keeps_recognized_text_intact() {
-        // 先按有效路径加载（读跳过），再在目标路径上放一个同名目录：
-        // 临时文件写得进去但 persist 必然失败；内存中的识别文本不受影响，
-        // 命令层用 `let _ =` 吞掉该错误后仍返回 Ok(OcrResult)。
+        // Load via a valid path first (the read is skipped), then place a same-named directory at the
+        // target path: the temp file writes fine but persist must fail; the recognized text in memory
+        // is unaffected, and the command layer swallows the error with `let _ =` and still returns
+        // Ok(OcrResult).
         let dir = temp_dir().join("local-ocr-blocked");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("history.json");
         let mut manager = HistoryManager::with_path(&path, 100).expect("loads empty");
         std::fs::create_dir_all(&path).unwrap();
-        // add_success 内部的 save 会因 persist 到目录而失败，被 `let _` 吞掉。
+        // add_success's internal save fails because persist targets a directory; the error is swallowed by `let _`.
         record_offline_result(&mut manager, "识别文本");
         assert!(manager.save().is_err(), "persisting onto a directory must fail");
         assert_eq!(manager.records()[0].text, "识别文本");

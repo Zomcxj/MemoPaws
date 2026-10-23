@@ -117,8 +117,8 @@ async function closePin(pinPage) {
   throw new Error(`pin window ${pinPage.url()} did not close after 关闭钉图`);
 }
 
-// 读取浮层 contain 几何：把客户端拖拽坐标换算成原图像素坐标，
-// 用于在真机截图（内容不可知）上定位画下的标注。
+// Reads the overlay's contain geometry: converts client drag coordinates to original-pixel coordinates
+// to locate drawn marks on a real screenshot (whose content is unknowable).
 async function overlayGeometry(mainPage) {
   return mainPage.evaluate(() => {
     const img = document.querySelector('.capture-overlay img');
@@ -136,7 +136,7 @@ const toImagePoint = (geometry, client) => ({
   y: (client.y - geometry.offsetY) * geometry.scale,
 });
 
-// 解码钉图窗口实际展示的 PNG 字节并采样若干坐标的像素。
+// Decodes the PNG bytes actually displayed in the pin window and samples pixels at given coordinates.
 async function decodePinnedImage(pinPage, probePoints) {
   return pinPage.evaluate(async ({ points }) => {
     const img = document.querySelector('img[alt="pinned"]');
@@ -175,8 +175,8 @@ async function windowSnapshot(mainPage) {
   };
 }
 
-// 轮询主窗可见性，记录每次翻转时的完整窗口状态（最大化/全屏/几何），
-// 用于指认隐藏窗口被重新显示的原生路径（tao 的旗标差异重显）。
+// Polls main-window visibility and records the full window state (maximized/fullscreen/geometry) at
+// every flip, used to identify the native path that re-showed a hidden window (tao's flag-diff re-show).
 async function waitForMainVisibility(mainPage, expected, timeoutMs = 15000) {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
@@ -223,8 +223,9 @@ async function runTests() {
     await mainPage.waitForSelector('.recognize-page', { timeout: 60000 });
     const knownPages = new Set([mainPage]);
 
-    // 原生端没有 mock 调用日志：生产 invoke 走 fetch(ipc://)/postMessage，
-    // 在这两层记录命令与调用栈（属性包装 __TAURI_INTERNALS__.invoke 会被静默跳过）。
+    // The native side has no mock call log: production invoke goes through fetch(ipc://)/postMessage,
+    // so log commands and stacks at those two layers (a property wrapper around
+    // __TAURI_INTERNALS__.invoke is silently bypassed).
     await mainPage.evaluate(() => {
       const log = [];
       window.__INVOKE_LOG__ = log;
@@ -237,7 +238,7 @@ async function runTests() {
             if (url.indexOf("ipc") !== -1) {
               log.push({ via: "fetch", url: String(url).slice(0, 120), stack: shortStack() });
             }
-          } catch { /* 诊断钩子不得影响正常调用 */ }
+          } catch { /* the diagnostic hook must never break normal calls */ }
           return originalFetch(input, init);
         };
       }
@@ -248,7 +249,7 @@ async function runTests() {
           webview.postMessage = function (message) {
             try {
               log.push({ via: "postMessage", body: String(typeof message === "string" ? message : JSON.stringify(message)).slice(0, 160), stack: shortStack() });
-            } catch { /* 同上 */ }
+            } catch { /* same as above */ }
             return originalPost(message);
           };
         }
@@ -257,7 +258,7 @@ async function runTests() {
     const sessionLog = () => mainPage.evaluate(() => window.__INVOKE_LOG__
       .map((entry) => {
         let text = entry.url || entry.body || "";
-        try { text = decodeURIComponent(text); } catch { /* 保留原文 */ }
+        try { text = decodeURIComponent(text); } catch { /* keep the raw text */ }
         return { text: text.slice(0, 110), stack: entry.stack };
       })
       .filter((entry) => /capture_session|pin_image|plugin:window.*(show|hide)/i.test(entry.text)));
@@ -382,7 +383,7 @@ async function runTests() {
       await markedPin.waitForSelector('img[alt="pinned"]', { timeout: 15000 });
       await mainPage.locator('.capture-overlay').waitFor({ state: 'detached', timeout: 20000 });
       const size = await decodePinnedImage(markedPin, []);
-      // 描边：沿矩形四条边（选区相对坐标 = 原图坐标 − 选区原点）各取 30 点。
+      // Stroke: 30 samples along each of the four rect edges (selection-relative = image − selection origin).
       const strokePoints = [];
       for (let index = 0; index < 30; index++) {
         const t = index / 29;
@@ -400,7 +401,7 @@ async function runTests() {
       if (redRatio < 0.6) {
         problems.push(`pinned PNG must carry the drawn rectangle stroke, red ratio ${redRatio.toFixed(2)}`);
       }
-      // 马赛克：第一个块内两个采样点必须逐位相同（块平均）。
+      // Mosaic: two samples inside the first block must be bit-identical (block averaging).
       const block = Math.max(4, Math.round(3 * 4));
       const bx = Math.floor(Math.min(im1.x, im2.x) - origin.x);
       const by = Math.floor(Math.min(im1.y, im2.y) - origin.y);
@@ -408,7 +409,7 @@ async function runTests() {
       if (JSON.stringify(mosaic.pixels[0]) !== JSON.stringify(mosaic.pixels[1])) {
         problems.push(`mosaic block must be averaged in the pinned PNG, saw ${JSON.stringify(mosaic.pixels)}`);
       }
-      // 圆角：四角必须透明。
+      // Corners: all four must be transparent.
       const corners = await decodePinnedImage(markedPin, [[0, 0], [size.width - 1, 0], [0, size.height - 1], [size.width - 1, size.height - 1]]);
       if (corners.pixels.some((pixel) => pixel[3] !== 0)) {
         problems.push(`pinned PNG corners must stay transparent, saw ${JSON.stringify(corners.pixels)}`);
@@ -455,7 +456,8 @@ async function runTests() {
     // Scenario D: offline OCR on the real Windows engine — generate a
     // high-contrast text PNG in the browser, import it, run local_ocr with an
     // actually installed language and require nonempty text with spaces.
-    // 无已安装语言能力时报告环境不支持，绝不安装语言包或假装通过。
+    // Without an installed OCR language, report the environment as unsupported — never install
+    // language packs or pretend to pass.
     const installedLanguages = await invokeOn(mainPage, 'local_ocr_languages');
     const languageTag = installedLanguages.preferred || (installedLanguages.languages && installedLanguages.languages[0]?.tag) || "";
     if (!languageTag) {
@@ -484,7 +486,7 @@ async function runTests() {
       }));
       await mainPage.locator('.recognize-toolbar input[type="file"]').setInputFiles({ name: 'offline-ocr-text.png', mimeType: 'image/png', buffer: Buffer.from(textPng) });
       await mainPage.locator('.image-canvas img').waitFor({ timeout: 15000 });
-      // 语言查询完成前按钮被禁用：等待其可用再点。
+      // The button stays disabled until the language query completes: wait for it to become clickable.
       await mainPage.waitForFunction(() => {
         const offline = Array.from(document.querySelectorAll('.ocr-controls button'))
           .find((button) => button.textContent === '离线 OCR' || button.textContent === 'Offline OCR');
@@ -499,22 +501,22 @@ async function runTests() {
       if (!/[a-z]{3,}/i.test(offlineText) || !offlineText.includes(' ')) {
         problems.push(`offline OCR must return nonempty text with retained spaces, saw ${JSON.stringify(offlineText)}`);
       }
-      // IPC 观察：离线路径不得触碰 AI/密钥命令，且必须有 local_ocr 调用。
+      // IPC observation: the offline path must never touch AI/key commands and must record local_ocr.
       const ipcCommands = await mainPage.evaluate(() => (window.__INVOKE_LOG__ || [])
         .map((entry) => {
           let text = entry.url || entry.body || "";
-          try { text = decodeURIComponent(text); } catch { /* 保留原文 */ }
+          try { text = decodeURIComponent(text); } catch { /* keep the raw text */ }
           return text;
         }));
       const aiHits = ipcCommands.filter((text) => /ai_ocr|ai_translate|get_value/.test(text));
       if (aiHits.length) problems.push(`offline OCR must never touch AI/vault IPC, saw ${JSON.stringify(aiHits)}`);
       if (!ipcCommands.some((text) => text.includes('local_ocr'))) problems.push('offline OCR click must record a local_ocr IPC call');
-      // 成功文本按 local_ocr 入既有历史（序列化键是 type，不是 typ）。
+      // Successful text enters the existing history as local_ocr (serialized key is type, not typ).
       const history = await invokeOn(mainPage, 'history_list');
       if (!history.some((record) => record.type === 'local_ocr' && record.text === offlineText)) {
         problems.push(`successful offline text must enter history as local_ocr, saw ${JSON.stringify(history.slice(0, 2))}`);
       }
-      // 未安装语言：明确报错，不回退、不安装。
+      // Missing language: explicit error, no fallback, no install.
       const missingLanguageError = await mainPage.evaluate(async () => {
         try {
           await window.__TAURI_INTERNALS__.invoke('local_ocr', { image: [137, 80, 78, 71], language: 'zz-ZZ' });
@@ -526,7 +528,7 @@ async function runTests() {
       if (!missingLanguageError || !/not installed/i.test(missingLanguageError)) {
         problems.push(`missing language must fail explicitly without fallback, saw ${JSON.stringify(missingLanguageError)}`);
       }
-      // 畸形图片：解码失败只报错，不崩溃。
+      // Malformed image: decode failure shows an error without crashing.
       await mainPage.locator('.recognize-toolbar input[type="file"]').setInputFiles({ name: 'corrupt.png', mimeType: 'image/png', buffer: Buffer.from('this is definitely not an image') });
       await mainPage.waitForTimeout(400);
       await mainPage.locator('.ocr-controls').nth(0).getByRole('button', { name: /离线 OCR|Offline OCR/ }).click();
@@ -534,7 +536,7 @@ async function runTests() {
         const element = document.querySelector('.recognize-error');
         return Boolean(element && element.textContent.trim().length > 0);
       }, null, { timeout: 20000 });
-      // 隔离主目录（不含 WebView 配置目录）不得出现任何 OCR 图片文件。
+      // The isolated data home (excluding the WebView profile dir) must contain no OCR image files.
       const imageFiles = [];
       const walk = (directory) => {
         for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {

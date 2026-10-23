@@ -1,5 +1,6 @@
-// Playwright E2E: 更新通知全链路——角标 → 卡片（事件/挂载两条路径）→ 下载（离线/安装/失败）→ 重启。
-// Usage: 保持 `npm --prefix frontend run dev` 运行，然后
+// Playwright E2E: the update-notification full chain — badge → card (event/mount paths) → download
+// (offline/install/failure) → restart.
+// Usage: keep `npm --prefix frontend run dev` running, then
 //   node frontend/e2e/test-update-check.cjs
 
 const assert = require('node:assert/strict');
@@ -10,7 +11,7 @@ const path = require('node:path');
 const BASE_URL = 'http://localhost:1420';
 const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, 'mock-tauri.js'), 'utf-8');
 
-// initScript 在 mock 加载后、页面脚本前执行，用于预置 latest_release_version / 下载模式
+// initScript runs after the mock loads and before page scripts, used to preset latest_release_version / download modes
 async function newPage(browser, initScript) {
   const context = await browser.newContext({ viewport: { width: 1460, height: 960 } });
   const page = await context.newPage();
@@ -40,11 +41,12 @@ async function checkBadge(browser) {
   }
 }
 
-// 卡片路径说明：SettingsPage 刻意不监听 update-available（版本只存本页 state），
-// 卡片由挂载时的 latest_release_version 查询驱动——所以下面的卡片用例都通过
-// __MOCK_TAURI_SET_LATEST_VERSION__ 预置版本，而不是 emit 事件。角标同样由
-// App 挂载时的 latest_release_version 查询点亮（update-available 事件可能在
-// 监听器注册前被后端丢弃），所以预置非 null 返回值时卡片与角标应同时出现。
+// Card path note: SettingsPage deliberately does not listen to update-available (the version only
+// lives in this page's state); the card is driven by the mount-time latest_release_version query —
+// so the card cases below preset the version via __MOCK_TAURI_SET_LATEST_VERSION__ instead of
+// emitting events. The badge is lit by the same mount-time query in App (the update-available event
+// can be dropped before a listener registers), so presetting a non-null return value should make
+// card and badge appear together.
 
 async function checkOfflineFlow(browser) {
   const { context, page } = await newPage(browser, () => {
@@ -78,8 +80,9 @@ async function checkOfflineFlow(browser) {
   }
 }
 
-// 安装包路径：后端下载完交给 NSIS 安装器并 exit(0)，没有终态事件——
-// 即使等过离线包 ready 本会到达的时刻，UI 也必须停留在下载态而不是就绪态
+// Installer path: after downloading, the backend hands off to the NSIS installer and exits(0) — there
+// is no terminal event, so even past the moment when the offline package would have reached ready,
+// the UI must stay in the downloading state rather than the ready state.
 async function checkInstallerFlow(browser) {
   const { context, page } = await newPage(browser, () => {
     window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
@@ -101,12 +104,12 @@ async function checkInstallerFlow(browser) {
   }
 }
 
-// 挂载查询路径：update-available 事件可能在监听器注册前被后端丢弃（冷启动 15 秒轮询），
-// 设置页与 App 挂载时都主动调 latest_release_version 兜底（后者驱动角标），
-// mock 里通过 initScript 预置返回值
+// Mount-query path: the update-available event can be dropped before a listener registers (the
+// cold-start poll runs after 15 seconds), so both SettingsPage and App query latest_release_version
+// on mount as a fallback (the latter drives the badge); the mock presets the return value via initScript.
 async function checkCardFromMountQuery(browser) {
   const { context, page } = await newPage(browser, () => {
-    // 预置检测到的最新版本 9.9.9（> 当前 0.0.4 → hasUpdate true）
+    // Preset the detected latest version 9.9.9 (> current 0.0.4 → hasUpdate true)
     window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
   });
   try {
@@ -116,7 +119,7 @@ async function checkCardFromMountQuery(browser) {
     const text = await card.textContent();
     assert.ok(text.includes('9.9.9'), '卡片应显示挂载查询到的新版本号, got ' + text);
     assert.ok(text.includes('0.0.4'), '卡片应显示当前版本号, got ' + text);
-    // I1 回归：App 挂载查询必须点亮角标——否则事件丢失时角标整场缺失
+    // I1 regression: App's mount query must light the badge — otherwise the badge is missing entirely whenever the event is lost.
     assert.equal(await page.locator('.sidebar-update-dot').count(), 1, '挂载查询应点亮角标');
     console.log('  mount query flow: ok');
   } finally {
@@ -124,8 +127,8 @@ async function checkCardFromMountQuery(browser) {
   }
 }
 
-// 失败路径：mock 切到 error 模式后 download_update 派发 update-download-error，
-// UI 应显示错误并恢复两个下载按钮（downloadKind 只清掉失败的那个）
+// Failure path: after the mock switches to error mode, download_update dispatches update-download-error;
+// the UI should show the error and restore both download buttons (downloadKind only clears the failed one).
 async function checkDownloadError(browser) {
   const { context, page } = await newPage(browser, () => {
     window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
@@ -148,9 +151,9 @@ async function checkDownloadError(browser) {
   }
 }
 
-// I1 回归：unlisten 必须把 handler 从 mock 注册表移除——否则页面导航往返后
-// 一次 emit 会触发所有历史 handler（真实 Tauri 在 unlisten 后不再投递）。
-// 直接复刻 @tauri-apps/api listen/unlisten 的底层 IPC 形状：
+// I1 regression: unlisten must remove the handler from the mock registry — otherwise after page
+// navigation a single emit would fire all historical handlers (real Tauri stops delivering after
+// unlisten). Directly replicates the low-level IPC shape of @tauri-apps/api listen/unlisten:
 //   listen   → invoke("plugin:event|listen", { event, target, handler })
 //   unlisten → invoke("plugin:event|unlisten", { event, eventId })
 async function checkUnlistenRemovesHandler(browser) {
@@ -186,11 +189,12 @@ async function checkUnlistenRemovesHandler(browser) {
   }
 }
 
-// I3 回归：reject 模式下 download_update 的 invoke 立即失败且不发任何事件，
-// UI 必须靠 SettingsPage.startDownload 的 catch 分支恢复：错误文案 + 两个按钮可再点。
-// （3d58123 的 setDownloadKind 守卫在浏览器层测不了并发场景：downloadKind 非 null 时
-// 两个下载按钮已卸载，无法在第一个下载进行中触发第二次 startDownload；mock 的
-// downloadMode 又是全局的，无法只对第二次 invoke 设为 reject。守卫逻辑留给 Rust 层。）
+// I3 regression: in reject mode download_update's invoke fails immediately and emits nothing; the UI
+// must recover through SettingsPage.startDownload's catch branch: error text + both buttons clickable
+// again. (3d58123's setDownloadKind guard cannot be tested at the browser layer for concurrency: when
+// downloadKind is non-null both download buttons are unmounted, so a second startDownload cannot be
+// triggered while the first download is in flight; the mock's downloadMode is also global and cannot
+// be set to reject for only the second invoke. The guard logic is left to the Rust layer.)
 async function checkDownloadInvokeReject(browser) {
   const { context, page } = await newPage(browser, () => {
     window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9");
@@ -213,9 +217,9 @@ async function checkDownloadInvokeReject(browser) {
   }
 }
 
-// 手动"检查更新"按钮：覆盖三种结局——检查失败（Err → "检查失败"）、确认无更新
-//（Ok(null) → "未发现新版本"）、发现新版本（卡片 + 角标点亮）。mock 值可在页面
-// 加载后动态改，四段点击覆盖全部状态迁移。
+// The manual "check for updates" button: covers three outcomes — check failed (Err → "检查失败"),
+// confirmed no update (Ok(null) → "未发现新版本"), new version found (card + badge lit). The mock
+// value can be changed dynamically after page load; the four clicks cover every state transition.
 async function checkManualCheck(browser) {
   const { context, page } = await newPage(browser);
   try {
@@ -227,7 +231,7 @@ async function checkManualCheck(browser) {
     assert.equal(await versionHint.count(), 1, '软件更新组应显示当前版本号');
     assert.ok((await versionHint.textContent()).includes('0.0.4'), '当前版本应为 0.0.4, got ' + await versionHint.textContent());
 
-    // 1) 检查失败（后端 Err）：必须说"检查失败"，不能谎报"未发现新版本"
+    // 1) Check failed (backend Err): must say "检查失败", never lie with "未发现新版本"
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("__error__"));
     await checkButton.click();
     await page.waitForTimeout(200);
@@ -235,7 +239,7 @@ async function checkManualCheck(browser) {
     assert.equal(await failedHint.count(), 1, '检查失败应显示"检查失败"提示');
     assert.equal(await page.locator('.settings-update-card').count(), 0, '检查失败不应出卡片');
 
-    // 2) 检测到与当前相同的版本：直接显示检测到的版本号（对齐 agent2api 文案）
+    // 2) Detected version equal to current: show the detected version directly (matches the agent2api wording)
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("0.0.4"));
     await checkButton.click();
     await page.waitForTimeout(200);
@@ -244,7 +248,7 @@ async function checkManualCheck(browser) {
     assert.ok((await hint.textContent()).includes('0.0.4'), '提示应包含检测到的版本号');
     assert.equal(await failedHint.count(), 0, '失败提示应被新结果替换');
 
-    // 3) 仓库无 release：回退到"未发现新版本"
+    // 3) Repo has no release: fall back to "未发现新版本"
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__(null));
     await checkButton.click();
     await page.waitForTimeout(200);
@@ -252,7 +256,7 @@ async function checkManualCheck(browser) {
     const noReleaseHint = page.locator('.settings-actions .settings-hint').filter({ hasText: '未发现新版本' });
     assert.equal(await noReleaseHint.count(), 1, '仓库无 release 时应显示"未发现新版本"');
 
-    // 4) 发现新版本：卡片出现 + 角标点亮（手动链路与自动链路可见性一致），提示消失
+    // 4) New version found: card appears + badge lit (manual and automatic chains share the same visibility), hint gone
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("9.9.9"));
     await checkButton.click();
     await page.waitForTimeout(200);
@@ -263,7 +267,7 @@ async function checkManualCheck(browser) {
     assert.equal(await hint.count(), 0, '发现新版本后"已是最新版本"提示应消失');
     assert.equal(await noReleaseHint.count(), 0, '发现新版本后"未发现新版本"提示应消失');
 
-    // 5) 卡片已显示时检查失败：显示"检查失败"但不清卡片——安静曾真机被读成"没反应"
+    // 5) Check failed while the card is showing: show "检查失败" without clearing the card — silence was once read as "nothing happened" on a real machine
     await page.evaluate(() => window.__MOCK_TAURI_SET_LATEST_VERSION__("__error__"));
     await checkButton.click();
     await page.waitForTimeout(200);

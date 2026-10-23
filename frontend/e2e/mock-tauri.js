@@ -12,29 +12,30 @@
   let apiTestMode = "success-vision";
   let fullscreen = false;
   let visible = true;
-  // 受控失败模式：钉图拒绝（失败保持断言）/ AI OCR 延迟回填（令牌失效断言）
+  // Controlled failure modes: pin rejection (retention assertions) / delayed AI OCR results (token invalidation)
   let pinRejectMode = false;
   let aiOcrDelay = 0;
-  // 离线 OCR 受控模式：success（默认）/ error（识别失败）/ empty（空文本）
-  // / nolangs（无已安装语言能力）/ langerror（语言查询失败）。
-  // 经 sessionStorage 持久化，跨 reload 保持（无语言场景需要重载后仍生效）。
+  // Offline OCR controlled modes: success (default) / error (recognition failed) / empty (empty text)
+  // / nolangs (no installed language capability) / langerror (language query failed).
+  // Persisted via sessionStorage so modes survive a reload (the no-languages scenario reloads the page).
   const LOCAL_OCR_MODE_KEY = "memopaws-mock-local-ocr";
   const clampLocalOcrMode = (mode) => (["error", "empty"].includes(mode) ? mode : "success");
   const clampLanguagesMode = (mode) => (["error", "nolangs"].includes(mode) ? mode : "success");
   let localOcrMode = clampLocalOcrMode(sessionStorage.getItem(LOCAL_OCR_MODE_KEY + ":ocr") || "success");
   let localOcrLanguagesMode = clampLanguagesMode(sessionStorage.getItem(LOCAL_OCR_MODE_KEY + ":langs") || "success");
-  // 事件桩：eventHandlers 记录每个事件名注册的 handler id（plugin:event|listen 的返回值），
-  // eventCallbacks 记录 transformCallback 分配的 id → 回调，emit 时按 id 取回调用
+  // Event stubs: eventHandlers records the handler id registered per event name (the return value of
+  // plugin:event|listen), eventCallbacks maps transformCallback-assigned ids to callbacks; emit looks
+  // callbacks up by id.
   const eventHandlers = {};
   const eventCallbacks = {};
-  // latest_release_version 的可注入返回值：null 表示无更新（挂载查询路径静默）
+  // Injectable return value for latest_release_version: null means no update (silent on the mount-query path)
   let latestReleaseVersion = null;
-  // download_update 的结局模式：success（离线包→ready）/ error（→update-download-error）
-  // / reject（invoke 立即 reject 且不发任何事件，镜像后端下载互斥时的立即失败）
+  // Outcome mode for download_update: success (offline package → ready) / error (→ update-download-error)
+  // / reject (invoke rejects immediately and emits nothing, mirroring the backend's instant failure when the download mutex is taken)
   let downloadMode = "success";
 
-  // 钉图会话状态机：与 Rust `pinned_images::Pins` 同一套规则（首张前可见性、
-  // 会话互斥、取消/确认/钉图三种 finish 结果、最后一张销毁才恢复）。
+  // Pin-session state machine: the same rules as Rust `pinned_images::Pins` (visibility before the
+  // first pin, session mutex, the three finish outcomes cancel/confirm/pin, restore only when the last pin dies).
   const pinSession = { next: 0, images: new Map(), captureVisible: null, restoreVisible: null };
   function sessionBegin(visible) {
     if (pinSession.captureVisible !== null) throw new Error("capture is already active");
@@ -120,7 +121,7 @@
     get_value: "test-api-key-12345"
   };
 
-   // 一次性生成的不透明 PNG（128×96），供 image_crop 等返回真实可解码字节。
+   // One-shot opaque PNG (128×96) so image_crop and friends can return real decodable bytes.
    let opaquePngCache = null;
    function opaquePngBytes() {
      if (!opaquePngCache) {
@@ -138,9 +139,10 @@
      return opaquePngCache;
    }
 
-   // capture_screen 的目标契约是 tauri::ipc::Response：invoke 直接拿到整屏 PNG
-   // 的 ArrayBuffer，前端自己 objectURL 并解码一次。1280×720 全不透明，像素按
-   // rgb(x%256, y%256, 64) 把坐标编进颜色，测试据此验证裁到的是选区而非整屏。
+   // capture_screen's target contract is tauri::ipc::Response: invoke directly receives the full-screen
+   // PNG as an ArrayBuffer and the frontend creates its own objectURL and decodes once. 1280×720 fully
+   // opaque, pixels encode coordinates as rgb(x%256, y%256, 64) so tests verify the crop is the
+   // selection, not the whole screen.
    let capturePngCache = null;
    function capturePngBuffer() {
      if (!capturePngCache) {
@@ -185,7 +187,7 @@
         } else if (command === "set_language") {
           const nextLanguage = args && args.language === "en" ? "en" : "zh";
           MOCK_DATA.get_config.language = nextLanguage;
-          // 真实后端把语言写进配置持久化：mock 用 sessionStorage 镜像，跨 reload 保持。
+          // The real backend persists the language into config: the mock mirrors it via sessionStorage across reloads.
           sessionStorage.setItem("memopaws-mock-language", nextLanguage);
           resolve();
         } else if (command === "get_config") {
@@ -222,26 +224,26 @@
         } else if (command === "unlock") {
           resolve(true);
         } else if (command === "capture_screen") {
-          // 原始二进制：invoke 的返回值就是 ArrayBuffer，没有 { image, preview } 外壳
+          // Raw binary: invoke's return value IS the ArrayBuffer, no { image, preview } wrapper.
           resolve(capturePngBuffer());
         } else if (command === "pin_image") {
-          // 镜像新后端：返回唯一 pin-N 标签并登记进会话状态。
-          // pinRejectMode：invoke 直接失败，用于断言浮层错误与标注保留。
+          // Mirrors the new backend: returns a unique pin-N label and registers it in the session state.
+          // pinRejectMode: invoke fails immediately, for overlay-error and mark-retention assertions.
           if (pinRejectMode) { reject(new Error("Mock pin rejected")); return; }
           try { resolve(sessionInsert()); } catch (error) { reject(error); }
         } else if (command === "pin_close") {
-          // 真实后端由销毁钩子恢复主窗；浏览器里关闭走 __MOCK_TAURI_CLOSE_PIN__。
+          // The real backend restores the main window via the destroy hook; in the browser, closing goes through __MOCK_TAURI_CLOSE_PIN__.
           resolve(null);
         } else if (command === "capture_session_begin") {
           try { sessionBegin(args && args.visible); resolve(null); } catch (error) { reject(error); }
         } else if (command === "capture_session_finish") {
           try { resolve(sessionFinish((args && args.outcome) || "cancel")); } catch (error) { reject(error); }
         } else if (command === "image_crop") {
-          // 前端应当在本地 canvas 裁剪；这条分支只用来让误调 IPC 的实现被
-          // image_crop 计数断言抓住，而不是在解码处抛错。
+          // The frontend must crop on a local canvas; this branch only exists so implementations that
+          // wrongly call IPC get caught by the image_crop count assertion instead of failing at decode.
           resolve({ image: opaquePngBytes() });
         } else if (command === "ai_ocr") {
-          // aiOcrDelay > 0：延迟回填，验证操作令牌在标注/选区变化后作废旧结果。
+          // aiOcrDelay > 0: delayed fill, verifies the operation token invalidates stale results after marks/selection change.
           if (aiOcrDelay > 0) { setTimeout(function() { resolve({ text: "Mock OCR text" }); }, aiOcrDelay); return; }
           resolve({ text: "Mock OCR text" });
         } else if (command === "local_ocr_languages") {
@@ -255,9 +257,9 @@
         } else if (command === "ai_translate") {
           resolve({ text: "Mock translation" });
         } else if (command === "latest_release_version") {
-          // "__error__" 哨兵镜像真实后端的 Err：检查本身失败（网络/限流），invoke reject。
-          // 返回形状对齐后端 UpdateCheck：注入 null = 仓库无 release；"0.0.4" 与当前
-          // 版本相同 → hasUpdate false；更高的版本号 → hasUpdate true
+          // The "__error__" sentinel mirrors the real backend's Err: the check itself failed (network/rate limit), invoke rejects.
+          // The return shape matches the backend's UpdateCheck: null = repo has no release; "0.0.4" equal to the
+          // current version → hasUpdate false; a higher version → hasUpdate true.
           if (latestReleaseVersion === "__error__") {
             reject(new Error("Mock release check failed"));
             return;
@@ -268,15 +270,15 @@
             resolve({ latestVersion: latestReleaseVersion, currentVersion: "0.0.4", hasUpdate: latestReleaseVersion !== "0.0.4" });
           }
         } else if (command === "download_update") {
-          // reject 模式：invoke 立即失败、不发任何事件——UI 必须靠 invoke 的
-          // catch 分支（SettingsPage startDownload）恢复，覆盖 3d58123 的守卫路径
+          // reject mode: invoke fails immediately and emits nothing — the UI must recover via invoke's
+          // catch branch (SettingsPage startDownload), covering the guard path from 3d58123.
           if (downloadMode === "reject") {
             reject(new Error("Mock download rejected"));
             return;
           }
-          // 镜像真实后端：command 立即 resolve，进度与终态通过事件异步派发。
-          // 安装包路径后端直接交给 NSIS 安装器并 exit(0)，没有终态事件；
-          // error 模式不发 ready，供测试驱动失败路径
+          // Mirrors the real backend: the command resolves immediately, progress and terminal states are
+          // dispatched asynchronously via events. The installer path hands off to the NSIS installer and
+          // exits(0) with no terminal event; error mode skips ready so tests can drive the failure path.
           const kind = args && args.kind;
           const total = 2097152;
           setTimeout(function () { window.__MOCK_TAURI_EMIT__("update-download-progress", { received: Math.floor(total / 2), total: total }); }, 30);
@@ -298,7 +300,7 @@
   }
 
   // Tauri 2 uses __TAURI_INTERNALS__ not __TAURI__
-  // invoke 统一走下面的包装函数（plugin:* 分流 + 兜底转 mockInvoke）
+  // invoke goes through the wrapper below (plugin:* routing + fallback to mockInvoke)
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
     callbacks: {},
@@ -315,7 +317,7 @@
         if (command === "plugin:window|is_visible") { windowCalls.push({ command: command }); return Promise.resolve(visible); }
         if (command === "plugin:window|set_fullscreen") { windowCalls.push({ command: command, value: payload && payload.value }); fullscreen = Boolean(payload && payload.value); return Promise.resolve(); }
         if (command === "plugin:window|hide") { windowCalls.push({ command: command }); visible = false; return Promise.resolve(); }
-        // @tauri-apps/api/event 的 listen/unlisten 走这里；handler 是 transformCallback 返回的 id
+        // @tauri-apps/api/event's listen/unlisten come through here; handler is the transformCallback-returned id
         if (command === "plugin:event|listen") {
           const name = payload && payload.event;
           const handler = payload && payload.handler;
@@ -323,9 +325,10 @@
           return Promise.resolve(handler || 0);
         }
         if (command === "plugin:event|unlisten") {
-          // @tauri-apps/api/event._unlisten 传 { event, eventId }，eventId 即 listen 时
-          // 注册进 eventHandlers 的 handler id。必须移除，否则页面导航往返后
-          // 一次 emit 会触发所有历史 handler——真实 Tauri 在 unlisten 后不再投递
+          // @tauri-apps/api/event._unlisten passes { event, eventId } where eventId is the handler id
+          // registered into eventHandlers by listen. It must be removed, otherwise after page
+          // navigation a single emit would fire all historical handlers — real Tauri stops delivering
+          // after unlisten.
           const name = payload && payload.event;
           const eventId = payload && payload.eventId;
           const handlers = eventHandlers[name];
@@ -335,7 +338,7 @@
           }
           return Promise.resolve();
         }
-        // getVersion()（@tauri-apps/api/app）用真实应用版本回答，更新卡片显示"当前 0.0.4"
+        // getVersion() (@tauri-apps/api/app) answers with the real app version so the update card shows "current 0.0.4"
         if (command === "plugin:app|version") return Promise.resolve("0.0.4");
         if (command === "plugin:window|show") { windowCalls.push({ command: command }); visible = true; return Promise.resolve(); }
         if (command === "plugin:window|set_position" || command === "plugin:window|set_size") { windowCalls.push({ command: command, value: payload && payload.value }); return Promise.resolve(); }
@@ -348,28 +351,31 @@
   window.__MOCK_TAURI_RUNTIME_UPDATES__ = runtimeUpdates;
   window.__MOCK_TAURI_SET_API_MODE__ = function(mode) { apiTestMode = mode; };
   window.__MOCK_TAURI_SET_FULLSCREEN__ = function(value) { fullscreen = Boolean(value); };
-  // 模拟原生 destroyed 钩子：移除钉图；仅当返回 true（最后一张且首张前可见）时恢复显示。
+  // Simulates the native destroyed hook: removes the pin; restores visibility only when it returns
+  // true (last pin closed and the window was visible before the first pin).
   window.__MOCK_TAURI_CLOSE_PIN__ = function(label) {
     const restore = sessionRemove(label);
     if (restore === true) visible = true;
     return restore;
   };
   window.__MOCK_TAURI_PIN_LABELS__ = function() { return Array.from(pinSession.images.keys()); };
-  // 由 plugin:window|hide/show 维护的可见性，供注入脚本在记录命令时如实上报
+  // Visibility maintained by plugin:window|hide/show, reported truthfully by scripts recording commands.
   window.__MOCK_TAURI_IS_VISIBLE__ = function() { return visible; };
 
-  // listen() 注册回调前 @tauri-apps/api 会先调 transformCallback 拿 handler id，
-  // 真实环境由 Tauri IPC 注入，浏览器 mock 环境必须自己补
+  // Before listen() registers a callback, @tauri-apps/api first calls transformCallback for a handler
+  // id; in the real environment Tauri's IPC injects it, so the browser mock must provide it.
   window.__TAURI_INTERNALS__.transformCallback = window.__TAURI_INTERNALS__.transformCallback || function (callback) {
-    // 忽略 once 参数：@tauri-apps/api 的 once() 是用 listen + 手动 unlisten 在 JS 层实现的，
-    // listen 路径从不传 once，mock 无需模拟"首次调用后自动注销"
+    // The once parameter is ignored: @tauri-apps/api's once() is implemented at the JS level with
+    // listen + manual unlisten; the listen path never passes once, so the mock need not simulate
+    // "auto-unregister after the first call".
     const id = Math.floor(Math.random() * 1e9);
     eventCallbacks[id] = callback;
     return id;
   };
-  // 测试可编程 emit 钩子：任意事件 + 任意 payload，payload 完全由测试控制。
-  // 真实 Tauri 事件经 IPC 异步送达，所以每个回调用 setTimeout(0) 延后一个宏任务，
-  // 保持与真实环境一致的时序语义（emit 后同步断言不成立）
+  // Programmable emit hook for tests: any event + any payload, fully controlled by the test. Real
+  // Tauri events arrive asynchronously over IPC, so each callback is deferred one macro task via
+  // setTimeout(0), keeping timing semantics consistent with the real environment (synchronous
+  // assertions right after emit must not hold).
   window.__MOCK_TAURI_EMIT__ = function (event, payload) {
     for (const id of eventHandlers[event] || []) {
       const callback = eventCallbacks[id];
@@ -380,14 +386,14 @@
       }
     }
   };
-  // 快捷方式：模拟后端冷启动轮询发现新版本（payload 固定 9.9.9，避免每个测试重复写）
+  // Shortcut: simulate the backend's cold-start poll finding a new version (payload fixed at 9.9.9 to avoid repeating it in every test)
   window.__MOCK_EMIT_UPDATE__ = function () {
     window.__MOCK_TAURI_EMIT__("update-available", { version: "9.9.9", currentVersion: "0.0.4" });
   };
-  // 注入 latest_release_version 检测到的最新版本号（挂载查询路径；传 null 恢复
-  // "仓库无 release"，传 "__error__" 让 invoke reject——镜像后端 Err 的"检查失败"路径）
+  // Injects the version detected by latest_release_version (mount-query path; null restores
+  // "repo has no release", "__error__" makes invoke reject — mirroring the backend's Err "check failed" path).
   window.__MOCK_TAURI_SET_LATEST_VERSION__ = function (value) { latestReleaseVersion = value; };
-  // 切换 download_update 的结局：success（默认）/ error（事件报错）/ reject（invoke 立即失败）
+  // Switches download_update's outcome: success (default) / error (error event) / reject (invoke fails immediately)
   window.__MOCK_TAURI_SET_DOWNLOAD_MODE__ = function (mode) { downloadMode = mode === "error" || mode === "reject" ? mode : "success"; };
   window.__MOCK_TAURI_SET_PIN_REJECT__ = function (value) { pinRejectMode = Boolean(value); };
   window.__MOCK_TAURI_SET_OCR_DELAY__ = function (ms) { aiOcrDelay = Number(ms) || 0; };

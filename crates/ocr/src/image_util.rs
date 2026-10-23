@@ -72,8 +72,9 @@ pub fn decode_limited(bytes: &[u8]) -> Result<DynamicImage, OcrError> {
     decode_with_limit(bytes, None)
 }
 
-/// 本地 OCR 专用：在既有字节/格式/像素校验之上，额外限制解码期间的内存
-/// 分配（宽×高×4 的预算由调用方决定）。原有 AI 调用方的分配行为不变。
+/// Local OCR specific: on top of the existing byte/format/pixel checks, additionally caps the memory
+/// allocated during decoding (the width×height×4 budget is decided by the caller). Original AI
+/// callers keep their allocation behavior unchanged.
 pub fn decode_limited_with_rgba_limit(bytes: &[u8], max_rgba_bytes: u64) -> Result<DynamicImage, OcrError> {
     decode_with_limit(bytes, Some(max_rgba_bytes))
 }
@@ -156,13 +157,13 @@ mod tests {
 
     #[test]
     fn decode_limited_accepts_bmp_and_keeps_ai_prepare_unchanged() {
-        // 格式支持面不变：BMP 依旧可解码（有界变体走同一条校验管线）。
+        // The format support surface is unchanged: BMP still decodes (the bounded variant runs the same validation pipeline).
         let buffer = RgbaImage::from_fn(6, 4, |x, y| image::Rgba([x as u8, y as u8, 7, 255]));
         let mut bmp = Cursor::new(Vec::new());
         DynamicImage::ImageRgba8(buffer).write_to(&mut bmp, ImageFormat::Bmp).expect("bmp encodes");
         let decoded = decode_limited_with_rgba_limit(bmp.get_ref(), 128 * 1024 * 1024).expect("bmp decodes");
         assert_eq!(decoded.dimensions(), (6, 4));
-        // AI 预处理尺寸策略不变：大图仍缩到 1024 以内，输出 data_uri。
+        // The AI preprocessing size policy is unchanged: large images still shrink below 1024 and output a data_uri.
         let large = sample_png(2000, 1500);
         let prepared = prepare_image(&large).expect("AI prepare unchanged");
         assert!(prepared.width <= 1024 && prepared.height <= 1024);
@@ -171,11 +172,11 @@ mod tests {
 
     #[test]
     fn decode_limited_with_rgba_limit_enforces_128mib_boundary() {
-        // 8192×4096×4 = 128MiB：恰好等于上限，允许。
+        // 8192×4096×4 = 128MiB: exactly the limit, allowed.
         let boundary = sample_png(8192, 4096);
         assert!(decode_limited_with_rgba_limit(&boundary, 128 * 1024 * 1024).is_ok());
-        // 8192×4097×4 = 128MiB + 4 字节：超限，拒绝（普通 decode_limited 仍放行，
-        // 因为它的 40M 像素上限独立于本地 OCR 的 RGBA 预算）。
+        // 8192×4097×4 = 128MiB + 4 bytes: over the limit, rejected (plain decode_limited still
+        // accepts it because its 40M-pixel cap is independent of the local OCR RGBA budget).
         let over = sample_png(8192, 4097);
         assert!(decode_limited_with_rgba_limit(&over, 128 * 1024 * 1024).is_err());
         assert!(decode_limited(&over).is_ok());

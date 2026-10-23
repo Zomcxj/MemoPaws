@@ -24,7 +24,7 @@ const copy = {
 type Texts = (typeof copy)[Lang];
 const shortcutLabels = { capture: ["截图识别", "Capture"], canvas_fit: ["画布自适应", "Canvas Fit"], new_memo: ["新建备忘录", "New Memo"], global_search: ["全局搜索", "Global Search"], toggle_clipboard: ["打开剪切板", "Open Clipboard"] };
 
-/** latest_release_version 的返回形状（后端 UpdateCheck，camelCase 序列化） */
+/** Return shape of latest_release_version (backend UpdateCheck, camelCase serialized) */
 interface UpdateCheck { latestVersion: string | null; currentVersion: string; hasUpdate: boolean; }
 
 interface Props { theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onLanguageChange?: (lang: Lang) => void; onUpdateFound?: (version: string) => void; glass?: boolean; onGlassChange?: (on: boolean) => void; }
@@ -42,14 +42,15 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
   const [conflict, setConflict] = useState(false);
   const [initialDataDir, setInitialDataDir] = useState("");
   const [updateInfo, setUpdateInfo] = useState<{ version: string; currentVersion: string } | null>(null);
-  // 手动检查更新的状态：checking 期间禁点，upToDate 表示确认无新版本，failed 表示
-  // 这次检查本身没查成（网络/限流）——两者措辞必须分开，不能都叫"未发现新版本"
+  // Manual update-check state: disabled while checking; upToDate means confirmed no new version; failed
+  // means this check itself did not succeed (network/rate limit) — the two wordings must stay separate,
+  // both must not read "no new version found".
   const [checkState, setCheckState] = useState<"idle" | "checking" | "upToDate" | "failed">("idle");
-  // 当前应用版本：getVersion 会话内不变，取一次即可；空串表示获取失败，UI 隐藏
+  // Current app version: getVersion is stable within the session, read once; empty string = fetch failed, UI hides it.
   const [currentVersion, setCurrentVersion] = useState("");
-  // 手动检查检测到的最新版本号（无更新时用于"已是最新版本（x.y.z）"提示）
+  // Latest version detected by a manual check (used for the "already on the latest version (x.y.z)" hint when there is no update).
   const [checkLatest, setCheckLatest] = useState("");
-  // downloadKind 非 null 表示正在下载对应类型；done 表示离线包已替换好 exe，等重启生效
+  // downloadKind non-null = the matching type is downloading; done = the offline package has replaced the exe, awaiting restart.
   const [downloadKind, setDownloadKind] = useState<"installer" | "offline" | null>(null);
   const [downloadDone, setDownloadDone] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ received: number; total: number } | null>(null);
@@ -65,7 +66,7 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
     ])
       .then(([raw, dir]) => {
         if (!active) return;
-        // 旧版配置缺字段时 serde 返回 null，剔除后让默认值兜底
+        // Old configs miss fields and serde returns null; strip them so defaults take over.
         const present = Object.fromEntries(
           Object.entries(raw).filter(([, value]) => value !== null && value !== undefined),
         );
@@ -87,15 +88,18 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
     };
   }, []);
 
-  // 挂载时主动问一次最新版本：后端轮询事件可能在监听器注册前被丢弃。
-  // latest_release_version 每次调用都打一次 GitHub API（未认证 60 次/小时/IP），
-  // 所以自动路径只在挂载时调一次，禁止进轮询或渲染路径；用户手动点"检查更新"是
-  // 显式触发，频率由用户控制。返回 None（无网络/限流/无更新）时静默。
-  // 版本只存在本页 state，不回写 App.tsx——角标走 update-available 事件链路，双写会不一致。
+  // Ask for the latest version once on mount: the backend poll event can be dropped before a listener
+  // registers. latest_release_version hits the GitHub API on every call (unauthenticated 60/hour/IP),
+  // so the automatic path calls it exactly once on mount and must never enter polling or render paths;
+  // the user pressing "check for updates" is an explicit trigger with user-controlled frequency.
+  // Silent when it returns None (no network/rate limited/no update). The version lives only in this
+  // page's state and is not written back to App.tsx — the badge follows the update-available event
+  // chain; double-writing would desync them.
   useEffect(() => {
     let active = true;
-    // 两个请求各自兜底：release 检查失败（网络抖动很常见）不能把已成功的
-    // getVersion 结果一起带崩——那会让"当前版本"永远显示不出来（真机实测踩过）
+    // Each request has its own fallback: a failed release check (network jitter is common) must not
+    // take down the already-successful getVersion result — that would leave "current version" hidden
+    // forever (hit on a real machine).
     const currentPromise = getVersion().catch(() => "");
     const checkPromise = invoke<UpdateCheck>("latest_release_version").catch(() => null);
     void Promise.all([currentPromise, checkPromise]).then(([current, check]) => {
@@ -109,8 +113,9 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
     };
   }, []);
 
-  // 手动检查：用户显式触发，不受挂载查询的"只调一次"约束。
-  // 后端以 Err 区分"检查失败"与 Ok(None) 的"确实无新版本"；invoke 对 Err 会 reject。
+  // Manual check: explicitly triggered by the user, not bound by the mount query's "call once" rule.
+  // The backend distinguishes "check failed" (Err) from Ok(None)'s "genuinely no new version"; invoke
+  // rejects on Err.
   const checkForUpdate = () => {
     if (checkState === "checking") return;
     setCheckState("checking");
@@ -118,27 +123,30 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
       .then((check) => {
         if (check?.hasUpdate && check.latestVersion) {
           setUpdateInfo({ version: check.latestVersion, currentVersion });
-          // 回写给 App 点亮角标：手动确认的新版本必须与自动链路可见性一致
+          // Write back to App to light the badge: a manually confirmed new version must be as visible as the automatic chain.
           onUpdateFound?.(check.latestVersion);
           setCheckState("idle");
         } else if (updateInfo) {
-          // 卡片已显示新版本时，"无更新"结果与之矛盾（release 可能刚被撤下）——保持安静
+          // A "no update" result contradicts a card already showing a new version (the release may
+          // have just been withdrawn) — stay quiet.
           setCheckState("idle");
         } else {
-          // 直接显示检测到的版本：对齐 agent2api 的"当前已是最新版本（x.y.z）"
+          // Show the detected version directly: matches agent2api's "already on the latest version (x.y.z)".
           setCheckLatest(check?.latestVersion ?? "");
           setCheckState("upToDate");
         }
       })
       .catch(() => {
-        // 检查失败一律明说。之前"卡片在就保持安静"在真机上被读成"点了没反应"；
-        // 失败提示与卡片并不矛盾（卡片是更早一次成功查询的结果）
+        // Check failures are always stated explicitly. The earlier "stay quiet while the card shows"
+        // was read on a real machine as "clicking did nothing"; a failure hint does not contradict the
+        // card (the card is the result of an earlier successful query).
         setCheckState("failed");
       });
   };
 
-  // 下载进度与结果事件。注意安装包路径没有终态事件：下载完成后后端直接 app.exit(0)
-  // 交给 NSIS 安装器，所以 installer 下载中不等待"完成"，失败时靠 error 事件恢复。
+  // Download progress and result events. Note the installer path has NO terminal event: after the
+  // download the backend calls app.exit(0) and hands off to the NSIS installer, so an installer
+  // download does not wait for "done"; failures recover via the error event.
   useEffect(() => {
     const stops = [
       listen<{ received: number; total: number }>("update-download-progress", (event) => {
@@ -165,8 +173,8 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
     setDownloadProgress(null);
     setDownloadKind(kind);
     void invoke("download_update", { kind }).catch((reason) => {
-      // 后端下载互斥（并发 invoke）等立即失败走这里，不依赖事件；
-      // 只清掉自己的状态，别把别的下载路径正在进行的 UI 态错杀掉
+      // The backend's download mutex (concurrent invoke) and immediate failures come through here,
+      // without relying on events; clear only this download's state, never kill another path's in-flight UI state.
       setDownloadKind((current) => (current === kind ? null : current));
       setUpdateError(errorText(reason));
     });
@@ -310,8 +318,8 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
      <Group title={t.shortcuts}>{shortcutKeys.map((key) => <div className="settings-shortcut" key={key}><span>{shortcutLabels[key as keyof typeof shortcutLabels][lang === "en" ? 1 : 0]}</span><input aria-label={`${shortcutLabels[key as keyof typeof shortcutLabels][lang === "en" ? 1 : 0]} shortcut`} value={config.shortcuts[key] || ""} readOnly onKeyDown={(e) => recordShortcut(key, e)} /><button type="button" onClick={() => resetShortcut(key)}>{lang === "en" ? "Reset" : "重置"}</button></div>)}</Group>
      <Group title={t.close}><Row><SegmentedControl value={config.close_behavior} options={[["exit", lang === "zh" ? "退出" : "Exit"], ["tray", lang === "zh" ? "任务栏" : "Tray"]]} onChange={(v) => immediate("close_behavior", v as CloseBehavior)} /></Row></Group>
      <Group title={t.updateSection}>{updateInfo ? (() => {
-      // total 未知（后端无 Content-Length）时不发 progress 事件：无 value 的 progress
-      // 渲染为不定进度条，文案退化为"下载中…"，避免算出 NaN%
+      // No progress event when total is unknown (backend sent no Content-Length): progress without a
+      // value renders as an indeterminate bar and the wording degrades to "downloading…", avoiding NaN%.
       const total = downloadProgress?.total ?? 0;
       const pct = total > 0 ? Math.min(100, Math.round(((downloadProgress?.received ?? 0) / total) * 100)) : null;
       return <div className="settings-update-card" role="status">
@@ -320,7 +328,7 @@ export function SettingsPage({ theme, onThemeChange, onLanguageChange, onUpdateF
         {downloadDone ? (
           <div className="settings-update-ready">
             <span>{t.updateReady}</span>
-            {/* 离线包已替换好 exe，restart_app 即切到新版（后端 restart_app 已注册） */}
+            {/* The offline package has replaced the exe; restart_app switches to the new version (restart_app is registered in the backend) */}
             <button type="button" onClick={() => void invoke("restart_app")}>{t.restartToUpdate}</button>
           </div>
         ) : downloadKind !== null ? (

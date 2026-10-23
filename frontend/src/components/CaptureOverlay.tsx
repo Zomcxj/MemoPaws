@@ -40,7 +40,7 @@ interface Props {
   background: string;
   hint: string;
   onConfirm: (result: { image: Uint8Array; ocrText: string; translation: string }) => Promise<void> | void;
-  // 统一合成入口：所有动作都先经它拿到"标注后的完整 PNG"，再分发。
+  // Single composition entry: every action first obtains the "marked full PNG" through it, then dispatches.
   onCrop: (region: RegionCss, scale: number, cornerRadius: number, marks: Mark[]) => Promise<Uint8Array>;
   onCancel: () => void;
   onRecognize?: (image: Uint8Array) => Promise<string>;
@@ -129,8 +129,8 @@ export function CaptureOverlay({
   const magnifierRef = useRef<HTMLCanvasElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [cornerRadius, setCornerRadius] = useState(12);
-  // 标注状态：工具/历史/进行中的草稿/颜色线宽/文字草稿。
-  // 历史里的标记永不原地修改——undo/redo/addMark 全部返回新对象。
+  // Annotation state: tool/history/in-progress draft/color+width/text draft.
+  // Marks in history are never mutated in place — undo/redo/addMark all return new objects.
   const [tool, setTool] = useState<Tool>("move");
   const [history, setHistory] = useState<History>(emptyHistory);
   const [draft, setDraft] = useState<Mark | null>(null);
@@ -280,8 +280,8 @@ export function CaptureOverlay({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // 文字编辑/取色/线宽输入期间，快捷键属于编辑器而非浮层；
-      // 输入法组合中（isComposing）的 Enter/Esc 也不能触发确认或取消。
+      // While the text editor/color/width inputs are focused, shortcuts belong to the editor, not the
+      // overlay; Enter/Esc during IME composition (isComposing) must not confirm or cancel either.
       if (event.isComposing) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
@@ -391,7 +391,7 @@ export function CaptureOverlay({
   }, [drag !== null, editing, layout, onCancel, regionFrom]);
 
   const beginSelectionEdit = (kind: SelectionEdit["kind"], event: ReactMouseEvent<HTMLDivElement | HTMLButtonElement>) => {
-    // 绘制模式下选区只作为画布：不移动、不缩放（把手也只在移动模式渲染）。
+    // In drawing mode the selection is only a canvas: no move, no resize (handles render in move mode only).
     if (tool !== "move" || !selection || busy || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -400,8 +400,9 @@ export function CaptureOverlay({
   };
 
   const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
-    // 绘制按下后紧随的 mousedown 属于同一次按压，不得清掉选区。
-    // busy 不拦这里：动作挂起时仍可框新选区/绘制，随即令牌 +1 作废旧结果。
+    // The mousedown right after a drawing press belongs to the same press and must not clear the selection.
+    // busy does not block here: while actions are pending the user can still draw/new-select, which then
+    // bumps the token and invalidates stale results.
     if (drawingRef.current) return;
     if (event.button !== 0) return;
       if ((event.target as HTMLElement).closest(".capture-result-window")) return;
@@ -417,10 +418,11 @@ export function CaptureOverlay({
     setDrag({ startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, width: 0, height: 0 });
   };
 
-  // 绘制入口：仅在标注工具激活且按下点落在选区内时开始一份草稿。
-  // 选区外的按下放行给 handleMouseDown —— "换个新选区"不清已画的标注。
+  // Drawing entry: starts a draft only when an annotation tool is active and the press lands inside the
+  // selection. Presses outside are left to handleMouseDown — "choosing a new selection" keeps existing marks.
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    // busy 不拦绘制：动作挂起时照样可以标注，绘制会作废挂起中的旧结果。
+    // busy does not block drawing: annotation continues while actions are pending, and drawing
+    // invalidates stale pending results.
     if (tool === "move" || event.button !== 0) return;
     if ((event.target as HTMLElement).closest(".capture-overlay-toolbar, .capture-result-window, .capture-overlay-text-editor, input, button, .capture-overlay-rect-radius")) return;
     if (!selection) return;
@@ -437,7 +439,7 @@ export function CaptureOverlay({
       { offsetX: bounds.offsetX, offsetY: bounds.offsetY, scale: bounds.scale, nw: bounds.nw, nh: bounds.nh },
     );
     if (tool === "text") {
-      // 文字工具：不拖拽起笔，在锚点放一个有界编辑器（视口内钳制）。
+      // Text tool: no drag-to-draw; place a bounded editor (clamped to the viewport) at the anchor.
       const left = Math.min(Math.max(4, event.clientX), Math.max(4, window.innerWidth - 288));
       const top = Math.min(Math.max(4, event.clientY), Math.max(4, window.innerHeight - 160));
       setTextDraft({ image: point, left, top, value: "" });
@@ -445,7 +447,7 @@ export function CaptureOverlay({
     }
     event.currentTarget.setPointerCapture(event.pointerId);
     drawingRef.current = true;
-    // 绘制即新操作：作废延迟回填的旧 OCR 结果，但不清标注历史。
+    // Drawing is a new operation: invalidates delayed stale OCR results, but keeps mark history.
     operationTokenRef.current += 1;
     setOcrText("");
     setTranslation("");
@@ -455,7 +457,8 @@ export function CaptureOverlay({
     setDraft(mark);
   };
 
-  // 草稿存在期间才挂窗口级指针监听：画笔逐点追加，其余工具以终点替换。
+  // Window-level pointer listeners exist only while a draft exists: pen appends points, other tools
+  // replace the endpoint.
   useEffect(() => {
     if (!draft) return;
     const onMove = (event: PointerEvent) => {
@@ -547,7 +550,7 @@ export function CaptureOverlay({
     };
   };
 
-  // 所有动作共用的取图口：同一选区、同一份标注 → 同一张 PNG。
+  // The image seam shared by all actions: same selection, same marks → same PNG.
   const imageForSelection = () => {
     if (!selection) throw new Error("没有截图选区");
     return onCrop(selection.region, selection.scale, cornerRadius, history.marks);
@@ -598,8 +601,8 @@ export function CaptureOverlay({
     finally { setBusy(false); }
   };
 
-  // 离线 OCR：同一张合成图、同一个操作令牌；语言未就绪时按钮被禁用，
-  // 失败只报错，绝不回退到 AI 识别/翻译。
+  // Offline OCR: same composited image, same operation token; the button stays disabled until the
+  // language is ready. Failures report errors only and never fall back to AI recognize/translate.
   const runLocalRecognize = async () => {
     if (!selection || !onLocalRecognize || busy || !localLanguage) return;
     const operationToken = ++operationTokenRef.current;
@@ -625,8 +628,8 @@ export function CaptureOverlay({
     </select>
   )) || null;
 
-  // 预览画布：底存储 = 原图像素尺寸，CSS 尺寸 = contain 布局矩形。
-  // 与导出共用 drawMarks（预览即导出），rAF 合并同帧的多次失效。
+  // Preview canvas: backing store = original image pixels, CSS size = the contain layout rectangle.
+  // Shares drawMarks with the exporter (preview is what you export); rAF coalesces same-frame invalidations.
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const canvas = previewCanvasRef.current;
@@ -646,7 +649,8 @@ export function CaptureOverlay({
     return () => cancelAnimationFrame(frame);
   }, [background, history.marks, draft]);
 
-  // 工具条两行后的实际尺寸未知：测量后据此钳制左缘、贴底时上翻。
+  // The two-row toolbar's real size is unknown up front: measure it, then clamp the left edge and flip
+  // above the selection when near the bottom.
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const node = toolbarRef.current;
@@ -817,7 +821,7 @@ export function CaptureOverlay({
             style={{ fontSize: Math.max(12, penWidth * 6), lineHeight: 1.3 }}
             onChange={(event) => setTextDraft({ ...textDraft, value: event.target.value })}
             onKeyDown={(event) => {
-              // IME 组合中的按键属于输入法：Enter/Esc 都不能提交或丢弃。
+              // Keys during IME composition belong to the IME: Enter/Esc must not commit or discard.
               if (event.nativeEvent.isComposing) return;
               if (event.key === "Escape") {
                 event.preventDefault();

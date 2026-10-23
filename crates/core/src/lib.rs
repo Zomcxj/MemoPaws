@@ -9,8 +9,8 @@ pub fn init() {
     let _ = paths::ensure_data_dir();
 }
 
-/// 原子写文件：临时文件 + fsync + persist(rename)，崩溃不会留下截断的目标文件。
-/// 与密钥库的落盘策略一致（keys crate save）。
+/// Atomic file write: temp file + fsync + persist(rename); a crash never leaves a truncated target.
+/// Matches the key vault's persistence strategy (keys crate save).
 pub fn write_file_atomic(path: &std::path::Path, contents: &[u8]) -> Result<()> {
     use std::io::Write;
     let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty());

@@ -12,7 +12,7 @@ const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, "mock-tauri.js"), "utf-
   await page.goto("http://localhost:1420/", { waitUntil: "networkidle" });
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("memopaws-capture")));
   await page.waitForSelector(".capture-overlay", { timeout: 5000 });
-  // 模拟框选一块区域
+  // Simulate selecting a region
   const overlay = await page.locator(".capture-overlay").boundingBox();
   await page.mouse.move(overlay.x + 300, overlay.y + 200);
   await page.mouse.down();
@@ -20,7 +20,7 @@ const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, "mock-tauri.js"), "utf-
   await page.mouse.up();
   await page.waitForSelector(".capture-overlay-handle--e", { timeout: 5000 });
   await page.screenshot({ path: path.join(__dirname, "screenshots", "handle-check.png") });
-  // 单独放大截取手柄区域
+  // Zoom in and capture the handle area separately
   const handle = await page.locator(".capture-overlay-handle--ne").boundingBox();
   await page.screenshot({
     path: path.join(__dirname, "screenshots", "handle-zoom.png"),
