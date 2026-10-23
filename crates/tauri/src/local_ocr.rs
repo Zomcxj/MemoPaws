@@ -101,9 +101,20 @@ mod win {
         let mut result = Vec::new();
         for i in 0..langs.Size()? {
             let lang = langs.GetAt(i)?;
-            result.push(LocalLanguage { tag: lang.LanguageTag()?.to_string(), name: lang.DisplayName()?.to_string() });
+            result.push(LocalLanguage { tag: lang.LanguageTag()?.to_string(), name: display_name(&lang.DisplayName()?.to_string()) });
         }
         Ok(result)
+    }
+
+    /// Windows labels zh-Hans-CN things like "中文（简体，中国大陆）" / "中文（中华人民共和国）";
+    /// the region mention is noise in a language picker. Keep language + script, drop the region.
+    fn display_name(raw: &str) -> String {
+        raw.replace("（简体，中国大陆）", "（简体）")
+            .replace("（中华人民共和国）", "（简体）")
+            .replace("（中国大陆）", "（简体）")
+            .replace("(Simplified, Mainland China)", "(Simplified)")
+            .replace("(Simplified, China)", "(Simplified)")
+            .replace("(Mainland China)", "")
     }
 
     pub fn languages() -> Result<LocalLanguages, String> {

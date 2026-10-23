@@ -277,6 +277,16 @@
   gap: var(--space-4);
 }
 
+/* The text editor reuses .capture-overlay-action, whose fixed 28×28 box is meant for icon buttons;
+   the Commit/Discard labels need an auto-width pill instead, or the text overflows the border. */
+.capture-overlay-text-editor-actions .capture-overlay-action {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
 /* Offline OCR language select (inside the overlay) and the main page's "no installed languages" hint. */
 .capture-overlay-local-language {
   min-height: 28px;

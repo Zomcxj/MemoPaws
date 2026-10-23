@@ -192,6 +192,9 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
       // "appearing by itself" during pin sessions.
       setCovering(true);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      // Let the cover's fade-in finish so the last composited frame is fully masked; a mid-fade frame
+      // would ghost the screenshot back at restore time.
+      await new Promise((resolve) => setTimeout(resolve, 180));
       if (await window.isFullscreen()) await window.setFullscreen(false);
       await window.hide();
       await window.setPosition(geometry.position);
