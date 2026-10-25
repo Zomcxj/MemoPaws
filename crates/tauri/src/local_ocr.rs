@@ -56,6 +56,43 @@ fn white_bgra(pixels: &mut image::RgbaImage) {
     }
 }
 
+/// Region words Windows puts into OCR language display names. The mention is noise in a language
+/// picker ("中文（简体，中国大陆）" / "中文(中华人民共和国)" / "Chinese (Simplified, Mainland
+/// China)"), so segments containing them are dropped and the leftover punctuation repaired.
+const REGION_MARKERS: [&str; 4] = ["中国大陆", "中华人民共和国", "Mainland China", "People's Republic of China"];
+
+fn display_name(raw: &str) -> String {
+    let mut cleaned = raw.to_string();
+    for marker in REGION_MARKERS {
+        // Expand each marker to its enclosing segment: from the nearest opener/separator before it to
+        // the nearest closer/separator after it ("简体，中国大陆）" → drop "，中国大陆"). Include the
+        // leading separator so "简体，中国大陆）" does not become "简体，）".
+        while let Some(start) = cleaned.find(marker) {
+            // rfind returns the byte offset of the opener/separator itself; step over its full UTF-8
+            // length (，is three bytes) so seg_start stays on a char boundary.
+            let seg_start = cleaned[..start]
+                .rfind(|c| c == '（' || c == '(' || c == '，' || c == ',')
+                .map(|index| index + cleaned[index..].chars().next().unwrap().len_utf8())
+                .unwrap_or(0);
+            let seg_end = cleaned[start..]
+                .find(|c| c == '）' || c == ')' || c == '，' || c == ',')
+                .map(|index| start + index)
+                .unwrap_or(cleaned.len());
+            let mut drop_start = seg_start;
+            if seg_start > 0 {
+                // The separator may be multi-byte (，): step back by its UTF-8 length, not one byte.
+                let previous = cleaned[..seg_start].chars().next_back();
+                if previous == Some('，') || previous == Some(',') {
+                    drop_start = seg_start - previous.unwrap().len_utf8();
+                }
+            }
+            cleaned.replace_range(drop_start..seg_end, "");
+        }
+    }
+    // A removal can leave empty parentheses behind ("中文(中华人民共和国)" → "中文()").
+    cleaned.replace("（）", "").replace("()", "").trim().to_string()
+}
+
 /// An OCR language capability installed on this machine.
 #[derive(serde::Serialize)]
 pub struct LocalLanguage { pub tag: String, pub name: String }
@@ -106,17 +143,6 @@ mod win {
         Ok(result)
     }
 
-    /// Windows labels zh-Hans-CN things like "中文（简体，中国大陆）" / "中文（中华人民共和国）";
-    /// the region mention is noise in a language picker. Keep language + script, drop the region.
-    fn display_name(raw: &str) -> String {
-        raw.replace("（简体，中国大陆）", "（简体）")
-            .replace("（中华人民共和国）", "（简体）")
-            .replace("（中国大陆）", "（简体）")
-            .replace("(Simplified, Mainland China)", "(Simplified)")
-            .replace("(Simplified, China)", "(Simplified)")
-            .replace("(Mainland China)", "")
-    }
-
     pub fn languages() -> Result<LocalLanguages, String> {
         let _apartment = Apartment::new()?;
         let languages = available().map_err(|e| format!("Cannot list installed OCR languages: {e}"))?;
@@ -165,6 +191,18 @@ pub use win::{languages, recognize};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_name_drops_region_segments_in_any_writing() {
+        assert_eq!(display_name("中文（简体，中国大陆）"), "中文（简体）");
+        assert_eq!(display_name("中文(中华人民共和国)"), "中文");
+        assert_eq!(display_name("中文（中国大陆）"), "中文");
+        assert_eq!(display_name("中文(简体,中国大陆)"), "中文(简体)");
+        assert_eq!(display_name("Chinese (Simplified, Mainland China)"), "Chinese (Simplified)");
+        // 无地区词的显示名原样保留。
+        assert_eq!(display_name("中文（简体）"), "中文（简体）");
+        assert_eq!(display_name("English (US)"), "English (US)");
+    }
 
     #[test]
     fn ocr_size_preserves_ratio_without_enlarging() {
