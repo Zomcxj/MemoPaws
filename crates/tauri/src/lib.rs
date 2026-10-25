@@ -1,4 +1,5 @@
 mod clipboard_hook;
+mod capture_overlay;
 mod commands;
 mod hotkeys;
 mod local_ocr;
@@ -15,6 +16,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use commands::{
     add, ai_ocr, ai_translate, capture_delete, capture_get_image, capture_list, capture_screen,
     choose_data_dir, save_image_as, clipboard_clear, clipboard_delete, clipboard_delete_many, clipboard_get_image,
+    window_probe,
     clipboard_list, clipboard_paste_image, clipboard_set_locked, clipboard_update_text, delete,
     download_update, get_config, get_data_dir, get_storage_dir_conflict, get_theme, get_value,
     global_search, history_clear, history_delete, history_list, image_crop, image_preprocess,
@@ -121,6 +123,7 @@ pub fn run() {
             memopaws_core::init();
             app.manage(hotkeys::ShortcutActions::default());
             app.manage(pinned_images::PinState::default());
+            app.manage(Mutex::new(capture_overlay::CaptureOverlayState::default()));
             let path = memopaws_core::paths::keys_path().map_err(|error| error.to_string())?;
             let vault = memopaws_keys::KeyVault::load(path)
                 .unwrap_or_else(|error| error.into_locked_vault());
@@ -130,6 +133,12 @@ pub fn run() {
                 .map_err(|error| error.to_string())?;
             app.manage(Mutex::new(history));
             spawn_update_poller(app.handle().clone());
+            // Pre-create the hidden capture overlay window: reusing a warm window
+            // keeps every capture ~sub-second instead of paying WebView2 cold
+            // start + page boot per capture. Must run OFF the main thread —
+            // build() on the main thread deadlocks (same lesson as pin_image).
+            let precreate_handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || capture_overlay::precreate(&precreate_handle));
             let clipboard =
                 memopaws_clipboard::ClipboardManager::load().map_err(|error| error.to_string())?;
             app.manage(Mutex::new(clipboard));
@@ -146,8 +155,15 @@ pub fn run() {
                 eprintln!("global shortcut registration: {error}");
             }
             setup_tray(&app.handle())?;
-            if let Err(error) = clipboard_hook::init(&app.handle()) {
-                eprintln!("clipboard listener: {error}");
+            // In E2E mode (MEMOPAWS_E2E_HIDDEN marks a test instance) the app must
+            // not touch the user's real clipboard: the listener ingests whatever
+            // image the user happens to have copied — a real observation, it wrote
+            // clipboard_images/1.png into the isolated data home and broke the
+            // offline-OCR "no image files" check.
+            if std::env::var_os("MEMOPAWS_E2E_HIDDEN").is_none() {
+                if let Err(error) = clipboard_hook::init(&app.handle()) {
+                    eprintln!("clipboard listener: {error}");
+                }
             }
             if config.text_replacements.iter().any(|r| !r.abbr.is_empty()) {
                 if let Err(error) = text_replacer_hook::init(text_replacer) {
@@ -191,10 +207,21 @@ pub fn run() {
             show_main_window_when_ready,
             set_glass_effect,
             pinned_images::pin_image,
-            pinned_images::get_pinned_image,
+            pinned_images::get_pinned_image_radius,
+            pinned_images::get_pinned_image_meta,
+            pinned_images::get_pinned_image_base64,
+            pinned_images::pin_ready,
             pinned_images::pin_close,
             pinned_images::capture_session_begin,
             pinned_images::capture_session_finish,
+            capture_overlay::capture_overlay_begin,
+            capture_overlay::capture_overlay_image,
+            capture_overlay::capture_overlay_ready,
+            capture_overlay::capture_overlay_end,
+            capture_overlay::capture_overlay_finish,
+            capture_overlay::capture_overlay_generation,
+            capture_overlay::capture_session_status,
+            capture_overlay::capture_session_result_image,
             set_close_behavior,
             set_clipboard_max_items,
             set_history_max_items,
@@ -218,6 +245,7 @@ pub fn run() {
             capture_get_image,
             capture_delete,
             capture_screen,
+            window_probe,
             image_preprocess,
             image_crop,
             clipboard_paste_image,
@@ -235,6 +263,23 @@ pub fn run() {
             if window.label().starts_with("pin-") {
                 if matches!(event, tauri::WindowEvent::Destroyed) {
                     pinned_images::destroyed(window);
+                }
+                return;
+            }
+            if window.label() == "capture-overlay" {
+                // Crash safety net: if the overlay dies without settling the
+                // session, cancel it and bring the main window back. A normal
+                // end already consumed the session, so this finish errors and
+                // does nothing.
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    let pins = window.app_handle().state::<pinned_images::PinState>();
+                    if let Ok(show_main) = pinned_images::finish_session(&pins, "cancel") {
+                        if show_main {
+                            if let Some(main) = window.app_handle().get_webview_window("main") {
+                                let _ = main.show();
+                            }
+                        }
+                    }
                 }
                 return;
             }

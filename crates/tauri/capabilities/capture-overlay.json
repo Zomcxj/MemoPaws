@@ -1,0 +1,5 @@
+{
+  "identifier": "capture-overlay",
+  "windows": ["capture-overlay"],
+  "permissions": ["core:event:default"]
+}

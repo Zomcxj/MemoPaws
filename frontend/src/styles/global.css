@@ -124,6 +124,15 @@ html[data-window="pin"] #root {
   background: transparent;
 }
 
+html[data-window="capture"],
+html[data-window="capture"] body,
+html[data-window="capture"] #root {
+  /* Transparent: the reused overlay window's empty state must show the desktop
+   * through (a black fill here painted a fullscreen black canvas over the
+   * screen between sessions). */
+  background: transparent;
+}
+
 .app-shell {
   display: flex;
   flex-direction: column;

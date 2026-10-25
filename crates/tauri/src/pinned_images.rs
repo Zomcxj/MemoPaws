@@ -1,9 +1,17 @@
 use std::{collections::HashMap, sync::Mutex};
 
+use base64::Engine;
+
 use tauri::Manager;
 
 #[derive(Clone)]
-struct PinData { image: Vec<u8>, radius: f64 }
+struct PinData {
+    /// The composed PNG on disk — the pin page loads it through the asset
+    /// protocol (QuickClipboard's model). IPC image transport (JSON array AND
+    /// base64) corrupted intermittently and left pins blank.
+    path: std::path::PathBuf,
+    radius: f64,
+}
 
 #[derive(Default)]
 pub struct Pins {
@@ -19,15 +27,24 @@ impl Pins {
         self.capture_visible = Some(visible);
         Ok(())
     }
+    fn next_label(&mut self) -> String {
+        self.next += 1;
+        format!("pin-{}", self.next)
+    }
+    fn insert_with_label(&mut self, label: String, data: PinData) {
+        self.restore_visible.get_or_insert(self.capture_visible.unwrap_or(false));
+        self.images.insert(label, data);
+    }
     fn insert(&mut self, data: PinData) -> String {
         self.next += 1;
         let label = format!("pin-{}", self.next);
-        self.restore_visible.get_or_insert(self.capture_visible.unwrap_or(false));
-        self.images.insert(label.clone(), data);
+        self.insert_with_label(label.clone(), data);
         label
     }
     fn remove(&mut self, label: &str) -> Option<bool> {
-        self.images.remove(label)?;
+        if let Some(data) = self.images.remove(label) {
+            let _ = std::fs::remove_file(&data.path);
+        }
         if self.images.is_empty() && self.capture_visible.is_none() {
             self.restore_visible.take()
         } else { None }
@@ -58,16 +75,34 @@ fn validate_radius(radius: f64) -> Result<f64, String> {
 
 /// Caller-window lookup: a pin window may only read its own image, so the
 /// label comes from the invoking window, never from frontend-supplied data.
-fn lookup(pins: &Pins, label: &str) -> Result<(Vec<u8>, f64), String> {
+fn lookup(pins: &Pins, label: &str) -> Result<(std::path::PathBuf, f64), String> {
     let data = pins
         .images
         .get(label)
         .ok_or_else(|| "pinned image not found".to_string())?;
-    Ok((data.image.clone(), data.radius))
+    Ok((data.path.clone(), data.radius))
 }
 
-fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
+pub(crate) fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() == "main" { Ok(()) } else { Err("main window required".into()) }
+}
+
+/// Capture-session commands are driven by the main window (session start) or by
+/// the capture overlay window (pin/confirm/cancel actions).
+pub(crate) fn capture_caller(window: &tauri::WebviewWindow) -> Result<(), String> {
+    match window.label() {
+        "main" | "capture-overlay" => Ok(()),
+        _ => Err("main or capture overlay window required".into()),
+    }
+}
+
+pub(crate) fn finish_session(pins: &PinState, outcome: &str) -> Result<bool, String> {
+    pins.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).finish(outcome)
+}
+
+pub(crate) fn session_active(pins: &PinState) -> bool {
+    let pins = pins.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    pins.capture_visible.is_some()
 }
 
 #[tauri::command]
@@ -93,14 +128,27 @@ pub fn capture_session_finish(
 #[tauri::command]
 pub async fn pin_image(
     window: tauri::WebviewWindow,
-    image: Vec<u8>,
+    // The composed image travels base64: a JSON array of millions of elements
+    // gets corrupted in transit and the pin renders an undecodable image.
+    image_base64: Option<String>,
+    image: Option<Vec<u8>>,
     radius: Option<f64>,
 ) -> Result<String, String> {
-    main_only(&window)?;
+    let image = match image_base64 {
+        Some(image_base64) => base64::engine::general_purpose::STANDARD
+            .decode(image_base64)
+            .map_err(|error| format!("pin image base64 decode failed: {error}"))?,
+        None => image.unwrap_or_default(),
+    };
+    capture_caller(&window)?;
     let app = window.app_handle().clone();
-    let monitor = window
-        .current_monitor()
-        .map_err(|error| error.to_string())?
+    // The pin belongs to the MAIN window's display: the invoking window is now
+    // the capture overlay (a separate fullscreen window), whose current monitor
+    // can be missing or the wrong one - that put pins nowhere.
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|main| main.current_monitor().ok().flatten())
+        .or_else(|| window.current_monitor().ok().flatten())
         .ok_or_else(|| "pin display not found".to_string())?;
     // The pin lives on the invoking window's monitor, so that monitor's own
     // scale factor is the correct physical↔logical conversion (mixed-DPI safe).
@@ -111,6 +159,12 @@ pub async fn pin_image(
     if !factor.is_finite() || factor <= 0.0 || bounds.width == 0 || bounds.height == 0 {
         return Err("invalid pin display geometry".into());
     }
+    // Everything runs in spawn_blocking: window creation on the main thread
+    // DEADLOCKS in this app (the overlay pre-create comment documents the same
+    // lesson). The main-thread version left the pin window in a state where
+    // show() returned Ok but the window never appeared and every later main
+    // thread query failed with FailedToReceiveMessage.
+    let app_bg = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let radius = validate_radius(radius.unwrap_or(0.0))?;
         let decoded = memopaws_ocr::image_util::decode_limited(&image).map_err(|error| error.to_string())?;
@@ -123,12 +177,25 @@ pub async fn pin_image(
             .min(bounds.width as f64 / w as f64)
             .min(bounds.height as f64 / h as f64)
             .min(1.0);
-        let label = app
+        // The composed PNG goes to DISK; the pin page fetches it via IPC.
+        let pins_dir = app_bg
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("pin data dir failed: {error}"))?
+            .join("pins");
+        std::fs::create_dir_all(&pins_dir).map_err(|error| format!("pin data dir failed: {error}"))?;
+        let label = app_bg
             .state::<PinState>()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(PinData { image, radius });
-        let created = tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("index.html#pin".into()))
+            .next_label();
+        let image_path = pins_dir.join(format!("{label}.png"));
+        std::fs::write(&image_path, &image).map_err(|error| format!("pin image write failed: {error}"))?;
+        app_bg.state::<PinState>()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert_with_label(label.clone(), PinData { path: image_path, radius });
+        let created = tauri::WebviewWindowBuilder::new(&app_bg, &label, tauri::WebviewUrl::App("index.html#pin".into()))
             .title("钉图")
             .always_on_top(true)
             .decorations(false)
@@ -141,7 +208,7 @@ pub async fn pin_image(
         let pin = match created {
             Ok(pin) => pin,
             Err(error) => {
-                app.state::<PinState>()
+                app_bg.state::<PinState>()
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .remove(&label);
@@ -155,29 +222,89 @@ pub async fn pin_image(
                     (w as f64 * scale).round() as u32,
                     (h as f64 * scale).round() as u32,
                 ))
-            })
-            .and_then(|_| pin.show());
+            });
+        // Deliberately NOT shown here: the reveal happens inside
+        // capture_overlay_end once the screen is clean (exit first, then show the
+        // pin), with pin_show as the error-path fallback so a pin is never lost.
         if let Err(error) = sized {
             let _ = pin.close();
-            app.state::<PinState>()
+            app_bg.state::<PinState>()
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .remove(&label);
             return Err(format!("pin window setup failed: {error}"));
         }
-        Ok(label)
+        // The window stays HIDDEN until the page has loaded and drawn its
+        // image (pin_ready + a belt-and-suspenders timer in capture_overlay_end).
+        // Showing it earlier paints an empty transparent frame first.
+        Ok::<String, String>(label)
     })
     .await
     .map_err(|error| format!("pin task failed: {error}"))?
 }
 
+/// The pin page calls this once it has actually drawn its image. Showing the
+/// window before that paints an empty transparent frame (a blank pin).
 #[tauri::command]
-pub fn get_pinned_image(
+pub fn pin_ready(window: tauri::WebviewWindow) -> Result<(), String> {
+    if !window.label().starts_with("pin-") {
+        return Err("pin window required".into());
+    }
+    // Mark ready so capture_overlay_end's reveal timer knows it can show now.
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    let app_for_closure = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(pin) = app_for_closure.get_webview_window(&label) {
+            let _ = pin.show();
+        }
+    });
+    Ok(())
+}
+
+/// Corner radius for a pin window (cheap metadata; the PNG itself travels over
+/// the binary channel via get_pinned_image_bytes).
+#[tauri::command]
+pub fn get_pinned_image_radius(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, PinState>,
-) -> Result<(Vec<u8>, f64), String> {
+) -> Result<f64, String> {
     let pins = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    lookup(&pins, window.label())
+    let (_, radius) = lookup(&pins, window.label())?;
+    Ok(radius)
+}
+
+/// Disk path + radius for the pin page.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinnedImageMeta {
+    pub path: String,
+    pub radius: f64,
+}
+
+#[tauri::command]
+pub fn get_pinned_image_meta(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, PinState>,
+) -> Result<PinnedImageMeta, String> {
+    let pins = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (path, radius) = lookup(&pins, window.label())?;
+    Ok(PinnedImageMeta { path: path.to_string_lossy().to_string(), radius })
+}
+
+/// Base64 handoff: the PNG is read from disk and sent as a base64 string.
+/// The asset protocol scope did not match on Windows, and the binary IPC
+/// channel (tauri::ipc::Response) failed intermittently. Base64 of a few
+/// hundred KB PNG is a few hundred KB string - reliable for IPC.
+#[tauri::command]
+pub fn get_pinned_image_base64(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, PinState>,
+) -> Result<String, String> {
+    let pins = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (path, _) = lookup(&pins, window.label())?;
+    let image = std::fs::read(&path).map_err(|error| format!("pin image read failed: {error}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(image))
 }
 
 #[tauri::command]
@@ -207,7 +334,7 @@ pub fn destroyed(window: &tauri::Window) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn data() -> PinData { PinData { image: vec![1], radius: 12.0 } }
+    fn data() -> PinData { PinData { path: std::path::PathBuf::from("pin-test.png"), radius: 12.0 } }
     #[test]
     fn independent_close_restores_only_last() {
         let mut pins = Pins::default();
@@ -281,7 +408,7 @@ mod tests {
         pins.begin(true).unwrap();
         let label = pins.insert(data());
         assert!(lookup(&pins, "main").is_err());
-        assert_eq!(lookup(&pins, &label).unwrap(), (vec![1], 12.0));
+        assert_eq!(lookup(&pins, &label).unwrap(), (std::path::PathBuf::from("pin-test.png"), 12.0));
     }
     #[test]
     fn duplicate_destroy_does_not_signal_restoration() {

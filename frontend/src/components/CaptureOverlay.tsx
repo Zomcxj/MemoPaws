@@ -52,6 +52,9 @@ interface Props {
   onPinImage?: (image: Uint8Array, cornerRadius: number) => Promise<void> | void;
   onCopyImage?: (image: Uint8Array) => Promise<void> | void;
   onSaveImage?: (image: Uint8Array) => Promise<void> | void;
+  // Visually hides the overlay (visibility:hidden) while keeping it mounted — restoreCaptureWindow
+  // uses this so the app UI becomes the last composited frame before the window hides.
+  visualHidden?: boolean;
   labels?: Partial<CaptureLabels>;
 }
 
@@ -120,6 +123,7 @@ export function CaptureOverlay({
   onPinImage,
   onCopyImage,
   onSaveImage,
+  visualHidden,
   labels,
 }: Props) {
   const text = { ...DEFAULT_LABELS, ...labels };
@@ -727,7 +731,7 @@ export function CaptureOverlay({
   };
 
   return (
-    <div className="capture-overlay" role="dialog" aria-modal="true" onMouseDown={handleMouseDown} onPointerDown={handlePointerDown}>
+    <div className={`capture-overlay${visualHidden ? " is-hidden" : ""}`} role="dialog" aria-modal="true" onMouseDown={handleMouseDown} onPointerDown={handlePointerDown}>
       <img ref={imgRef} src={background} alt="" draggable={false} />
       <canvas
         ref={previewCanvasRef}

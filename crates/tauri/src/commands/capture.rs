@@ -63,6 +63,33 @@ pub async fn capture_screen(
     .map_err(|error| format!("screen capture task failed: {error}"))?
 }
 
+/// Atomic window-state snapshot for the native dismissal assertion. Every field
+/// is read inside ONE main-thread command execution, so a sample can never mix
+/// values from different moments — sequential IPC reads produced "frankenstein"
+/// samples (visibility read before a hide, position read after a later restore)
+/// that looked like on-screen flashes which never happened.
+#[derive(Debug, serde::Serialize)]
+pub struct WindowProbe {
+    pub visible: bool,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub fn window_probe(window: tauri::WebviewWindow) -> Result<WindowProbe, String> {
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let size = window.outer_size().map_err(|error| error.to_string())?;
+    Ok(WindowProbe {
+        visible: window.is_visible().map_err(|error| error.to_string())?,
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct ImageResult {
     pub image: Vec<u8>,

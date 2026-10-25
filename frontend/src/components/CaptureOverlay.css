@@ -178,6 +178,12 @@
   pointer-events: none;
 }
 
+/* While the restore hides the overlay visually (still mounted), the recognize page behind it becomes
+   the last composited frame — dismissing a capture never shows a gray mask. */
+.capture-overlay.is-hidden {
+  visibility: hidden;
+}
+
 /* Two-row toolbar: row one holds annotation tools and properties, row two reuses the action buttons.
    Positioning uses ResizeObserver-measured sizes (left-edge clamping, flip above near the bottom). */
 .capture-overlay-toolbar {
@@ -210,10 +216,16 @@
   padding: 2px 8px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.4);
-  background: transparent;
+  /* Unified chip background shared by every tool/action/select in the overlay
+     (user feedback: the bottom-row buttons used to mix four different fills). */
+  background: rgba(20, 20, 20, 0.92);
   color: #fff;
   font-size: 12px;
   cursor: pointer;
+}
+
+.capture-overlay-tool:hover:not(:disabled):not(.is-active) {
+  background: rgba(48, 48, 48, 0.95);
 }
 
 .capture-overlay-tool.is-active {
@@ -232,11 +244,20 @@
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 6px;
-  background: transparent;
+  background: rgba(20, 20, 20, 0.92);
 }
 
 .capture-overlay-tool-width {
   width: 90px;
+}
+
+/* The width select otherwise renders with the light native system fill. */
+.capture-overlay-tool-width,
+.capture-overlay-tool-width option {
+  background: rgba(20, 20, 20, 0.92);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
 }
 
 .capture-overlay-tool:focus-visible,
@@ -399,9 +420,9 @@
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, .55);
-  border-radius: var(--radius-3);
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.92);
   color: #fff;
   cursor: pointer;
   font: inherit;
@@ -415,12 +436,17 @@
 }
 
 .capture-overlay-action:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(48, 48, 48, 0.95);
 }
 
 .capture-overlay-action.is-primary {
   margin-left: auto;
-  background: var(--accent);
+  background: rgba(77, 163, 255, 0.85);
+  border-color: rgba(77, 163, 255, 0.95);
+}
+
+.capture-overlay-action.is-primary:hover {
+  background: rgba(96, 176, 255, 0.92);
 }
 
 /* Bottom-right ∟-shaped drag handle: elevated to override the .recognize-page button global styles */

@@ -238,6 +238,11 @@
           try { sessionBegin(args && args.visible); resolve(null); } catch (error) { reject(error); }
         } else if (command === "capture_session_finish") {
           try { resolve(sessionFinish((args && args.outcome) || "cancel")); } catch (error) { reject(error); }
+        } else if (command === "capture_settle_fullscreen_exit") {
+          // Mocks the native offscreen settle; in the browser there is no window geometry to move.
+          resolve(true);
+        } else if (command === "pin_show") {
+          resolve(null);
         } else if (command === "image_crop") {
           // The frontend must crop on a local canvas; this branch only exists so implementations that
           // wrongly call IPC get caught by the image_crop count assertion instead of failing at decode.

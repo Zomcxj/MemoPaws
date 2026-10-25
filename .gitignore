@@ -17,6 +17,10 @@ frontend/node_modules/
 crates/tauri/gen/
 frontend/test-results/
 frontend/e2e/screenshots/
+frontend/e2e/pin-screen-*.png
+frontend/e2e/pin-screenshot-*.png
+frontend/e2e/pindiag-*.png
+frontend/e2e/desktop-*.png
 frontend/dist/
 *.log
 *.tmp

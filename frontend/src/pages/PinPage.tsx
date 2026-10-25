@@ -12,20 +12,38 @@ export function PinPage() {
   const [error, setError] = useState("");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const resizeQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let active = true;
     let objectUrl: string | null = null;
-    void invoke<[number[], number]>("get_pinned_image").then(([bytes, r]) => {
-      if (!active || !bytes?.length) return;
-      setRadius(r);
-      const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
-      objectUrl = URL.createObjectURL(blob);
-      setUrl(objectUrl);
-    }).catch((reason) => {
-      if (active) setError(reason instanceof Error ? reason.message : String(reason));
-    });
+    // The pin window is revealed the instant it is created; its webview may
+    // still be initializing, and invoke() before that silently never resolves
+    // (the pin showed an empty window). Wait for the DOM, then retry with
+    // backoff until the IPC channel answers.
+    const load = async (attempt: number) => {
+      try {
+        const b64 = await invoke<string>("get_pinned_image_base64");
+        if (!active || !b64) return;
+        const meta = await invoke<{ radius: number }>("get_pinned_image_meta");
+        if (!active) return;
+        setRadius(meta?.radius ?? 12);
+        setUrl(`data:image/png;base64,${b64}`);
+      } catch (reason) {
+        if (!active) return;
+        if (attempt >= 10) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        return load(attempt + 1);
+      }
+    };
+    void new Promise<void>((resolve) => {
+      if (document.readyState === "complete") resolve();
+      else window.addEventListener("load", () => resolve(), { once: true });
+    }).then(() => load(1));
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -102,6 +120,29 @@ export function PinPage() {
     };
   }, []);
 
+  // img elements do NOT render in Tauri's transparent windows (verified via
+  // screenshot: the DOM shows naturalWidth>0 and a 600x300 box, but the
+  // window is blank). Canvas DOES render. Draw the image onto a canvas; the
+  // img stays hidden for wheel-zoom to read naturalWidth.
+  useEffect(() => {
+    if (!url) return;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      // The image is now actually painted; only then may the window appear,
+      // otherwise it shows an empty transparent frame first.
+      void invoke("pin_ready").catch(() => {});
+    };
+    img.src = url;
+  }, [url]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") void invoke("pin_close").catch(() => {});
@@ -120,7 +161,9 @@ export function PinPage() {
   };
 
   if (error) return <div style={{ background: "transparent", color: "#f2a2a2", height: "100vh", display: "grid", placeItems: "center", fontSize: 12, padding: 8 }}>{error}</div>;
-  if (!url) return <div style={{ background: "transparent", color: "#888", height: "100vh", display: "grid", placeItems: "center" }}>加载中…</div>;
+  // No loading text: the pin window must paint nothing until the image is ready,
+  // so the first frames stay fully transparent instead of flashing gray glyphs.
+  if (!url) return <div style={{ width: "100vw", height: "100vh", background: "transparent" }} />;
   return (
     <div
       ref={containerRef}
@@ -129,7 +172,8 @@ export function PinPage() {
       onMouseDown={onMouseDown}
       onContextMenu={(e) => { e.preventDefault(); void invoke("pin_close").catch(() => {}); }}
     >
-      <img ref={imageRef} src={url} alt="pinned" draggable={false} style={{ width: "100%", height: "100%", objectFit: "fill", display: "block", background: "transparent", borderRadius: radius, cursor: "default" }} />
+      <img ref={imageRef} src={url} alt="pinned" draggable={false} style={{ display: "none" }} />
+      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", borderRadius: radius, cursor: "default" }} />
       <button
         type="button"
         aria-label="关闭钉图"

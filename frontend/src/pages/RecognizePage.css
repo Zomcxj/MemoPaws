@@ -615,22 +615,6 @@
   }
 }
 
-/* Exemption: the transition mask that prevents stale-frame flashes, fixed dark to match the capture overlay. */
-/* Solid-color transition mask while the window is restored after a confirmed capture, preventing stale screenshot frames from flashing. */
-.capture-cover {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: #262624;
-  /* Fade in quickly so dismissing a capture reads as a smooth dim instead of a hard gray flash. */
-  animation: capture-cover-fade 150ms ease-out;
-}
-
-@keyframes capture-cover-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 .history-head-actions {
   display: flex;
   align-items: center;
