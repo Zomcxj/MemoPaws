@@ -113,7 +113,7 @@ export function CaptureOverlayPage() {
     setBackground("");
     screenshotRef.current = null;
     return new Promise((resolve) => setTimeout(resolve, 60))
-      .then(() => invoke("capture_overlay_end", {
+      .then(() => invoke<{ restored: boolean; generation: number }>("capture_overlay_end", {
         outcome,
         revealPin,
         ocrText: result ? result.ocrText : null,
@@ -121,8 +121,11 @@ export function CaptureOverlayPage() {
         imageBase64: result ? bytesToBase64(result.image) : null,
       }))
       // Belt-and-suspenders: capture_overlay_end already hid this window and
-      // settled the session synchronously; this only covers a survivor.
-      .then(() => { void invoke("capture_overlay_finish").catch(() => {}); });
+      // settled the session synchronously; this only covers a survivor. The
+      // generation gates it: hidden-page IPC can be deferred for seconds, and
+      // an ungated settle+hide here raced the NEXT capture session and
+      // intermittently wedged it ("stuck on the main window").
+      .then((end) => { void invoke("capture_overlay_finish", { generation: end.generation }).catch(() => {}); });
   };
 
   const cropFromImage = async (region: RegionCss, scale: number, cornerRadius?: number, marks: Mark[] = []): Promise<Uint8Array> => {

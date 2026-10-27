@@ -197,6 +197,12 @@
 
 .capture-overlay-toolbar .capture-overlay-actions {
   position: static;
+  /* Same panel treatment as the tools row above (user feedback: the two bottom
+     rows must read as one toolbar, not a panel plus bare floating buttons). */
+  padding: 4px 6px;
+  border-radius: var(--radius-10);
+  background: rgba(20, 20, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .capture-overlay-tools {

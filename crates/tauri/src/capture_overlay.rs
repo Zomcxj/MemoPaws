@@ -102,6 +102,16 @@ pub async fn capture_overlay_begin(
             guard.shown = false;
             guard.generation += 1;
         }
+        // The 8s fallback must only cancel ITS OWN session: a normal end()
+        // also clears shown and bumps the generation, so without the generation
+        // check the timer of an already-finished session fired later, judged it
+        // "stuck", and corrupted the NEXT session (intermittent wedge after
+        // pin/confirm in quick succession).
+        let session_generation = {
+            let state = app.state::<Mutex<CaptureOverlayState>>();
+            let guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.generation
+        };
         let overlay = ensure_window(&app)?;
         // A borderless window sized to the monitor bounds is fullscreen to the eye
         // WITHOUT tao's fullscreen flag — nothing saves or restores a placement.
@@ -126,7 +136,7 @@ pub async fn capture_overlay_begin(
             let state = app_for_fallback.state::<Mutex<CaptureOverlayState>>();
             let should_recover = {
                 let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                let should = !guard.shown;
+                let should = !guard.shown && guard.generation == session_generation;
                 if should {
                     guard.image = None;
                     guard.generation += 1;
@@ -209,7 +219,7 @@ pub fn capture_overlay_end(
     translation: Option<String>,
     image_base64: Option<String>,
     pins: tauri::State<'_, PinState>,
-) -> Result<bool, String> {
+) -> Result<CaptureEndOutcome, String> {
     overlay_only(&window)?;
     let show_main = crate::pinned_images::finish_session(&pins, &outcome)?;
     let result = match (outcome.as_str(), image_base64) {
@@ -264,17 +274,44 @@ pub fn capture_overlay_end(
             });
         });
     }
-    Ok(show_main)
+    // The generation AFTER settling. The page passes it to
+    // capture_overlay_finish so that a DELAYED finish (hidden-page IPC can be
+    // deferred for seconds) can never settle or hide a NEWER session — that
+    // race intermittently wedged the next capture ("stuck on the main window").
+    let generation = app
+        .state::<Mutex<CaptureOverlayState>>()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .generation;
+    Ok(CaptureEndOutcome { restored: show_main, generation })
 }
 
 /// The (now hidden) overlay page's belt-and-suspenders after capture_overlay_end:
 /// settles a session that somehow survived, and hides the overlay.
+#[derive(Debug, serde::Serialize)]
+pub struct CaptureEndOutcome {
+    pub restored: bool,
+    pub generation: u64,
+}
+
+/// The (now hidden) overlay page's belt-and-suspenders after capture_overlay_end:
+/// settles a session that somehow survived, and hides the overlay. Generation-
+/// gated: a finish whose generation no longer matches means a NEW session has
+/// begun — it must touch nothing.
 #[tauri::command]
 pub fn capture_overlay_finish(
     window: tauri::WebviewWindow,
     pins: tauri::State<'_, PinState>,
+    generation: u64,
 ) -> Result<(), String> {
     overlay_only(&window)?;
+    {
+        let state = window.app_handle().state::<Mutex<CaptureOverlayState>>();
+        let guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.generation != generation {
+            return Ok(());
+        }
+    }
     let _ = crate::pinned_images::finish_session(&pins, "cancel");
     let _ = window.hide();
     Ok(())
