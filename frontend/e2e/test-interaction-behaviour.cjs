@@ -12,7 +12,8 @@ const { chromium } = require('playwright');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const BASE_URL = 'http://localhost:1420';
+// MEMOPAWS_E2E_BASE_URL overrides the dev server (e.g. when 1420 is taken by another project).
+const BASE_URL = process.env.MEMOPAWS_E2E_BASE_URL || 'http://localhost:1420';
 const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, 'mock-tauri.js'), 'utf-8');
 
 async function open(browser, nav) {

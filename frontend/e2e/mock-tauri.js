@@ -33,6 +33,8 @@
   // Outcome mode for download_update: success (offline package → ready) / error (→ update-download-error)
   // / reject (invoke rejects immediately and emits nothing, mirroring the backend's instant failure when the download mutex is taken)
   let downloadMode = "success";
+  // Clipboard thumbnail test hooks: fail the next thumbnail call for this id once.
+  let thumbFailOnce = null;
 
   // Pin-session state machine: the same rules as Rust `pinned_images::Pins` (visibility before the
   // first pin, session mutex, the three finish outcomes cancel/confirm/pin, restore only when the last pin dies).
@@ -137,6 +139,25 @@
        opaquePngCache = Array.from(bytes);
      }
      return opaquePngCache;
+   }
+
+   // Tiny 8×8 decodable PNG for clipboard_get_thumbnail: lets tests tell thumbnails
+   // (naturalWidth 8) apart from originals served by clipboard_get_image (128×96).
+   let thumbPngCache = null;
+   function thumbPngBytes() {
+     if (!thumbPngCache) {
+       const canvas = document.createElement("canvas");
+       canvas.width = 8;
+       canvas.height = 8;
+       const ctx = canvas.getContext("2d");
+       ctx.fillStyle = "rgb(1,2,3)";
+       ctx.fillRect(0, 0, canvas.width, canvas.height);
+       const binary = atob(canvas.toDataURL("image/png").split(",")[1]);
+       const bytes = new Uint8Array(binary.length);
+       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+       thumbPngCache = Array.from(bytes);
+     }
+     return thumbPngCache;
    }
 
    // capture_screen's target contract is tauri::ipc::Response: invoke directly receives the full-screen
@@ -295,7 +316,15 @@
           }
           resolve();
         } else if (command === "clipboard_get_image" || command === "capture_get_image") {
-          resolve([137, 80, 78, 71]);
+          resolve(opaquePngBytes());
+        } else if (command === "clipboard_get_thumbnail") {
+          const id = args && args.id;
+          if (thumbFailOnce !== null && Number(thumbFailOnce) === Number(id)) {
+            thumbFailOnce = null;
+            reject(new Error("Mock thumbnail failed"));
+            return;
+          }
+          resolve(thumbPngBytes());
         } else {
           console.warn("[Mock] Unknown command: " + command);
           resolve(null);
@@ -404,6 +433,10 @@
   window.__MOCK_TAURI_SET_OCR_DELAY__ = function (ms) { aiOcrDelay = Number(ms) || 0; };
   window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__ = function (mode) { localOcrMode = clampLocalOcrMode(mode); sessionStorage.setItem(LOCAL_OCR_MODE_KEY + ":ocr", localOcrMode); };
   window.__MOCK_TAURI_SET_LOCAL_OCR_LANGUAGES_MODE__ = function (mode) { localOcrLanguagesMode = clampLanguagesMode(mode); sessionStorage.setItem(LOCAL_OCR_MODE_KEY + ":langs", localOcrLanguagesMode); };
+  // Replaces the clipboard_list fixture before page scripts run (call from a second addInitScript).
+  window.__MOCK_TAURI_SET_CLIPBOARD_ITEMS__ = function (items) { MOCK_DATA.clipboard_list = items; };
+  // Makes the next clipboard_get_thumbnail call for this id reject exactly once (failure/retry path).
+  window.__MOCK_TAURI_FAIL_THUMB_ONCE__ = function (id) { thumbFailOnce = id; };
 
   // Also set __TAURI__ for older compatibility
   window.__TAURI__ = {
