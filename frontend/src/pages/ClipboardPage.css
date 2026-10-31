@@ -355,6 +355,12 @@
   padding: var(--space-7) var(--space-12);
 }
 
+.clipboard-thumb-loading {
+  height: 44px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-6);
+}
+
 .clipboard-delete {
   color: var(--error);
 }

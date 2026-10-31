@@ -113,14 +113,22 @@ export function ClipboardPage({ language = "zh" }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"list" | "grid">("list");
-  const [imageUrls, setImageUrls] = useState<Record<number, string>>({});
-  const [imageBytes, setImageBytes] = useState<Record<number, number[]>>({});
+  const [thumbs, setThumbs] = useState<Record<number, string>>({});
+  const [thumbFailed, setThumbFailed] = useState<Record<number, boolean>>({});
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [previewView, setPreviewView] = useState<PreviewView>(IDLE_VIEW);
   const [dragging, setDragging] = useState(false);
+  const thumbUrlsRef = useRef<Record<number, string>>({});
+  const previewUrlRef = useRef<string | null>(null);
+  const previewToken = useRef(0);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const inflightRef = useRef<Set<number>>(new Set());
+  const activeRef = useRef<Set<number>>(new Set());
+  const pendingRef = useRef<number[]>([]);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const t = copy[language];
@@ -151,10 +159,20 @@ export function ClipboardPage({ language = "zh" }: Props) {
     dragRef.current = null;
     setDragging(false);
     setPreviewId(null);
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setPreviewUrl(null);
   }, []);
 
   const openPreview = async (id: number) => {
-    if (!(await loadImage(id))) return;
+    const blob = await loadFullImage(id);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = url;
+    setPreviewUrl(url);
     setPreviewView(IDLE_VIEW);
     setPreviewId(id);
   };
@@ -309,37 +327,114 @@ export function ClipboardPage({ language = "zh" }: Props) {
     window.localStorage.setItem("clipboard_view_mode", next);
   };
 
-  // Revoke object URLs only on unmount: depending on imageUrls would revoke existing URLs early when new images arrive.
-  const imageUrlsRef = useRef<Record<number, string>>({});
-  imageUrlsRef.current = imageUrls;
-  useEffect(() => {
-    return () => {
-      Object.values(imageUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, []);
+  const releaseThumb = (id: number) => {
+    const url = thumbUrlsRef.current[id];
+    if (url) {
+      URL.revokeObjectURL(url);
+      delete thumbUrlsRef.current[id];
+    }
+    setThumbs((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  };
 
-  const loadImage = async (id: number) => {
-    if (imageUrls[id]) return true;
-    try {
-      const bytes = await invoke<number[]>("clipboard_get_image", { id });
-      const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
-      setImageBytes((prev) => ({ ...prev, [id]: bytes }));
-      setImageUrls((prev) => ({ ...prev, [id]: URL.createObjectURL(blob) }));
-      return true;
-    } catch (reason) {
-      setError(errorText(reason));
-      return false;
+  const pump = () => {
+    while (inflightRef.current.size < 2 && pendingRef.current.length) {
+      const id = pendingRef.current.shift()!;
+      if (!activeRef.current.has(id)) continue;
+      inflightRef.current.add(id);
+      invoke<ArrayBuffer>("clipboard_get_thumbnail", { id })
+        .then((buffer) => {
+          if (!activeRef.current.has(id)) return; // stale after offscreen/delete/unmount
+          const url = URL.createObjectURL(new Blob([new Uint8Array(buffer)], { type: "image/png" }));
+          const previous = thumbUrlsRef.current[id];
+          if (previous) URL.revokeObjectURL(previous);
+          thumbUrlsRef.current[id] = url;
+          setThumbs((current) => ({ ...current, [id]: url }));
+          setThumbFailed((current) => {
+            if (!(id in current)) return current;
+            const next = { ...current };
+            delete next[id];
+            return next;
+          });
+        })
+        .catch(() => {
+          if (activeRef.current.has(id)) setThumbFailed((current) => ({ ...current, [id]: true }));
+        })
+        .finally(() => {
+          inflightRef.current.delete(id);
+          pump();
+        });
     }
   };
 
-  useEffect(() => {
-    if (view !== "grid") return;
-    for (const item of items) {
-      if (item.content_type === "image" && !imageUrls[item.id]) {
-        void loadImage(item.id);
-      }
+  const enqueueThumb = (id: number) => {
+    if (thumbUrlsRef.current[id] || inflightRef.current.has(id) || pendingRef.current.includes(id)) return;
+    activeRef.current.add(id);
+    pendingRef.current.push(id);
+    pump();
+  };
+
+  const dropThumb = (id: number) => {
+    activeRef.current.delete(id);
+    pendingRef.current = pendingRef.current.filter((value) => value !== id);
+    releaseThumb(id);
+  };
+
+  const loadFullImage = async (id: number): Promise<Blob | null> => {
+    const token = ++previewToken.current;
+    try {
+      const buffer = await invoke<ArrayBuffer>("clipboard_get_image", { id });
+      if (token !== previewToken.current) return null; // a newer preview superseded this one
+      return new Blob([new Uint8Array(buffer)], { type: "image/png" });
+    } catch (reason) {
+      setError(errorText(reason));
+      return null;
     }
-  }, [items, view]);
+  };
+
+  // Near-viewport thumbnail lifecycle; callbacks only touch refs and stable setters.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || view !== "grid") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = Number((entry.target as HTMLElement).dataset.clipboardId);
+          if (!Number.isFinite(id)) continue;
+          if (entry.isIntersecting) enqueueThumb(id);
+          else dropThumb(id);
+        }
+      },
+      { root: body, rootMargin: "160px 0px" },
+    );
+    body.querySelectorAll<HTMLElement>("[data-clipboard-id]").forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [view, items, search]);
+
+  // Release thumbnails that no longer have a rendered card (deleted or filtered out).
+  useEffect(() => {
+    const present = new Set(items.map((item) => item.id));
+    for (const id of Object.keys(thumbUrlsRef.current).map(Number)) {
+      if (!present.has(id)) dropThumb(id);
+    }
+  }, [items]);
+
+  useEffect(() => {
+    if (view === "grid") return;
+    for (const id of Object.keys(thumbUrlsRef.current).map(Number)) dropThumb(id);
+  }, [view]);
+
+  // Revoke everything on unmount (StrictMode-safe: queue state lives in refs).
+  useEffect(() => {
+    return () => {
+      Object.values(thumbUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
 
   const copyText = async (value: string) => {
     try {
@@ -351,8 +446,8 @@ export function ClipboardPage({ language = "zh" }: Props) {
 
   const copyImage = async (id: number) => {
     try {
-      const bytes = imageBytes[id] ?? await invoke<number[]>("clipboard_get_image", { id });
-      const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+      const buffer = await invoke<ArrayBuffer>("clipboard_get_image", { id });
+      const blob = new Blob([new Uint8Array(buffer)], { type: "image/png" });
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
     } catch (reason) {
       setError(errorText(reason));
@@ -448,7 +543,7 @@ export function ClipboardPage({ language = "zh" }: Props) {
             </button>
           </div>
         )}
-        <div className="clipboard-body">
+        <div className="clipboard-body" ref={bodyRef}>
           {filtered.length === 0 ? (
             <div className="clipboard-empty">{search ? t.noMatch : t.empty}</div>
           ) : (
@@ -476,8 +571,8 @@ export function ClipboardPage({ language = "zh" }: Props) {
                         {formatClipboardLine(item)}
                       </div>
                     ) : item.content_type === "image" ? (
-                      <div className="clipboard-image-wrap">
-                        {imageUrls[item.id] ? (
+                      <div className="clipboard-image-wrap" data-clipboard-id={item.id}>
+                        {thumbs[item.id] ? (
                           <button
                             type="button"
                             className="clipboard-image-open"
@@ -485,13 +580,26 @@ export function ClipboardPage({ language = "zh" }: Props) {
                             title={t.preview}
                             aria-label={t.preview}
                           >
-                            <img src={imageUrls[item.id]} alt={t.imageAlt} />
+                            <img src={thumbs[item.id]} alt={t.imageAlt} />
                           </button>
-                        ) : (
-                          <button className="clipboard-image-load" onClick={() => loadImage(item.id)} title={t.loadImage}>
+                        ) : thumbFailed[item.id] ? (
+                          <button
+                            className="clipboard-image-load"
+                            onClick={() => {
+                              setThumbFailed((current) => {
+                                const next = { ...current };
+                                delete next[item.id];
+                                return next;
+                              });
+                              enqueueThumb(item.id);
+                            }}
+                            title={t.loadImage}
+                          >
                             <img src="/assets/icons/download.svg" alt="" aria-hidden="true" />
                             {t.loadImage}
                           </button>
+                        ) : (
+                          <div className="clipboard-thumb-loading" aria-hidden="true" />
                         )}
                         <div className="clipboard-image-name" title={item.image_path || undefined}>
                           {item.image_path?.split(/[\\/]/).pop() || "image.png"}
@@ -572,7 +680,7 @@ export function ClipboardPage({ language = "zh" }: Props) {
           </div>
         </div>
       )}
-      {previewId !== null && imageUrls[previewId] && (
+      {previewId !== null && previewUrl && (
         <div
           className="clipboard-preview"
           role="dialog"
@@ -604,7 +712,7 @@ export function ClipboardPage({ language = "zh" }: Props) {
             onDoubleClick={resetView}
           >
             <img
-              src={imageUrls[previewId]}
+              src={previewUrl}
               alt={t.imageAlt}
               draggable={false}
               style={{ transform: `translate3d(${previewView.x}px, ${previewView.y}px, 0) scale(${previewView.zoom})` }}
