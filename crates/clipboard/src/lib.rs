@@ -269,9 +269,19 @@ impl ClipboardManager {
     }
 
     pub fn get_image_bytes(&self, id: u64) -> Result<Vec<u8>, String> {
+        fs::read(self.image_path_for(id)?).map_err(|e| e.to_string())
+    }
+
+    /// Cross-crate test/embedding constructor with explicit storage locations.
+    pub fn open_at(path: PathBuf, images_dir: PathBuf) -> Result<Self, String> {
+        Self::load_from(path, images_dir)
+    }
+
+    /// Resolves an image record's source path without reading the file.
+    pub fn image_path_for(&self, id: u64) -> Result<PathBuf, String> {
         let item = self.items.iter().find(|i| i.id == id).ok_or_else(|| "item not found".to_string())?;
         let image_path = item.image_path.as_ref().ok_or_else(|| "not an image item".to_string())?;
-        fs::read(self.images_dir.join(image_path)).map_err(|e| e.to_string())
+        Ok(self.images_dir.join(image_path))
     }
 
     fn save(&self) -> Result<(), String> {

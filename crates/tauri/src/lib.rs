@@ -16,6 +16,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use commands::{
     add, ai_ocr, ai_translate, capture_delete, capture_get_image, capture_list, capture_screen,
     choose_data_dir, save_image_as, clipboard_clear, clipboard_delete, clipboard_delete_many, clipboard_get_image,
+    clipboard_get_thumbnail,
     window_probe,
     clipboard_list, clipboard_paste_image, clipboard_set_locked, clipboard_update_text, delete,
     download_update, get_config, get_data_dir, get_storage_dir_conflict, get_theme, get_value,
@@ -237,6 +238,7 @@ pub fn run() {
             clipboard_delete,
             clipboard_clear,
             clipboard_get_image,
+            clipboard_get_thumbnail,
             clipboard_set_locked,
             clipboard_update_text,
             clipboard_delete_many,

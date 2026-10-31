@@ -24,6 +24,7 @@ macro_rules! lock_recover {
 
 mod capture;
 mod clipboard;
+mod clipboard_thumbnail;
 mod config;
 mod history;
 mod keys;
@@ -35,6 +36,7 @@ mod update;
 
 pub use capture::*;
 pub use clipboard::*;
+pub use clipboard_thumbnail::*;
 pub use config::*;
 pub use history::*;
 pub use keys::*;
