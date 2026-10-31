@@ -78,8 +78,10 @@ pub fn clipboard_clear(state: tauri::State<'_, ClipboardState>) -> Result<(), St
 pub fn clipboard_get_image(
     id: u64,
     state: tauri::State<'_, ClipboardState>,
-) -> Result<Vec<u8>, String> {
-    clipboard_mut(state, |clipboard| clipboard.get_image_bytes(id))
+) -> Result<tauri::ipc::Response, String> {
+    clipboard_mut(state, |clipboard| {
+        Ok(tauri::ipc::Response::new(clipboard.get_image_bytes(id)?))
+    })
 }
 
 #[tauri::command]
