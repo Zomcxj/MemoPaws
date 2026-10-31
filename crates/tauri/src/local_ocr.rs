@@ -56,6 +56,71 @@ fn white_bgra(pixels: &mut image::RgbaImage) {
     }
 }
 
+// Narrow-image recovery: an empty result on a narrow crop gets one bounded
+// enlargement retry (integer scale 2-3, 16px white border) before giving up.
+const SMALL_EDGE: u32 = 128;
+const RECOVERY_PADDING: u32 = 16;
+const MAX_RECOVERY_SCALE: u32 = 3;
+
+// Padded total size for the retry, or None when the image is not narrow, the
+// integer scale is below 2, the padded size busts the engine max, or the RGBA
+// budget would be exceeded.
+fn recovery_size(w: u32, h: u32, max: u32) -> Option<(u32, u32)> {
+    if w == 0 || h == 0 || max == 0 || w.min(h) > SMALL_EDGE {
+        return None;
+    }
+    let available = max.checked_sub(2 * RECOVERY_PADDING)?;
+    let scale = (available / w.max(h)).min(MAX_RECOVERY_SCALE);
+    if scale < 2 {
+        return None;
+    }
+    let total_w = w.checked_mul(scale)?.checked_add(2 * RECOVERY_PADDING)?;
+    let total_h = h.checked_mul(scale)?.checked_add(2 * RECOVERY_PADDING)?;
+    if total_w > max || total_h > max {
+        return None;
+    }
+    check_rgba_size(total_w, total_h).ok()?;
+    Some((total_w, total_h))
+}
+
+// Enlarges the content to fit inside a white-padded canvas of the given total
+// size; pixels are copied raw so white_bgra can run exactly once afterwards.
+fn padded_enlarged(image: &image::RgbaImage, total_w: u32, total_h: u32) -> Result<image::RgbaImage, String> {
+    let content_w = total_w.checked_sub(2 * RECOVERY_PADDING).ok_or("invalid recovery size")?;
+    let content_h = total_h.checked_sub(2 * RECOVERY_PADDING).ok_or("invalid recovery size")?;
+    if content_w == 0 || content_h == 0 {
+        return Err("invalid recovery size".into());
+    }
+        let scaled = if (content_w, content_h) == (image.width(), image.height()) {
+            image.clone()
+        } else {
+            image::imageops::resize(image, content_w, content_h, image::imageops::FilterType::Lanczos3)
+        };
+    let mut padded = image::RgbaImage::from_pixel(total_w, total_h, image::Rgba([255, 255, 255, 255]));
+    for (x, y, pixel) in scaled.enumerate_pixels() {
+        padded.put_pixel(x + RECOVERY_PADDING, y + RECOVERY_PADDING, *pixel);
+    }
+    Ok(padded)
+}
+
+// First pass, then one bounded enlargement retry when the result is empty on a
+// narrow crop. Errors from the retry propagate unchanged.
+fn recognize_with_recovery(
+    image: &image::RgbaImage,
+    max: u32,
+    mut recognize_image: impl FnMut(&image::RgbaImage) -> Result<String, String>,
+) -> Result<String, String> {
+    let text = recognize_image(image)?;
+    if !text.trim().is_empty() {
+        return Ok(text);
+    }
+    let Some((total_w, total_h)) = recovery_size(image.width(), image.height(), max) else {
+        return Ok(text);
+    };
+    let recovery = padded_enlarged(image, total_w, total_h)?;
+    recognize_image(&recovery)
+}
+
 /// Region words Windows puts into OCR language display names. The mention is noise in a language
 /// picker ("中文（简体，中国大陆）" / "中文(中华人民共和国)" / "Chinese (Simplified, Mainland
 /// China)"), so segments containing them are dropped and the leftover punctuation repaired.
@@ -165,23 +230,26 @@ mod win {
             // Explicit error: never auto-install language packs, never silently fall back to cloud OCR.
             return Err("Selected Windows OCR language is not installed; install its OCR language capability first".into());
         }
-        let max = OcrEngine::MaxImageDimension().map_err(|e| e.to_string())?;
-        let mut pixels = prepare(bytes, max)?;
-        white_bgra(&mut pixels);
-        let writer = DataWriter::new().map_err(|e| e.to_string())?;
-        writer.WriteBytes(pixels.as_raw()).map_err(|e| e.to_string())?;
-        let buffer = writer.DetachBuffer().map_err(|e| e.to_string())?;
-        let bitmap = SoftwareBitmap::CreateCopyFromBuffer(&buffer, BitmapPixelFormat::Bgra8, pixels.width() as i32, pixels.height() as i32)
-            .map_err(|e| e.to_string())?;
-        let language = Language::CreateLanguage(&HSTRING::from(tag)).map_err(|e| e.to_string())?;
+    let max = OcrEngine::MaxImageDimension().map_err(|e| e.to_string())?;
+    let pixels = prepare(bytes, max)?;
+    let language = Language::CreateLanguage(&HSTRING::from(tag)).map_err(|e| e.to_string())?;
         let engine = OcrEngine::TryCreateFromLanguage(&language).map_err(|e| format!("Cannot create installed Windows OCR engine: {e}"))?;
-        let result = engine.RecognizeAsync(&bitmap).map_err(|e| e.to_string())?.join().map_err(|e| format!("Windows OCR failed: {e}"))?;
-        let lines = result.Lines().map_err(|e| e.to_string())?;
-        let mut text = Vec::new();
-        for i in 0..lines.Size().map_err(|e| e.to_string())? {
-            text.push(lines.GetAt(i).map_err(|e| e.to_string())?.Text().map_err(|e| e.to_string())?.to_string());
-        }
-        Ok(text.join("\n").trim().to_string())
+        recognize_with_recovery(&pixels, max, |image| {
+            let mut bgra = image.clone();
+            white_bgra(&mut bgra);
+            let writer = DataWriter::new().map_err(|e| e.to_string())?;
+            writer.WriteBytes(bgra.as_raw()).map_err(|e| e.to_string())?;
+            let buffer = writer.DetachBuffer().map_err(|e| e.to_string())?;
+            let bitmap = SoftwareBitmap::CreateCopyFromBuffer(&buffer, BitmapPixelFormat::Bgra8, bgra.width() as i32, bgra.height() as i32)
+                .map_err(|e| e.to_string())?;
+            let result = engine.RecognizeAsync(&bitmap).map_err(|e| e.to_string())?.join().map_err(|e| format!("Windows OCR failed: {e}"))?;
+            let lines = result.Lines().map_err(|e| e.to_string())?;
+            let mut text = Vec::new();
+            for i in 0..lines.Size().map_err(|e| e.to_string())? {
+                text.push(lines.GetAt(i).map_err(|e| e.to_string())?.Text().map_err(|e| e.to_string())?.to_string());
+            }
+            Ok(text.join("\n").trim().to_string())
+        })
     }
 }
 
@@ -224,6 +292,83 @@ mod tests {
         let mut pixels = image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 0, 255, 0, 0, 255]).unwrap();
         white_bgra(&mut pixels);
         assert_eq!(pixels.as_raw(), &vec![255, 255, 255, 255, 0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn non_empty_first_result_skips_recovery() {
+        let image = image::RgbaImage::new(64, 32);
+        let mut calls = 0;
+        let text = recognize_with_recovery(&image, 1024, |_| { calls += 1; Ok("hello".into()) }).unwrap();
+        assert_eq!(text, "hello");
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn narrow_empty_result_retries_enlarged_and_padded() {
+        let image = image::RgbaImage::new(64, 32);
+        let mut sizes = Vec::new();
+        let text = recognize_with_recovery(&image, 1024, |img| {
+            sizes.push((img.width(), img.height()));
+            if sizes.len() == 1 { Ok("  ".into()) } else { Ok("recovered".into()) }
+        }).unwrap();
+        assert_eq!(text, "recovered");
+        assert_eq!(sizes, vec![(64, 32), (64 * 3 + 32, 32 * 3 + 32)]);
+    }
+
+    #[test]
+    fn wide_strip_without_headroom_stays_single_pass() {
+        let image = image::RgbaImage::new(600, 20);
+        let mut calls = 0;
+        let text = recognize_with_recovery(&image, 1024, |_| { calls += 1; Ok("".into()) }).unwrap();
+        assert_eq!(text, "");
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn non_narrow_image_stays_single_pass() {
+        let image = image::RgbaImage::new(200, 300);
+        let mut calls = 0;
+        let text = recognize_with_recovery(&image, 1024, |_| { calls += 1; Ok("".into()) }).unwrap();
+        assert_eq!(text, "");
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn recovery_over_rgba_budget_stays_single_pass() {
+        // max=120000, 59984×128 → scale 2 → 120000×288 ≈ 138MB > 128MiB budget.
+        let image = image::RgbaImage::new(59984, 128);
+        let mut calls = 0;
+        let text = recognize_with_recovery(&image, 120000, |_| { calls += 1; Ok("".into()) }).unwrap();
+        assert_eq!(text, "");
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn recovery_retry_error_propagates() {
+        let image = image::RgbaImage::new(64, 32);
+        let outcome = recognize_with_recovery(&image, 1024, |img| {
+            if img.width() == 64 { Ok("".into()) } else { Err("engine boom".into()) }
+        });
+        assert_eq!(outcome.unwrap_err(), "engine boom");
+    }
+
+    #[test]
+    fn padded_enlarged_scales_content_and_whites_border() {
+        let mut image = image::RgbaImage::new(2, 1);
+        image.put_pixel(0, 0, image::Rgba([10, 20, 30, 255]));
+        image.put_pixel(1, 0, image::Rgba([40, 50, 60, 255]));
+        // No-resize branch: content is copied raw inside a white border.
+        let padded = padded_enlarged(&image, 2 + 2 * RECOVERY_PADDING, 1 + 2 * RECOVERY_PADDING).unwrap();
+        assert_eq!(padded.dimensions(), (34, 33));
+        assert_eq!(*padded.get_pixel(0, 0), image::Rgba([255, 255, 255, 255]));
+        assert_eq!(*padded.get_pixel(33, 32), image::Rgba([255, 255, 255, 255]));
+        assert_eq!(*padded.get_pixel(16, 16), image::Rgba([10, 20, 30, 255]));
+        assert_eq!(*padded.get_pixel(17, 16), image::Rgba([40, 50, 60, 255]));
+        // Resize branch: content lands inside the border; resampled values may blend.
+        let scaled = padded_enlarged(&image, 2 * 3 + 2 * RECOVERY_PADDING, 1 * 3 + 2 * RECOVERY_PADDING).unwrap();
+        assert_eq!(scaled.dimensions(), (38, 35));
+        assert_eq!(*scaled.get_pixel(0, 0), image::Rgba([255, 255, 255, 255]));
+        assert_ne!(*scaled.get_pixel(20, 16), image::Rgba([255, 255, 255, 255]));
     }
 
     #[test]
