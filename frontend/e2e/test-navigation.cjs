@@ -5,7 +5,8 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const BASE_URL = 'http://localhost:1420';
+// MEMOPAWS_E2E_BASE_URL overrides the dev server (e.g. when 1420 is taken by another project).
+const BASE_URL = process.env.MEMOPAWS_E2E_BASE_URL || 'http://localhost:1420';
 const SCREENSHOTS_DIR = path.join(__dirname, 'screenshots');
 const MOCK_SCRIPT = fs.readFileSync(path.join(__dirname, 'mock-tauri.js'), 'utf-8');
 
@@ -20,11 +21,12 @@ const NAV_SELECTORS = {
 
 async function assertCanonicalPage(page, expectedSelector) {
   const selectors = Object.values(NAV_SELECTORS);
-  const counts = await Promise.all(selectors.map(selector => page.locator(selector).count()));
+  // Keep-alive mounts every page; only the active one may be visible.
+  const counts = await Promise.all(selectors.map(selector => page.locator(selector + ':visible').count()));
   const total = counts.reduce((sum, count) => sum + count, 0);
   const expectedIndex = selectors.indexOf(expectedSelector);
   if (total !== 1 || counts[expectedIndex] !== 1) {
-    throw new Error(`Expected exactly one canonical page selector total for ${expectedSelector}, found total=${total}, counts=${JSON.stringify(counts)}`);
+    throw new Error(`Expected exactly one visible canonical page for ${expectedSelector}, found total=${total}, counts=${JSON.stringify(counts)}`);
   }
 }
 

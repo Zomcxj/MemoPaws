@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTheme } from "./hooks/useTheme";
@@ -122,15 +122,15 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const renderPage = () => {
-    switch (currentPage) {
-      case "recognize": return <RecognizePage language={language} />;
-      case "memo": return <MemoPage language={language} onDirtyChange={setMemoDirty} renderTheme={resolvedTheme} />;
-      case "keys": return <KeysPage language={language} />;
-      case "clipboard": return <ClipboardPage language={language} />;
-      case "settings": return <SettingsPage theme={theme} onThemeChange={setTheme} onLanguageChange={changeLanguage} onUpdateFound={setLatestVersion} glass={glass} onGlassChange={setGlass} />;
-    }
-  };
+  // All pages stay mounted (hidden) so in-flight work — a running recognition,
+  // clipboard thumbnail loads, an unsaved memo draft — survives page switches.
+  const pages: Array<[Page, ReactNode]> = [
+    ["recognize", <RecognizePage key="recognize" language={language} />],
+    ["memo", <MemoPage key="memo" language={language} onDirtyChange={setMemoDirty} renderTheme={resolvedTheme} />],
+    ["keys", <KeysPage key="keys" language={language} />],
+    ["clipboard", <ClipboardPage key="clipboard" language={language} />],
+    ["settings", <SettingsPage key="settings" theme={theme} onThemeChange={setTheme} onLanguageChange={changeLanguage} onUpdateFound={setLatestVersion} glass={glass} onGlassChange={setGlass} />],
+  ];
 
   return (
     <div className="app-shell">
@@ -141,7 +141,11 @@ export default function App() {
           language={language}
           updateAvailable={latestVersion !== null}
         />
-        <main className="app-content">{renderPage()}</main>
+        <main className="app-content">
+          {pages.map(([id, node]) => (
+            <div key={id} className="app-page-slot" hidden={currentPage !== id}>{node}</div>
+          ))}
+        </main>
       </div>
       {searchOpen && <GlobalSearch language={language} onClose={() => setSearchOpen(false)} onNavigate={navigate} />}
     </div>

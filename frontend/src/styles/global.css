@@ -166,6 +166,10 @@ html[data-window="capture"] #root {
   min-width: 0;
 }
 
+.app-page-slot[hidden] {
+  display: none;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
