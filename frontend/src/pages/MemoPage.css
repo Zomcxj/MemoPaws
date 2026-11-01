@@ -252,6 +252,33 @@
   font-size: var(--font-size-12);
 }
 
+.memo-tags-row button,
+.memo-history-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-8);
+  padding: var(--space-4) var(--space-12);
+  background: var(--bg-neutral-button);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.memo-tags-row button:hover:not(:disabled),
+.memo-history-row button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--bg-active);
+}
+
+.memo-tags-row button:disabled,
+.memo-history-row button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
 .memo-tags-row > span {
   color: var(--text-muted);
   font-size: var(--font-size-11);

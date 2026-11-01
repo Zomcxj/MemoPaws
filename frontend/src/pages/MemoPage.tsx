@@ -343,6 +343,11 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
 
   const openHistory = async () => {
     if (!selected) return;
+    // Toggle: a second click hides the panel instead of refetching.
+    if (revisions !== null) {
+      setRevisions(null);
+      return;
+    }
     try {
       setRevisions(await invoke<Revision[]>("memo_revision_list", { id: selected.id }));
     } catch (reason) {
@@ -374,6 +379,7 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
     if (selected?.id === memo.id || !canDiscard()) return;
     setSelected(memo);
     setDirty(false);
+    setRevisions(null);
   };
 
   const createDraft = async () => {

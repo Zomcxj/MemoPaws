@@ -65,6 +65,11 @@ async function memoRevisionChecks(browser) {
     await page.getByRole('button', { name: '历史版本' }).click();
     await page.locator('.memo-history-row').first().waitFor({ timeout: 5000 });
     assert.ok(await page.locator('.memo-history').getByText('2026-10-31 10:00:00').count() === 1, 'revision time must be listed');
+    // Toggle: a second click hides the panel, a third shows it again.
+    await page.getByRole('button', { name: '历史版本' }).click();
+    await page.locator('.memo-history').waitFor({ state: 'detached', timeout: 5000 });
+    await page.getByRole('button', { name: '历史版本' }).click();
+    await page.locator('.memo-history-row').first().waitFor({ timeout: 5000 });
     await page.locator('.memo-history-row').getByRole('button', { name: '恢复' }).first().click();
     await page.waitForFunction(() => document.querySelector('.memo-editor')?.value === '旧版本内容（恢复用）', null, { timeout: 5000 });
     console.log('  memo revision restore: ok');
