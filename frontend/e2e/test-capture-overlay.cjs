@@ -42,11 +42,21 @@ const PIN_IMAGE_SCRIPT = `
       }
       return cached;
     }
+    function base64() {
+      const bytes = png();
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
     const original = window.__TAURI_INTERNALS__.invoke;
     window.__TAURI_INTERNALS__.invoke = function (command, payload) {
-      if (command === "get_pinned_image") {
+      if (command === "get_pinned_image_base64") {
         window.__MOCK_TAURI_COMMAND_CALLS__.push({ command: command, args: payload || null, visible: true });
-        return Promise.resolve([Array.from(png()), 16]);
+        return Promise.resolve(base64());
+      }
+      if (command === "get_pinned_image_meta") {
+        window.__MOCK_TAURI_COMMAND_CALLS__.push({ command: command, args: payload || null, visible: true });
+        return Promise.resolve({ radius: 16 });
       }
       return original.call(this, command, payload);
     };
@@ -110,6 +120,17 @@ async function waitForOverlay(page) {
     throw new Error(`overlay background must decode to the full 1280x720 screenshot, saw ${JSON.stringify(natural)}`);
   }
   return overlay;
+}
+
+// The standalone overlay window is a page of its own now: open #capture-overlay
+// directly and the mock serves the screenshot as capture_overlay_image.
+async function openOverlayPage(browser, extraScripts = [], contextOptions = {}) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...contextOptions });
+  const page = await context.newPage();
+  for (const script of [MOCK_SCRIPT, ...extraScripts]) await page.addInitScript(script);
+  await page.goto(`${BASE_URL}/#capture-overlay`, { waitUntil: "networkidle" });
+  const overlay = await waitForOverlay(page);
+  return { context, page, overlay };
 }
 
 const imageCropCalls = (page) =>
@@ -208,166 +229,93 @@ async function captureOverlayFlow(browser) {
   await page.addInitScript(MOCK_SCRIPT);
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
 
+  // Main-window capture dance: register the session, hide the window, take the
+  // screenshot, and hand the PNG to the standalone overlay window. The old
+  // geometry/fullscreen dance is gone from the product, so it is gone from here.
   await page.getByRole("combobox", { name: "显示器" }).selectOption("1");
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent("memopaws-capture")));
-  const overlay = await waitForOverlay(page);
-  let captureCall = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "capture_screen").at(-1));
-  if (!captureCall || captureCall.args.displayIndex !== 1) throw new Error(`Global capture event used a stale display selection: ${JSON.stringify(captureCall)}`);
-  let windowCalls = await page.evaluate(() => window.__MOCK_TAURI_WINDOW_CALLS__);
-  const hideBeforeCapture = windowCalls.findIndex((call) => call.command === "plugin:window|hide");
-  const captureDuringHide = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.find((call) => call.command === "capture_screen"));
-  const showAfterCapture = windowCalls.findIndex((call) => call.command === "plugin:window|show");
-  if (hideBeforeCapture < 0 || !captureDuringHide || captureDuringHide.visible || showAfterCapture < 0) {
-    throw new Error(`Main window was visible during capture or not shown for the overlay: ${JSON.stringify({ windowCalls, captureDuringHide })}`);
-  }
-  await page.keyboard.press("Escape");
-  await waitForDetach(page);
-  windowCalls = await page.evaluate(() => window.__MOCK_TAURI_WINDOW_CALLS__);
-  const overlayPosition = windowCalls.find((call) => call.command === "plugin:window|set_position" && call.value?.position?.x === 1280);
-  const restoredPosition = windowCalls.find((call) => call.command === "plugin:window|set_position" && call.value?.position?.x === 0 && call.value?.position?.y === 0);
-  if (!overlayPosition || !restoredPosition) throw new Error(`Capture window geometry was not set then restored: ${JSON.stringify(windowCalls)}`);
-
   await page.getByRole("button", { name: "截图" }).click();
-  await waitForOverlay(page);
-  await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+  await page.waitForFunction(() => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === "capture_overlay_begin"), null, { timeout: 15000 });
+  const dance = await page.evaluate(() => {
+    const calls = window.__MOCK_TAURI_COMMAND_CALLS__;
+    const index = (name) => calls.findIndex((call) => call.command === name);
+    const screen = calls.find((call) => call.command === "capture_screen");
+    const begin = calls.find((call) => call.command === "capture_overlay_begin");
+    return {
+      session: index("capture_session_begin"),
+      screen: index("capture_screen"),
+      begin: index("capture_overlay_begin"),
+      visibleDuringCapture: screen ? screen.visible : null,
+      displayIndex: screen && screen.args ? screen.args.displayIndex : null,
+      pngLength: begin && begin.args && Array.isArray(begin.args.png) ? begin.args.png.length : 0,
+      display: begin && begin.args ? begin.args.display : null,
+      shownAfter: window.__MOCK_TAURI_WINDOW_CALLS__.some((call) => call.command === "plugin:window|show"),
+    };
+  });
+  const problems = [];
+  if (dance.session < 0 || dance.screen < 0 || dance.begin < 0 || !(dance.session < dance.screen && dance.screen < dance.begin)) {
+    problems.push(`capture dance order wrong: ${JSON.stringify(dance)}`);
+  }
+  if (dance.visibleDuringCapture !== false) problems.push(`main window was visible during capture: ${JSON.stringify(dance.visibleDuringCapture)}`);
+  if (dance.displayIndex !== 1) problems.push(`capture used display ${JSON.stringify(dance.displayIndex)}, expected 1`);
+  if (!dance.pngLength) problems.push("capture_overlay_begin received no PNG bytes");
+  if (!dance.display || dance.display.width !== 1600) problems.push(`capture_overlay_begin received display ${JSON.stringify(dance.display)}, expected the secondary 1600x900`);
+  if (dance.shownAfter) problems.push("main window was shown while the overlay owns the session");
+  if (problems.length) throw new Error(problems.join("; "));
 
-  const selection = page.locator(".capture-overlay-rect");
+  // The overlay page takes over as the standalone overlay window: same
+  // screenshot, same crop-on-the-frontend contract.
+  const overlayPage = await context.newPage();
+  await overlayPage.addInitScript(MOCK_SCRIPT);
+  await overlayPage.goto(`${BASE_URL}/#capture-overlay`, { waitUntil: "networkidle" });
+  const overlay = await waitForOverlay(overlayPage);
+  await drag(overlayPage, { x: 100, y: 100 }, { x: 400, y: 300 });
+
+  const selection = overlayPage.locator(".capture-overlay-rect");
   await selection.waitFor();
-  if (await page.locator(".capture-overlay-handle").count() !== 8) throw new Error("Expected all eight selection resize handles");
-  await drag(page, { x: 250, y: 200 }, { x: 300, y: 250 });
+  if (await overlayPage.locator(".capture-overlay-handle").count() !== 8) throw new Error("Expected all eight selection resize handles");
+  await drag(overlayPage, { x: 250, y: 200 }, { x: 300, y: 250 });
   let box = await selection.boundingBox();
   if (!box || Math.round(box.x) !== 150 || Math.round(box.y) !== 150) throw new Error(`Selection did not move by the drag delta: ${JSON.stringify(box)}`);
 
-  const eastHandle = page.locator(".capture-overlay-handle--e");
+  const eastHandle = overlayPage.locator(".capture-overlay-handle--e");
   if (await eastHandle.count() !== 1) throw new Error("Expected east resize handle");
   const eastBox = await eastHandle.boundingBox();
   if (!eastBox) throw new Error("East resize handle has no box");
-  await drag(page, { x: eastBox.x + eastBox.width / 2, y: eastBox.y + eastBox.height / 2 }, { x: 1600, y: eastBox.y + eastBox.height / 2 });
+  await drag(overlayPage, { x: eastBox.x + eastBox.width / 2, y: eastBox.y + eastBox.height / 2 }, { x: 1600, y: eastBox.y + eastBox.height / 2 });
   box = await selection.boundingBox();
   if (!box || Math.round(box.x + box.width) !== 1280) throw new Error("Resize was not clamped to image bounds");
 
   await overlay.getByRole("button", { name: "AI识别" }).click();
-  const resultWindow = page.locator(".capture-result-window");
+  const resultWindow = overlayPage.locator(".capture-result-window");
   await resultWindow.waitFor();
-  // The crop must happen on the frontend: ai_ocr receives exactly the live
-  // selection cut out of the screenshot, and image_crop stays silent.
   box = await selection.boundingBox();
   if (!box) throw new Error("Selection has no box");
   const cropWidth = Math.round(box.width);
   const cropHeight = Math.round(box.height);
-  const ocrImage = await readOcrImage(page);
+  const ocrImage = await readOcrImage(overlayPage);
   if (ocrImage.error) throw new Error(ocrImage.error);
   if (ocrImage.width !== cropWidth || ocrImage.height !== cropHeight) {
     throw new Error(`ai_ocr must receive the ${cropWidth}x${cropHeight} selection, saw ${ocrImage.width}x${ocrImage.height}`);
   }
-  // mock-tauri.js paints capture_screen with rgb(x%256, y%256, 64).
   const source = [Math.round(box.x) + (cropWidth >> 1), Math.round(box.y) + (cropHeight >> 1)];
   const expectedPixel = [source[0] % 256, source[1] % 256, 64, 255];
   if (ocrImage.pixel.some((value, index) => value !== expectedPixel[index])) {
     throw new Error(`ai_ocr pixel must come from the selected region, expected ${JSON.stringify(expectedPixel)}, saw ${JSON.stringify(ocrImage.pixel)}`);
   }
-  if (await imageCropCalls(page)) throw new Error("AI识别 must crop on the frontend, the image_crop IPC was invoked");
-  if (await page.locator(".capture-overlay").count() !== 1) throw new Error("Non-confirm overlay action closed the overlay");
-  if (await page.locator(".image-canvas").count() !== 0) throw new Error("Non-confirm overlay action changed the canvas");
+  if (await imageCropCalls(overlayPage)) throw new Error("AI识别 must crop on the frontend, the image_crop IPC was invoked");
   if (await resultWindow.locator("textarea").count() !== 2) throw new Error("Expected vertical OCR and translation result fields");
-  const initialResultBox = await resultWindow.boundingBox();
-  if (!initialResultBox || Math.round(initialResultBox.width) !== 450 || Math.round(initialResultBox.height) !== 533) {
-    throw new Error(`Result window did not start at the Python minimum size: ${JSON.stringify(initialResultBox)}`);
-  }
-  const titleBox = await resultWindow.locator(".capture-result-window-title").boundingBox();
-  if (!titleBox) throw new Error("Result window title bar has no box");
-  await drag(page, { x: titleBox.x + 80, y: titleBox.y + 12 }, { x: titleBox.x + 120, y: titleBox.y + 42 });
-  const movedResultBox = await resultWindow.boundingBox();
-  if (!movedResultBox || Math.round(movedResultBox.x - initialResultBox.x) !== 40 || Math.round(movedResultBox.y - initialResultBox.y) !== 30) {
-    throw new Error(`Result window title bar did not move the window: ${JSON.stringify({ initialResultBox, movedResultBox })}`);
-  }
-  const resultGrip = resultWindow.locator(".capture-result-window-resize");
-  const gripBox = await resultGrip.boundingBox();
-  if (!gripBox) throw new Error("Result window resize grip has no box");
-  await drag(page, { x: gripBox.x + gripBox.width / 2, y: gripBox.y + gripBox.height / 2 }, { x: gripBox.x + 100, y: gripBox.y + 70 });
-  const resizedResultBox = await resultWindow.boundingBox();
-  if (!resizedResultBox || resizedResultBox.width <= initialResultBox.width || resizedResultBox.height <= initialResultBox.height || resizedResultBox.width > 900 || resizedResultBox.height > 800) {
-    throw new Error(`Result window bottom-right resize did not update its size: ${JSON.stringify(resizedResultBox)}`);
-  }
 
-  await page.keyboard.press("Escape");
-  await waitForDetach(page);
-  await page.evaluate(() => { window.__MOCK_TAURI_SET_FULLSCREEN__(true); window.__MOCK_TAURI_WINDOW_CALLS__.length = 0; });
-  await page.getByRole("button", { name: "截图" }).click();
-  await waitForOverlay(page);
-  windowCalls = await page.evaluate(() => window.__MOCK_TAURI_WINDOW_CALLS__);
-  const fullscreenCheck = windowCalls.findIndex((call) => call.command === "plugin:window|is_fullscreen");
-  const exitFullscreen = windowCalls.findIndex((call) => call.command === "plugin:window|set_fullscreen" && call.value === false);
-  const firstGeometryWrite = windowCalls.findIndex((call) => call.command === "plugin:window|set_position" || call.command === "plugin:window|set_size");
-  if (fullscreenCheck < 0 || exitFullscreen < 0 || firstGeometryWrite < 0 || !(fullscreenCheck < exitFullscreen && exitFullscreen < firstGeometryWrite)) {
-    throw new Error(`Fullscreen was not exited before capture geometry writes: ${JSON.stringify(windowCalls)}`);
-  }
-  await page.keyboard.press("Escape");
-  await waitForDetach(page);
-  const restoredFullscreen = await page.evaluate(() => window.__MOCK_TAURI_WINDOW_CALLS__.some((call) => call.command === "plugin:window|set_fullscreen" && call.value === true));
-  if (!restoredFullscreen) throw new Error("Fullscreen state was not restored after cancelling capture");
-
-  await page.getByRole("button", { name: "截图" }).click();
-  await waitForOverlay(page);
-  await drag(page, { x: 100, y: 100 }, { x: 1600, y: 800 });
-  box = await selection.boundingBox();
-  if (!box || Math.round(box.x) !== 100 || Math.round(box.y) !== 100 || Math.round(box.x + box.width) !== 1280 || Math.round(box.y + box.height) !== 720) {
-    throw new Error(`Stored selection was not clamped to screenshot bounds: ${JSON.stringify(box)}`);
-  }
-  await page.keyboard.press("Escape");
-  await waitForDetach(page);
-  await page.getByRole("button", { name: "截图" }).click();
-  await waitForOverlay(page);
-  await drag(page, { x: 400, y: 300 }, { x: 100, y: 100 });
-  box = await selection.boundingBox();
-  if (!box || Math.round(box.x) !== 100 || Math.round(box.y) !== 100 || Math.round(box.width) !== 300 || Math.round(box.height) !== 200) {
-    throw new Error(`New selection was not clamped to screenshot bounds: ${JSON.stringify(box)}`);
-  }
-  await drag(page, { x: 250, y: 200 }, { x: 300, y: 250 });
-  box = await selection.boundingBox();
-  if (!box || Math.round(box.x) !== 150 || Math.round(box.y) !== 150) throw new Error(`Reverse selection did not move by the drag delta: ${JSON.stringify(box)}`);
-
-  await overlay.getByRole("button", { name: "确认" }).click();
-  await waitForDetach(page);
-  if (await imageCropCalls(page)) throw new Error("确认 must crop on the frontend, the image_crop IPC was invoked");
-  windowCalls = await page.evaluate(() => window.__MOCK_TAURI_WINDOW_CALLS__);
-  const restoreAfterConfirm = windowCalls.filter((call) => call.command === "plugin:window|set_position" && call.value?.position?.x === 0 && call.value?.position?.y === 0).length;
-  if (restoreAfterConfirm < 2) throw new Error(`Capture confirmation did not restore the original geometry: ${JSON.stringify(windowCalls)}`);
-
-  // OCR/translate text flow: mock text must reach the result window, and Enter must
-  // confirm the latest OCR/translation state rather than a stale closure.
-  await page.getByRole("button", { name: "截图" }).click();
-  await waitForOverlay(page);
-  await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
-  await overlay.getByRole("button", { name: "AI识别" }).click();
-  await page.waitForFunction(() => document.querySelector(".capture-result-window textarea")?.value?.length > 0);
-  const ocrField = resultWindow.locator("textarea").first();
-  const translateField = resultWindow.locator("textarea").nth(1);
-  if ((await ocrField.inputValue()) !== "Mock OCR text") throw new Error(`OCR text did not reach the result window: ${JSON.stringify(await ocrField.inputValue())}`);
+  // OCR and translation land in the result window; confirming hands them to the
+  // session store, where the hidden main window polls them back.
   await overlay.getByRole("button", { name: "AI翻译" }).click();
-  await page.waitForFunction(() => { const fields = document.querySelectorAll(".capture-result-window textarea"); return fields.length === 2 && Boolean(fields[1].value); });
-  if ((await translateField.inputValue()) !== "Mock translation") throw new Error(`Translation text did not reach the result window: ${JSON.stringify(await translateField.inputValue())}`);
-  await page.keyboard.press("Enter");
-  await waitForDetach(page);
-  let mainOcr = await page.locator("textarea[aria-label='AI识别']").inputValue();
-  let mainTranslate = await page.locator("textarea[aria-label='AI翻译']").inputValue();
-  if (mainOcr !== "Mock OCR text" || mainTranslate !== "Mock translation") throw new Error(`Enter confirmed stale OCR/translation text: ${JSON.stringify({ mainOcr, mainTranslate })}`);
-
-  // A new selection must clear the previous result window and text so a new image
-  // cannot be confirmed with old text.
-  await page.getByRole("button", { name: "截图" }).click();
-  await waitForOverlay(page);
-  await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
-  await overlay.getByRole("button", { name: "AI识别" }).click();
-  await page.waitForFunction(() => document.querySelector(".capture-result-window textarea")?.value?.length > 0);
-  await drag(page, { x: 900, y: 650 }, { x: 950, y: 690 });
-  if (await page.locator(".capture-result-window").count() !== 0) throw new Error("New selection did not clear the previous result window");
-  await page.keyboard.press("Enter");
-  await waitForDetach(page);
-  mainOcr = await page.locator("textarea[aria-label='AI识别']").inputValue();
-  mainTranslate = await page.locator("textarea[aria-label='AI翻译']").inputValue();
-  if (mainOcr !== "" || mainTranslate !== "") throw new Error(`New selection confirmed with stale OCR/translation text: ${JSON.stringify({ mainOcr, mainTranslate })}`);
-  if (await imageCropCalls(page)) throw new Error("No overlay action may call the image_crop IPC");
+  await overlayPage.waitForFunction(() => { const fields = document.querySelectorAll(".capture-result-window textarea"); return fields.length === 2 && Boolean(fields[1].value); });
+  if ((await resultWindow.locator("textarea").nth(1).inputValue()) !== "Mock translation") throw new Error("Translation text did not reach the result window");
+  await overlay.getByRole("button", { name: "确认" }).click();
+  await page.waitForFunction(() => document.querySelector("textarea[aria-label='AI识别']")?.value === "Mock OCR text", null, { timeout: 15000 });
+  const mainOcr = await page.locator("textarea[aria-label='AI识别']").inputValue();
+  const mainTranslate = await page.locator("textarea[aria-label='AI翻译']").inputValue();
+  if (mainOcr !== "Mock OCR text" || mainTranslate !== "Mock translation") throw new Error(`Confirm did not reflow the OCR/translation text: ${JSON.stringify({ mainOcr, mainTranslate })}`);
+  await page.locator(".image-canvas img").waitFor({ timeout: 10000 });
 
   await context.close();
 }
@@ -419,10 +367,8 @@ async function nativeSaveFlow(browser) {
 // pending, and render the rejection on the overlay itself (the overlay covers
 // the whole screen, so a page-level error bar behind it is invisible).
 async function overlaySaveFlow(browser) {
-  await withPage(browser, [MOCK_SCRIPT, CONTROLLED_SAVE_SCRIPT], async (page) => {
-    await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "截图" }).click();
-    const overlay = await waitForOverlay(page);
+  const { context, page, overlay } = await openOverlayPage(browser, [CONTROLLED_SAVE_SCRIPT]);
+  try {
     await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
     await page.locator(".capture-overlay-rect").waitFor();
 
@@ -465,7 +411,9 @@ async function overlaySaveFlow(browser) {
     if (!busyCleared) problems.push("overlay stayed busy after save_image_as rejected");
 
     if (problems.length) throw new Error(problems.join("; "));
-  });
+  } finally {
+    await context.close();
+  }
 }
 
 // The native Save As dialog is modal over its owner (the main window), so it
@@ -473,10 +421,8 @@ async function overlaySaveFlow(browser) {
 // Every outcome must keep the overlay mounted, keep the selection, and clear
 // the busy state so a rejected or cancelled save can be retried.
 async function overlaySaveVisibilityFlow(browser) {
-  await withPage(browser, [MOCK_SCRIPT, CONTROLLED_SAVE_SCRIPT], async (page) => {
-    await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "截图" }).click();
-    const overlay = await waitForOverlay(page);
+  const { context, page, overlay } = await openOverlayPage(browser, [CONTROLLED_SAVE_SCRIPT]);
+  try {
     await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
     const selection = page.locator(".capture-overlay-rect");
     await selection.waitFor();
@@ -539,16 +485,16 @@ async function overlaySaveVisibilityFlow(browser) {
     }
 
     if (problems.length) throw new Error(problems.join("; "));
-  });
+  } finally {
+    await context.close();
+  }
 }
 
 // Failure retention: rejected pin/clipboard writes and a delayed OCR response must keep marks and the
 // selection intact; a stale OCR result must never fill into a changed selection (operation token invalidated).
 async function annotationFailureRetentionFlow(browser) {
-  await withPage(browser, [MOCK_SCRIPT], async (page) => {
-    await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "截图" }).click();
-    const overlay = await waitForOverlay(page);
+  const { context, page, overlay } = await openOverlayPage(browser);
+  try {
     await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
     const selectionBox = await page.locator(".capture-overlay-rect").boundingBox();
     await page.locator(".capture-overlay-tools").getByRole("button", { name: "矩形" }).click();
@@ -596,16 +542,18 @@ async function annotationFailureRetentionFlow(browser) {
     await page.evaluate(() => window.__MOCK_TAURI_SET_OCR_DELAY__(0));
     await page.keyboard.press("Escape");
     await waitForDetach(page);
-  });
+  } finally {
+    await context.close();
+  }
 }
 
 // A pinned selection keeps its rounded corners transparent in the exact bytes
 // handed to pin_image; the pin window cannot round a corner that is opaque.
 async function pinAlphaFlow(browser) {
-  await withPage(browser, [MOCK_SCRIPT, PIN_IMAGE_SCRIPT], async (page) => {
-    await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "截图" }).click();
-    const overlay = await waitForOverlay(page);
+  const { context, page, overlay } = await openOverlayPage(browser, [PIN_IMAGE_SCRIPT]);
+  try {
+    // A visible origin so the pin lifecycle can assert the restore.
+    await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("capture_session_begin", { visible: true })).catch(() => {});
     await drag(page, { x: 120, y: 120 }, { x: 520, y: 400 });
     await page.locator(".capture-overlay-rect").waitFor();
 
@@ -630,8 +578,8 @@ async function pinAlphaFlow(browser) {
     const probe = await page.evaluate(async () => {
       const calls = window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === "pin_image");
       const last = calls[calls.length - 1];
-      if (!last || !Array.isArray(last.args?.image)) return { error: "pin_image was never invoked with image bytes" };
-      const bytes = new Uint8Array(last.args.image);
+      if (!last || typeof (last.args && last.args.imageBase64) !== "string") return { error: "pin_image was never invoked with base64 bytes" };
+      const bytes = Uint8Array.from(atob(last.args.imageBase64), (ch) => ch.charCodeAt(0));
       let bitmap;
       try {
         bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
@@ -655,17 +603,17 @@ async function pinAlphaFlow(browser) {
       if (probe.cornerAlpha !== 0) problems.push(`pinned image corner must be transparent after a ${radius}px radius crop, saw alpha ${probe.cornerAlpha}`);
       if (Number(probe.radius) !== 16) problems.push(`pin_image must receive the selection radius, saw ${probe.radius}`);
     }
-    if (problems.length) throw new Error(problems.join("; "));
 
-    // After pinning, the main window must stay hidden ("no main UI"), restoring when the pin window closes.
-    const hiddenAgain = await page.waitForFunction(() => !window.__MOCK_TAURI_IS_VISIBLE__(), null, { timeout: 5000 }).then(() => true).catch(() => false);
-    if (!hiddenAgain) problems.push("main window must stay hidden while the pin is up (no main UI during pin)");
-    // New session model: destruction is simulated by __MOCK_TAURI_CLOSE_PIN__, mirroring the native destroyed hook that restores the main window.
+    // Pin lifecycle on the session machine: the restore is held while the pin is
+    // up and released when the last pin closes (the visible-origin case).
+    await page.waitForFunction(() => window.__MOCK_TAURI_SESSION_STATE__().pins.length === 1, null, { timeout: 5000 }).catch(() => {});
     await page.evaluate(() => window.__MOCK_TAURI_CLOSE_PIN__(window.__MOCK_TAURI_PIN_LABELS__()[0]));
-    const mainRestored = await page.waitForFunction(() => window.__MOCK_TAURI_IS_VISIBLE__(), null, { timeout: 3000 }).then(() => true).catch(() => false);
-    if (!mainRestored) problems.push("main window did not come back after the pin was closed");
+    const restored = await page.waitForFunction(() => window.__MOCK_TAURI_SESSION_STATE__().lastRestore === true, null, { timeout: 3000 }).then(() => true).catch(() => false);
+    if (!restored) problems.push("main window did not come back after the pin was closed");
     if (problems.length) throw new Error(problems.join("; "));
-  });
+  } finally {
+    await context.close();
+  }
 }
 
 // The pin window renders only PinPage, so no element may paint an opaque page
@@ -674,7 +622,10 @@ async function pinAlphaFlow(browser) {
 async function pinWindowFlow(browser) {
   await withPage(browser, [MOCK_SCRIPT, PIN_IMAGE_SCRIPT], async (page) => {
     await page.goto(`${BASE_URL}/#pin`, { waitUntil: "networkidle" });
-    await page.locator("img[alt=\"pinned\"]").waitFor({ timeout: 5000 });
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector("[data-pin-root] canvas");
+      return Boolean(canvas && canvas.width > 0 && canvas.height > 0);
+    }, null, { timeout: 5000 });
 
     const backgrounds = await page.evaluate(() => {
       const read = (element) => {
@@ -704,7 +655,7 @@ async function pinWindowFlow(browser) {
     }
 
     const commands = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command));
-    if (!commands.includes("get_pinned_image")) problems.push("pin window never asked for its image");
+    if (!commands.includes("get_pinned_image_base64")) problems.push("pin window never asked for its image");
     for (const forbidden of ["show_main_window_when_ready", "set_glass_effect", "latest_release_version", "get_config"]) {
       if (commands.includes(forbidden)) problems.push(`pin window must not run the main-only startup command ${forbidden}`);
     }
@@ -719,34 +670,35 @@ async function captureFallbackFlow(browser) {
   await withPage(browser, [MOCK_SCRIPT, NUMBER_ARRAY_CAPTURE_SCRIPT], async (page) => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "截图" }).click();
-    const opened = await page.locator(".capture-overlay")
-      .waitFor({ state: "visible", timeout: 10000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!opened) {
-      const probe = await page.evaluate(async () => {
+    // The postMessage fallback hands capture_screen back as number[]; the whole
+    // dance must survive it and hand a decodable PNG to the overlay window.
+    const beginArgs = await page.waitForFunction(() => {
+      const begin = window.__MOCK_TAURI_COMMAND_CALLS__.find((call) => call.command === "capture_overlay_begin");
+      return begin ? begin.args : null;
+    }, null, { timeout: 10000 }).then((handle) => handle.jsonValue()).catch(() => null);
+    if (!beginArgs || !Array.isArray(beginArgs.png) || !beginArgs.png.length) {
+      const raw = await page.evaluate(async () => {
         const bytes = await window.__TAURI_INTERNALS__.invoke("capture_screen", {});
         let decode;
         try {
-          await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+          await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: "image/png" }));
           decode = "ok";
         } catch (reason) {
           decode = String((reason && reason.message) || reason);
         }
-        return {
-          isArray: Array.isArray(bytes),
-          decode,
-          uiError: Array.from(document.querySelectorAll("[role=alert]"))
-            .map((node) => node.textContent)
-            .filter(Boolean)
-            .join(" | "),
-        };
+        return { isArray: Array.isArray(bytes), decode, uiError: Array.from(document.querySelectorAll("[role=alert]")).map((node) => node.textContent).filter(Boolean).join(" | ") };
       });
-      throw new Error(`capture_screen number[] fallback must still open the overlay, production failed to decode it: ${JSON.stringify(probe)}`);
+      throw new Error(`capture_screen number[] fallback must still reach capture_overlay_begin, probe: ${JSON.stringify(raw)}`);
     }
-    await waitForOverlay(page);
-    await page.keyboard.press("Escape");
-    await waitForDetach(page);
+    const decode = await page.evaluate(async (png) => {
+      try {
+        await createImageBitmap(new Blob([new Uint8Array(png)], { type: "image/png" }));
+        return "ok";
+      } catch (reason) {
+        return String((reason && reason.message) || reason);
+      }
+    }, beginArgs.png);
+    if (decode !== "ok") throw new Error(`forwarded fallback PNG must decode, saw ${decode}`);
   });
 }
 
@@ -754,53 +706,74 @@ async function captureFallbackFlow(browser) {
 // that origin; closing a non-last pin never restores, the last close does, and
 // a close that lands during a pending capture only settles at session finish.
 async function multiPinSessionFlow(browser) {
-  await withPage(browser, [MOCK_SCRIPT, PIN_IMAGE_SCRIPT], async (page) => {
-    await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    const isVisible = () => page.evaluate(() => window.__MOCK_TAURI_IS_VISIBLE__());
+  const { context, page } = await openOverlayPage(browser, [PIN_IMAGE_SCRIPT]);
+  try {
+    const state = () => page.evaluate(() => window.__MOCK_TAURI_SESSION_STATE__());
     const labels = () => page.evaluate(() => window.__MOCK_TAURI_PIN_LABELS__());
     const closePin = (label) => page.evaluate((target) => window.__MOCK_TAURI_CLOSE_PIN__(target), label);
-    const capture = () => page.evaluate(() => window.dispatchEvent(new CustomEvent("memopaws-capture")));
+    // The overlay unmounts synchronously but capture_overlay_end runs 60ms
+    // later: wait until the session machine is actually idle before the next
+    // begin, or the machine corrupts ("capture is already active").
+    const awaitIdle = () => page.waitForFunction(() => window.__MOCK_TAURI_SESSION_STATE__().captureVisible === null, null, { timeout: 10000 });
+    const rebegin = async () => {
+      // Wait for the overlay to actually REMOUNT (the session attribute bumps),
+      // not just for the previous mount that is about to unmount.
+      const before = await page.evaluate(() => (document.querySelector("[data-overlay-session]") || document.body).getAttribute("data-overlay-session") || "0");
+      await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("capture_overlay_begin", { png: [], display: null }));
+      await page.waitForFunction((prev) => (document.querySelector("[data-overlay-session]") || document.body).getAttribute("data-overlay-session") !== prev, before, { timeout: 10000 });
+      await page.locator(".capture-overlay").waitFor({ timeout: 10000 });
+    };
     const pinSelection = async (from, to) => {
       await drag(page, from, to);
       const overlay = page.locator(".capture-overlay");
+      await page.locator(".capture-overlay-rect").waitFor({ timeout: 5000 });
       await overlay.getByRole("button", { name: "Pin image" }).click();
       await page.locator(".capture-overlay").waitFor({ state: "detached", timeout: 30000 });
+      await awaitIdle();
     };
     const problems = [];
 
     // Scenario A: visible origin — hidden stays hidden until the last pin closes.
-    await page.getByRole("button", { name: "截图" }).click();
-    await waitForOverlay(page);
+    await rebegin();
     await pinSelection({ x: 100, y: 100 }, { x: 400, y: 300 });
-    if (await isVisible()) problems.push("A: main window must stay hidden after the first pin");
-    await capture();
-    await waitForOverlay(page);
+    let snapshot = await state();
+    if (snapshot.pins.length !== 1 || snapshot.captureVisible !== null || snapshot.restoreVisible !== true) {
+      problems.push(`A: wrong state after the first pin: ${JSON.stringify(snapshot)}`);
+    }
+    await rebegin();
     await pinSelection({ x: 500, y: 120 }, { x: 800, y: 400 });
     if ((await labels()).length !== 2) problems.push(`A: expected two independent pins, saw ${JSON.stringify(await labels())}`);
-    await closePin("pin-1");
-    if (await isVisible()) problems.push("A: closing a non-last pin must not restore the main window");
-    await closePin("pin-2");
-    if (!(await isVisible())) problems.push("A: closing the last pin must restore the main window");
+    // The close's own return value is the restore decision (null = deferred).
+    if ((await closePin("pin-1")) !== null) problems.push("A: closing a non-last pin must not restore the main window");
+    if ((await closePin("pin-2")) !== true) problems.push("A: closing the last pin must restore the main window");
 
     // Scenario B: hidden origin — even the last close must stay hidden.
-    await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("plugin:window|hide"));
-    await page.getByRole("button", { name: "截图" }).click();
-    await waitForOverlay(page);
+    await awaitIdle();
+    await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("capture_session_begin", { visible: false }));
+    await rebegin();
     await pinSelection({ x: 100, y: 100 }, { x: 400, y: 300 });
-    await closePin("pin-3");
-    if (await isVisible()) problems.push("B: a hidden-origin pin must stay hidden after its last close");
+    if ((await closePin("pin-3")) !== false) problems.push("B: a hidden-origin pin must stay hidden after its last close");
 
-    // Scenario C: closing the last pin during a pending capture must not fire a
-    // stale restore; only the capture session finish settles visibility.
-    await page.getByRole("button", { name: "截图" }).click();
-    await waitForOverlay(page);
-    await closePin("pin-3");
+    // Scenario C: a close landing during a pending capture only settles at finish.
+    await awaitIdle();
+    await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("capture_session_begin", { visible: true }));
+    await rebegin();
+    await pinSelection({ x: 100, y: 100 }, { x: 400, y: 300 });
+    await rebegin();
+    await drag(page, { x: 120, y: 120 }, { x: 300, y: 260 });
+    const restoreBeforeClose = (await state()).lastRestore;
+    if ((await closePin("pin-4")) !== null) problems.push("C: a close during a pending capture must not fire a stale restore");
     if ((await labels()).length !== 0) problems.push("C: pin registry must be empty after the last close");
     await page.keyboard.press("Escape");
-    await waitForDetach(page);
-    if (!(await isVisible())) problems.push("C: cancel finish must settle the pending restoration");
+    await page.locator(".capture-overlay").waitFor({ state: "detached", timeout: 30000 });
+    // Detached only means the painted state cleared; the cancel finish is a
+    // deferred invoke — wait for the restore decision to land.
+    const settled = await page.waitForFunction(() => window.__MOCK_TAURI_SESSION_STATE__().lastRestore === true, null, { timeout: 5000 }).then(() => true).catch(() => false);
+    if (!settled) problems.push("C: cancel finish must settle the pending restoration");
     if (problems.length) throw new Error(problems.join("; "));
-  });
+  } finally {
+    await context.close();
+  }
 }
 
 // Pin window wheel/drag contract: one wheel step resizes the window
@@ -843,7 +816,10 @@ const PIN_WHEEL_SCRIPT = `
 async function pinWheelFlow(browser) {
   await withPage(browser, [MOCK_SCRIPT, PIN_IMAGE_SCRIPT, PIN_WHEEL_SCRIPT], async (page) => {
     await page.goto(`${BASE_URL}/#pin`, { waitUntil: "networkidle" });
-    await page.locator("img[alt=\"pinned\"]").waitFor({ timeout: 5000 });
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector("[data-pin-root] canvas");
+      return Boolean(canvas && canvas.width > 0 && canvas.height > 0);
+    }, null, { timeout: 5000 });
 
     const problems = [];
     await page.evaluate(() => {
@@ -860,7 +836,7 @@ async function pinWheelFlow(browser) {
       if (Math.abs(sized.height - Math.round(sized.width * 3 / 4)) > 1) problems.push(`wheel must preserve the 4:3 aspect within 1px, saw ${JSON.stringify(sized)}`);
     }
 
-    await page.locator("img[alt=\"pinned\"]").click({ button: "right" });
+    await page.locator("[data-pin-root] canvas").click({ button: "right" });
     const rightClose = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === "pin_close"));
     if (!rightClose) problems.push("right-click must close the calling pin instance");
     await page.keyboard.press("Escape");
@@ -943,12 +919,7 @@ async function annotationRenderFlow(browser) {
 // Annotation Task 4: drawing tools — one mark per drag, per-mark color/width,
 // undo/redo, export bytes carry the actual drawn pixels, loupe hidden mid-draw.
 async function annotationDrawFlow(browser) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  const page = await context.newPage();
-  await page.addInitScript(MOCK_SCRIPT);
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "截图" }).click();
-  const overlay = await waitForOverlay(page);
+  const { context, page, overlay } = await openOverlayPage(browser);
   await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
   const toolbar = page.locator(".capture-overlay-tools");
   await toolbar.waitFor();
@@ -1007,12 +978,7 @@ async function annotationDrawFlow(browser) {
 // Annotation Task 4: text tool with IME-safe Enter semantics — Enter inserts a
 // newline, Ctrl+Enter commits one mark, Esc discards only the text draft.
 async function annotationTextFlow(browser) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  const page = await context.newPage();
-  await page.addInitScript(MOCK_SCRIPT);
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "截图" }).click();
-  const overlay = await waitForOverlay(page);
+  const { context, page, overlay } = await openOverlayPage(browser);
   await drag(page, { x: 100, y: 100 }, { x: 500, y: 360 });
   const toolbar = page.locator(".capture-overlay-tools");
   await toolbar.waitFor();
@@ -1055,12 +1021,7 @@ async function annotationTextFlow(browser) {
 // Annotation Task 4: two-row toolbar must stay inside small viewports, keep
 // reachable hit targets and clamp near the right screen edge (2× DPR too).
 async function annotationToolbarFlow(browser) {
-  const context = await browser.newContext({ viewport: { width: 640, height: 480 }, deviceScaleFactor: 2 });
-  const page = await context.newPage();
-  await page.addInitScript(MOCK_SCRIPT);
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "截图" }).click();
-  await waitForOverlay(page);
+  const { context, page } = await openOverlayPage(browser, [], { viewport: { width: 640, height: 480 }, deviceScaleFactor: 2 });
   await drag(page, { x: 380, y: 100 }, { x: 620, y: 260 });
   const toolbar = page.locator(".capture-overlay-toolbar");
   await toolbar.waitFor();
@@ -1119,7 +1080,7 @@ async function offlineOcrMainFlow(browser) {
   // Offline OCR success: only local_ocr recorded (carrying the exact image bytes), result filled, stale translation cleared.
   await ocrControls.nth(0).getByRole("button", { name: "离线 OCR" }).click();
   await page.waitForTimeout(200);
-  const offlineCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command));
+  const offlineCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command).filter((command) => command !== "capture_session_status"));
   if (JSON.stringify(offlineCalls) !== JSON.stringify(["local_ocr"])) {
     throw new Error(`offline click must invoke only local_ocr, saw ${JSON.stringify(offlineCalls)}`);
   }
@@ -1150,7 +1111,7 @@ async function offlineOcrMainFlow(browser) {
   await page.waitForTimeout(200);
   await page.locator(".recognize-error").getByText("Mock offline OCR failed").waitFor({ timeout: 3000 });
   if ((await ocrArea.inputValue()) !== "Local OCR example text") throw new Error("failed offline OCR must keep the previous OCR text");
-  const failureCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command));
+  const failureCalls = await page.evaluate(() => window.__MOCK_TAURI_COMMAND_CALLS__.map((call) => call.command).filter((command) => command !== "capture_session_status"));
   if (JSON.stringify(failureCalls) !== JSON.stringify(["local_ocr"])) throw new Error(`failed offline OCR must not touch AI commands, saw ${JSON.stringify(failureCalls)}`);
   await page.evaluate(() => window.__MOCK_TAURI_SET_LOCAL_OCR_MODE__("success"));
 
@@ -1183,12 +1144,7 @@ async function offlineOcrMainFlow(browser) {
 // bytes carry a real mosaic block; failures report errors only and never fall back to AI; results go
 // into the existing result window.
 async function offlineOcrOverlayFlow(browser) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  const page = await context.newPage();
-  await page.addInitScript(MOCK_SCRIPT);
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "截图" }).click();
-  const overlay = await waitForOverlay(page);
+  const { context, page, overlay } = await openOverlayPage(browser);
   await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
   await page.locator(".capture-overlay-tools").getByRole("button", { name: "马赛克" }).click();
   await drag(page, { x: 150, y: 150 }, { x: 210, y: 210 });

@@ -41,6 +41,8 @@
   // Pin-session state machine: the same rules as Rust `pinned_images::Pins` (visibility before the
   // first pin, session mutex, the three finish outcomes cancel/confirm/pin, restore only when the last pin dies).
   const pinSession = { next: 0, images: new Map(), captureVisible: null, restoreVisible: null };
+  let lastRestore = null;
+  let overlayGeneration = 0;
   function sessionBegin(visible) {
     if (pinSession.captureVisible !== null) throw new Error("capture is already active");
     pinSession.captureVisible = Boolean(visible);
@@ -59,6 +61,7 @@
     if (pinSession.images.size === 0 && pinSession.captureVisible === null) {
       const restore = pinSession.restoreVisible;
       pinSession.restoreVisible = null;
+      lastRestore = restore;
       return restore;
     }
     return null;
@@ -247,6 +250,67 @@
         } else if (command === "capture_screen") {
           // Raw binary: invoke's return value IS the ArrayBuffer, no { image, preview } wrapper.
           resolve(capturePngBuffer());
+        } else if (command === "capture_overlay_begin") {
+          // The standalone overlay window exists only in the real backend; here the
+          // #capture-overlay page is the overlay, so opening a session is implied.
+          try {
+            if (pinSession.captureVisible === null) sessionBegin(true);
+            overlayGeneration += 1;
+            resolve(null);
+          } catch (error) { reject(error); }
+        } else if (command === "capture_overlay_image") {
+          resolve(capturePngBuffer());
+        } else if (command === "capture_overlay_ready" || command === "capture_overlay_finish") {
+          resolve(null);
+        } else if (command === "capture_overlay_generation") {
+          // +1 so the very first poll (generation starts at 0) always refreshes:
+          // StrictMode's double mount drops the proactive first load.
+          resolve(overlayGeneration + 1);
+        } else if (command === "capture_overlay_end") {
+          try {
+            // Tolerant when no session is running (overlay-only flows): nothing to
+            // finish, so nothing gets restored.
+            let restored = false;
+            if (pinSession.captureVisible !== null) restored = sessionFinish((args && args.outcome) || "confirm");
+            if ((args && args.outcome) === "confirm") {
+              // The confirmed result reaches the hidden main window through the
+              // session store, exactly like Rust: the main page polls it back.
+              overlayGeneration += 1;
+              localStorage.setItem("mock-capture-result", JSON.stringify({
+                ocrText: args.ocrText || null,
+                translation: args.translation || null,
+                imageBase64: args.imageBase64 || null,
+                resultGeneration: overlayGeneration,
+              }));
+            }
+            if (pinSession.captureVisible === null) lastRestore = restored;
+            resolve({ restored: restored, generation: overlayGeneration });
+          } catch (error) { reject(error); }
+        } else if (command === "capture_session_status") {
+          const stored = localStorage.getItem("mock-capture-result");
+          const result = stored ? JSON.parse(stored) : null;
+          resolve(result ? {
+            active: pinSession.captureVisible !== null,
+            ocrText: result.ocrText,
+            translation: result.translation,
+            resultGeneration: result.resultGeneration,
+          } : null);
+        } else if (command === "capture_session_result_image") {
+          const stored = localStorage.getItem("mock-capture-result");
+          const imageBase64 = stored ? JSON.parse(stored).imageBase64 : null;
+          if (!imageBase64) { resolve(new ArrayBuffer(0)); return; }
+          const binary = atob(imageBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          resolve(bytes.buffer);
+        } else if (command === "get_pinned_image_base64") {
+          // btoa of the capture PNG: small enough for the string conversion.
+          const bytes = new Uint8Array(capturePngBuffer());
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          resolve(btoa(binary));
+        } else if (command === "get_pinned_image_meta") {
+          resolve({ radius: 12 });
         } else if (command === "pin_image") {
           // Mirrors the new backend: returns a unique pin-N label and registers it in the session state.
           // pinRejectMode: invoke fails immediately, for overlay-error and mark-retention assertions.
@@ -402,6 +466,11 @@
   window.__MOCK_TAURI_PIN_LABELS__ = function() { return Array.from(pinSession.images.keys()); };
   // Visibility maintained by plugin:window|hide/show, reported truthfully by scripts recording commands.
   window.__MOCK_TAURI_IS_VISIBLE__ = function() { return visible; };
+  // Session-machine state for flows that run on the overlay page realm, where the
+  // main window's hide/show calls are invisible: what matters is what Rust would do.
+  window.__MOCK_TAURI_SESSION_STATE__ = function() {
+    return { captureVisible: pinSession.captureVisible, restoreVisible: pinSession.restoreVisible, pins: Array.from(pinSession.images.keys()), lastRestore: lastRestore };
+  };
 
   // Before listen() registers a callback, @tauri-apps/api first calls transformCallback for a handler
   // id; in the real environment Tauri's IPC injects it, so the browser mock must provide it.
@@ -412,6 +481,17 @@
     const id = Math.floor(Math.random() * 1e9);
     eventCallbacks[id] = callback;
     return id;
+  };
+  // @tauri-apps/api's unlisten goes through this internals object (StrictMode
+  // cleanup hits it on every mount); without it the overlay page throws before
+  // it ever paints the screenshot.
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener: function (event, eventId) {
+      const handlers = eventHandlers[event];
+      if (!Array.isArray(handlers)) return;
+      const index = handlers.indexOf(eventId);
+      if (index !== -1) handlers.splice(index, 1);
+    },
   };
   // Programmable emit hook for tests: any event + any payload, fully controlled by the test. Real
   // Tauri events arrive asynchronously over IPC, so each callback is deferred one macro task via
