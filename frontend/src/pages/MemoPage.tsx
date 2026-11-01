@@ -45,6 +45,7 @@ const copy = {
     mergeCopy: (n: number) => `合并复制 (${n})`,
     merged: "已合并复制",
     mergePick: "选择备忘录",
+    insertDate: "插入日期",
     counting: "搜索中…",
     count: (n: number) => `${n} 条`,
     close: "关闭",
@@ -88,6 +89,7 @@ const copy = {
     mergeCopy: (n: number) => `Merge copy (${n})`,
     merged: "Merged to clipboard",
     mergePick: "Select memo",
+    insertDate: "Insert date",
     counting: "Searching…",
     count: (n: number) => `${n} items`,
     close: "Close",
@@ -123,6 +125,15 @@ const emptyDraft = (title: string): Memo => {
 };
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+// Template variables resolve at render/export time so the editor keeps the raw
+// {{date}}/{{time}}/{{datetime}} text for future renders.
+export const resolveTemplateVariables = (text: string) => {
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return text.replace(/\{\{datetime\}\}/g, `${date} ${time}`).replace(/\{\{date\}\}/g, date).replace(/\{\{time\}\}/g, time);
+};
 
 interface MemoPageProps {
   language?: Lang;
@@ -204,7 +215,8 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
     // Keep previous HTML while re-rendering to avoid flash (Python debounce behavior).
     if (!preview) setPreviewLoading(true);
     const timer = window.setTimeout(() => {
-      const cacheKey = JSON.stringify({ content: selected.content, theme: renderTheme, scale: previewScale });
+      const renderSource = resolveTemplateVariables(selected.content);
+      const cacheKey = JSON.stringify({ content: renderSource, theme: renderTheme, scale: previewScale });
       const cached = previewCache.current.get(cacheKey);
       if (cached !== undefined) {
         if (active && token === renderToken.current) {
@@ -213,7 +225,7 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
         }
         return;
       }
-      invoke<string>("memo_render", { content: selected.content, theme: renderTheme })
+      invoke<string>("memo_render", { content: renderSource, theme: renderTheme })
         .then((html) => {
           previewCache.current.set(cacheKey, html);
           if (previewCache.current.size > PREVIEW_CACHE_MAX) {
@@ -297,6 +309,20 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
     } catch (reason) {
       setError(errorText(reason));
     }
+  };
+
+  const insertDate = () => {
+    const editor = document.querySelector<HTMLTextAreaElement>(".memo-editor");
+    if (!editor || !selected) return;
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const start = editor.selectionStart ?? selected.content.length;
+    const end = editor.selectionEnd ?? start;
+    patchSelected({ content: selected.content.slice(0, start) + stamp + selected.content.slice(end) });
+    requestAnimationFrame(() => {
+      editor.focus();
+      editor.setSelectionRange(start + stamp.length, start + stamp.length);
+    });
   };
   const selectMemo = (memo: Memo) => {
     if (selected?.id === memo.id || !canDiscard()) return;
@@ -402,7 +428,7 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
   const exportMemo = () => {
     if (!selected) return;
     const title = selected.title || t.defaultFile;
-    const body = `# ${title}\n\n${selected.content}`;
+    const body = `# ${title}\n\n${resolveTemplateVariables(selected.content)}`;
     const url = URL.createObjectURL(new Blob([body], { type: "text/markdown;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
@@ -500,6 +526,7 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
                   }
                   placeholder={t.tagsPh}
                 />
+                <button className="memo-date-insert" onClick={insertDate} disabled={saving || mode === "preview"}>{t.insertDate}</button>
               </div>
             </div>
             <div className={`memo-content memo-content-${mode}`}>

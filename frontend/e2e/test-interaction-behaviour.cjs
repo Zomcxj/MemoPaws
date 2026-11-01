@@ -27,6 +27,35 @@ async function open(browser, nav) {
   return { context, page };
 }
 
+// Date variables: {{date}}/{{time}}/{{datetime}} resolve at render time and the
+// toolbar button inserts today's stamp at the editor cursor.
+async function memoDateChecks(browser) {
+  const { context, page } = await open(browser, '备忘录');
+  try {
+    await page.locator('.memo-list-item').first().click();
+    const editor = page.locator('.memo-editor');
+    await editor.fill('今天 {{date}}，明天见。{{datetime}}');
+    await page.evaluate(async () => {
+      const module = await import('/src/pages/MemoPage.tsx');
+      const resolved = module.resolveTemplateVariables('d={{date}} t={{time}} dt={{datetime}} plain={{date}}');
+      window.__RESOLVED__ = resolved;
+    });
+    const resolved = await page.evaluate(() => window.__RESOLVED__);
+    const today = new Date();
+    const stamp = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    assert.ok(resolved.includes(`d=${stamp}`), `{{date}} must resolve, got ${JSON.stringify(resolved)}`);
+    assert.ok(!resolved.includes('{{'), `all variables must resolve, got ${JSON.stringify(resolved)}`);
+
+    await editor.evaluate(el => el.setSelectionRange(0, 0));
+    await page.getByRole('button', { name: '插入日期' }).click();
+    const value = await editor.inputValue();
+    assert.ok(value.startsWith(stamp), `insert date must land at the cursor, got ${JSON.stringify(value)}`);
+    console.log('  memo date variables and insert: ok');
+  } finally {
+    await context.close();
+  }
+}
+
 async function clipboardChecks(browser) {
   const { context, page } = await open(browser, '剪切板');
   try {
@@ -311,6 +340,7 @@ async function main() {
     await speedTestChecks(browser);
     await memoChecks(browser);
     await memoMergeCopyChecks(browser);
+    await memoDateChecks(browser);
     console.log('Interaction behaviour tests passed.');
   } finally {
     await browser.close();
