@@ -234,9 +234,53 @@ async function memoChecks(browser) {
   }
 }
 
+async function recognizeMemoChecks(browser) {
+  const { context, page } = await open(browser, '图片识别');
+  try {
+    // Offline OCR fills the result panel from the mock ("Local OCR example text").
+    // Fill the editable OCR textarea directly (no image needed for the save path).
+    await page.locator('.result-panel textarea').first().fill('Local OCR example text');
+
+    // Save as memo: the mock's memo_create must receive first-line title and full content.
+    await page.locator('.result-panel .result-actions button:has-text("存为笔记")').first().click();
+    await page.waitForFunction(() => {
+      const calls = window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === 'memo_create');
+      return calls.length > 0;
+    }, null, { timeout: 5000 });
+    const saved = await page.evaluate(() => {
+      const calls = window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === 'memo_create');
+      const memo = calls[calls.length - 1].args.memo;
+      return { title: memo.title, content: memo.content, tags: memo.tags };
+    });
+    assert.equal(saved.title, 'Local OCR example text', 'memo title must be the first line');
+    assert.equal(saved.content, 'Local OCR example text', 'memo content must be the full text');
+    assert.deepEqual(saved.tags, [], 'memo tags must be empty');
+
+    // Failure path: the next save rejects, the text stays, and a retry succeeds.
+    await page.evaluate(() => window.__MOCK_TAURI_FAIL_MEMO_ONCE__());
+    await page.locator('.result-panel .result-actions button:has-text("清空文本")').first().click();
+    // Fill the editable OCR textarea directly (no image needed for the save path).
+    await page.locator('.result-panel textarea').first().fill('Local OCR example text');
+    await page.locator('.result-panel .result-actions button:has-text("存为笔记")').first().click();
+    await page.waitForFunction(() => document.body.textContent.includes('Mock memo save failed'), null, { timeout: 5000 });
+    const textKept = await page.evaluate(() => document.querySelector('.result-panel textarea').value.includes('Local OCR example text'));
+    assert.ok(textKept, 'recognized text must survive a failed save');
+
+    await page.locator('.result-panel .result-actions button:has-text("存为笔记")').first().click();
+    await page.waitForFunction(() => {
+      const calls = window.__MOCK_TAURI_COMMAND_CALLS__.filter((call) => call.command === 'memo_create');
+      return calls.length >= 2;
+    }, null, { timeout: 5000 });
+    console.log('  recognize save-as-memo (success, failure, retry): ok');
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true });
   try {
+    await recognizeMemoChecks(browser);
     await clipboardChecks(browser);
     await keysChecks(browser);
     await speedTestChecks(browser);

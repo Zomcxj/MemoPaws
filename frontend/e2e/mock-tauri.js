@@ -35,6 +35,8 @@
   let downloadMode = "success";
   // Clipboard thumbnail test hooks: fail the next thumbnail call for this id once.
   let thumbFailOnce = null;
+  // Memo save test hook: fail the next memo_create call once.
+  let memoFailOnce = false;
 
   // Pin-session state machine: the same rules as Rust `pinned_images::Pins` (visibility before the
   // first pin, session mutex, the three finish outcomes cancel/confirm/pin, restore only when the last pin dies).
@@ -234,8 +236,6 @@
           resolve("<p class=\"memo-render-theme\">" + String(args && args.theme) + "</p>" + MOCK_DATA.memo_render);
         } else if (command in MOCK_DATA) {
           resolve(MOCK_DATA[command]);
-        } else if (command === "memo_create") {
-          resolve({ id: 99, title: (args && args.memo && args.memo.title) || "New", content: (args && args.memo && args.memo.content) || "", tags: [], created: new Date().toISOString(), updated: new Date().toISOString() });
         } else if (command === "memo_update") {
           resolve((args && args.memo) || { id: 1, title: "Updated", content: "", tags: [], created: "", updated: "" });
         } else if (command === "memo_delete" || command === "delete" || command === "lock" || command === "set_master" || command === "remove_master" || command === "save_config" || command === "history_delete" || command === "history_clear" || command === "clipboard_delete" || command === "clipboard_clear" || command === "capture_delete") {
@@ -315,6 +315,13 @@
             setTimeout(function () { window.__MOCK_TAURI_EMIT__("update-ready", {}); }, 200);
           }
           resolve();
+        } else if (command === "memo_create") {
+          if (memoFailOnce) {
+            memoFailOnce = false;
+            reject(new Error("Mock memo save failed"));
+            return;
+          }
+          resolve({ id: 99, title: (args && args.memo && args.memo.title) || "New", content: (args && args.memo && args.memo.content) || "", tags: [], created: new Date().toISOString(), updated: new Date().toISOString() });
         } else if (command === "clipboard_get_image" || command === "capture_get_image") {
           resolve(opaquePngBytes());
         } else if (command === "clipboard_get_thumbnail") {
@@ -437,6 +444,8 @@
   window.__MOCK_TAURI_SET_CLIPBOARD_ITEMS__ = function (items) { MOCK_DATA.clipboard_list = items; };
   // Makes the next clipboard_get_thumbnail call for this id reject exactly once (failure/retry path).
   window.__MOCK_TAURI_FAIL_THUMB_ONCE__ = function (id) { thumbFailOnce = id; };
+  // Makes the next memo_create call reject exactly once (save failure path).
+  window.__MOCK_TAURI_FAIL_MEMO_ONCE__ = function () { memoFailOnce = true; };
 
   // Also set __TAURI__ for older compatibility
   window.__TAURI__ = {
