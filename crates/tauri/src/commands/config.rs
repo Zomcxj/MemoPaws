@@ -9,7 +9,7 @@ use crate::hotkeys;
 
 
 use super::{ClipboardState, HistoryState, KeyVaultState};
-use super::keys::{is_settings_key, save_settings_key};
+use super::keys::{is_settings_key, save_settings_key, sync_settings_entry};
 use super::textrep::TextReplacerState;
 
 fn validate_theme(theme: &str) -> Result<&str, String> {
@@ -223,34 +223,43 @@ pub async fn save_config(
     // Async so the vault I/O, hotkey re-registration and config writes never block the UI.
     let config = config.get("config").cloned().unwrap_or(config);
     validate_config_request(&config)?;
-    if let Some(key) = config
+    let config_path = memopaws_core::paths::config_path().map_err(|e| e.to_string())?;
+    let mut merged = memopaws_config::config::AppConfig::load_from(&config_path)
+        .map_err(|error| error.to_string())?;
+    let url = config
+        .get("api_url")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let model = config
+        .get("api_model")
+        .and_then(|value| value.as_str())
+        .unwrap_or(memopaws_config::config::DEFAULT_MODEL);
+    let api_key = config
         .get("api_key")
         .and_then(|value| value.as_str())
         .filter(|key| !key.trim().is_empty())
-    {
+    ;
+    if let Some(key) = api_key {
         if !lock_recover!(vault).status().unlocked {
             return Err(
                 "key vault is locked; unlock it on the Keys page before saving an API key"
                     .to_string(),
             );
         }
-        let model = config
-            .get("api_model")
-            .and_then(|value| value.as_str())
-            .unwrap_or(memopaws_config::config::DEFAULT_MODEL);
         save_settings_key(
             &vault,
             key,
-            config
-                .get("api_url")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default(),
+            url,
             model,
         )?;
+    } else if merged.api_url.as_deref().unwrap_or_default() != url
+        || merged.api_model.as_deref().unwrap_or(memopaws_config::config::DEFAULT_MODEL) != model
+    {
+        // The form changed the API URL/model without re-typing the key: the vault
+        // entry is what recognition reads, so it must follow or the switch looks
+        // like it never took effect.
+        sync_settings_entry(&mut lock_recover!(vault), url, model)?;
     }
-    let config_path = memopaws_core::paths::config_path().map_err(|e| e.to_string())?;
-    let mut merged = memopaws_config::config::AppConfig::load_from(&config_path)
-        .map_err(|error| error.to_string())?;
     let previous_shortcuts = merged.shortcuts.clone();
     apply_config_patch(&mut merged, &config)?;
     if merged.shortcuts != previous_shortcuts {

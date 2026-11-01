@@ -22,6 +22,14 @@ pub fn prepare_image(bytes: &[u8]) -> Result<PreparedImage, OcrError> {
     Ok(PreparedImage { data_uri: format!("data:image/png;base64,{}", STANDARD.encode(png)), width, height })
 }
 
+/// Runtime-built 1x1 PNG for the multimodal capability probe. A hard-coded byte
+/// literal once rotted into an invalid stream, so the probe always failed before
+/// sending anything; building it with the image crate cannot rot.
+pub fn tiny_probe_png() -> Vec<u8> {
+    let image = RgbaImage::from_pixel(1, 1, Rgba([255, 0, 0, 255]));
+    encode_png(&DynamicImage::ImageRgba8(image)).expect("a 1x1 image always encodes")
+}
+
 pub fn grayscale_png(bytes: &[u8]) -> Result<Vec<u8>, OcrError> { encode_png(&DynamicImage::ImageLuma8(decode_limited(bytes)?.to_luma8())) }
 
 pub fn otsu_binary_png(bytes: &[u8]) -> Result<Vec<u8>, OcrError> {
@@ -168,6 +176,12 @@ mod tests {
         let prepared = prepare_image(&large).expect("AI prepare unchanged");
         assert!(prepared.width <= 1024 && prepared.height <= 1024);
         assert!(prepared.data_uri.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn tiny_probe_png_decodes_to_one_pixel() {
+        let decoded = decode_limited(&tiny_probe_png()).expect("probe png decodes");
+        assert_eq!(decoded.dimensions(), (1, 1));
     }
 
     #[test]

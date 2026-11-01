@@ -24,7 +24,7 @@ const blankDraft = (type: KeyType = "llm"): Draft => ({
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 const isVisionModel = (note: string) =>
-  /vision|vl|gpt-4o|claude-3|glm-4v|gemini|multimodal/i.test(note);
+  /vision|vl|gpt-4o|gpt-5|gpt-6|claude-3|claude-4|claude-5|claude-opus|claude-sonnet|claude-haiku|glm-4v|glm-5|gemini|deepseek-v4|multimodal/i.test(note);
 
 const shortUrl = (url: string) => {
   const cleaned = url.replace(/^https?:\/\//i, "");

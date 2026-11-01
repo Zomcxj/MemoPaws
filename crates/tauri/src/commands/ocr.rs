@@ -200,104 +200,11 @@ fn api_error_result(error: &str, elapsed_ms: u128) -> serde_json::Value {
     result
 }
 
-fn multimodal_probe_image() -> &'static [u8] {
-    // Minimal 1x1 PNG used only to test the provider's image capability.
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
-}
-
-// Bounded so the UI never appears frozen: reachability probe plus a shorter vision probe.
+// Bounded so the UI never appears frozen.
 const API_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
-const KEY_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Clone, Copy)]
-enum KeyProbeFamily {
-    Claude,
-    Grok,
-    Compatible,
-}
-
-struct KeyProbeRequest {
-    family: KeyProbeFamily,
-    endpoint: String,
-    payload: serde_json::Value,
-}
-
-fn key_probe_request(api_url: &str, model: &str) -> KeyProbeRequest {
-    let family = if model.trim().to_ascii_lowercase().starts_with("claude") {
-        KeyProbeFamily::Claude
-    } else if model.trim().to_ascii_lowercase().starts_with("grok") {
-        KeyProbeFamily::Grok
-    } else {
-        KeyProbeFamily::Compatible
-    };
-    let compatible_endpoint = ApiConfig::new(api_url, model, "").endpoint();
-    let base = compatible_endpoint
-        .trim_end_matches("/chat/completions")
-        .trim_end_matches("/messages")
-        .trim_end_matches("/responses");
-    match family {
-        KeyProbeFamily::Claude => KeyProbeRequest {
-            family,
-            endpoint: format!("{base}/messages"),
-            payload: serde_json::json!({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}),
-        },
-        KeyProbeFamily::Grok => KeyProbeRequest {
-            family,
-            endpoint: format!("{base}/responses"),
-            payload: serde_json::json!({"model": model, "input": "hi", "max_output_tokens": 1}),
-        },
-        KeyProbeFamily::Compatible => KeyProbeRequest {
-            family,
-            endpoint: compatible_endpoint,
-            payload: serde_json::json!({"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}),
-        },
-    }
-}
-
-async fn run_key_probe(
-    api_url: &str,
-    model: &str,
-    api_key: &str,
-) -> Result<serde_json::Value, String> {
-    let request = key_probe_request(api_url, model);
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(KEY_PROBE_TIMEOUT)
-        .build()
-        .map_err(|_| "API connection failed".to_string())?;
-    let started = std::time::Instant::now();
-    let response = match request.family {
-        KeyProbeFamily::Claude => {
-            client
-                .post(&request.endpoint)
-                .header("x-api-key", api_key)
-                .header("anthropic-version", "2023-06-01")
-                .json(&request.payload)
-                .send()
-                .await
-        }
-        KeyProbeFamily::Grok | KeyProbeFamily::Compatible => {
-            client
-                .post(&request.endpoint)
-                .bearer_auth(api_key)
-                .json(&request.payload)
-                .send()
-                .await
-        }
-    };
-    let elapsed = started.elapsed().as_millis();
-    match response {
-        Ok(response) => Ok(key_probe_status_result(response.status().as_u16(), elapsed)),
-        Err(error) => Ok(api_error_result(&error.to_string(), elapsed)),
-    }
-}
-
-fn key_probe_status_result(status_code: u16, elapsed_ms: u128) -> serde_json::Value {
-    if status_code == 200 {
-        serde_json::json!({"status_code": 200, "elapsed_ms": elapsed_ms})
-    } else {
-        api_error_result(&format!("HTTP {status_code}"), elapsed_ms)
-    }
+fn multimodal_probe_image() -> Vec<u8> {
+    memopaws_ocr::image_util::tiny_probe_png()
 }
 
 // The probe reuses the same OCR path as real image recognition, so a working
@@ -314,9 +221,14 @@ async fn run_api_probe(config: ApiConfig) -> Result<serde_json::Value, String> {
     let elapsed = started.elapsed().as_millis();
     match text_result {
         Ok(_) => {
-            let vision_ok = client.ocr(multimodal_probe_image()).await.is_ok();
+            // Surface the vision failure reason: a swallowed is_ok() once hid a
+            // corrupt probe image behind a misleading "text-only" verdict.
+            let vision = match client.ocr(&multimodal_probe_image()).await {
+                Ok(_) => serde_json::json!({"success": true}),
+                Err(error) => serde_json::json!({"success": false, "error": error.to_string()}),
+            };
             Ok(
-                serde_json::json!({"status_code": 200, "elapsed_ms": elapsed, "vision_result": {"success": vision_ok}}),
+                serde_json::json!({"status_code": 200, "elapsed_ms": elapsed, "vision_result": vision}),
             )
         }
         Err(error) => Ok(api_error_result(&error.to_string(), elapsed)),
@@ -346,8 +258,9 @@ pub async fn test_api_connection(
         ))
         .await;
     }
-    // No inline key: fall back to the saved settings entry so a stored key still tests.
-    let (api_url, anthropic_url, model, key) = {
+    // No inline key: fall back to the saved settings entry so a stored key still
+    // tests through the exact path real recognition uses.
+    let config = {
         let vault = lock_recover!(vault);
         if !vault.status().unlocked {
             return Err("key vault is locked, unlock it first".to_string());
@@ -371,26 +284,9 @@ pub async fn test_api_connection(
                 .get_value(entry.id)
                 .map_err(|_| "API connection failed".to_string())?,
         );
-        let anthropic_url = entry.url_anthropic.clone();
-        let config = resolve_ai_config(entry, key.clone(), Some(model.clone()))?;
-        (
-            config
-                .endpoint()
-                .trim_end_matches("/chat/completions")
-                .to_string(),
-            anthropic_url,
-            config.model().to_string(),
-            key,
-        )
+        resolve_ai_config(entry, key, Some(model))?
     };
-    let probe_url = if model.trim().to_ascii_lowercase().starts_with("claude")
-        && !anthropic_url.trim().is_empty()
-    {
-        anthropic_url.as_str()
-    } else {
-        api_url.as_str()
-    };
-    run_key_probe(probe_url, &model, key.as_str()).await
+    run_api_probe(config).await
 }
 
 #[tauri::command]
@@ -479,7 +375,7 @@ mod tests {
     use super::*;
     use memopaws_keys::KeyEntryInput;
     use std::{
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     #[test]
@@ -705,82 +601,6 @@ mod tests {
 
         let timeout = super::api_error_result("timed out", 8000);
         assert!(timeout.get("status_code").is_none());
-    }
-
-    #[test]
-    fn key_probe_accepts_only_http_200_and_preserves_other_statuses() {
-        for status in [201, 204, 400, 408, 500, 502] {
-            let result = super::key_probe_status_result(status, 7);
-            assert_eq!(result["status_code"], status);
-            assert!(result.get("error").is_some());
-        }
-        assert_eq!(super::key_probe_status_result(200, 7)["status_code"], 200);
-        assert!(super::key_probe_status_result(200, 7)
-            .get("error")
-            .is_none());
-        assert_eq!(
-            super::key_probe_status_result(201, 7)["error"],
-            "http_error"
-        );
-        assert_eq!(
-            super::key_probe_status_result(408, 7)["error"],
-            "request_timeout"
-        );
-        assert_eq!(
-            super::key_probe_status_result(500, 7)["error"],
-            "server_error"
-        );
-    }
-
-    #[test]
-    fn key_probe_selects_model_family_endpoint_and_payload() {
-        let claude = super::key_probe_request("https://api.anthropic.com/v1/", "claude-3-5-haiku");
-        assert_eq!(claude.endpoint, "https://api.anthropic.com/v1/messages");
-        assert_eq!(
-            claude.payload,
-            serde_json::json!({
-                "model": "claude-3-5-haiku",
-                "max_tokens": 1,
-                "messages": [{"role": "user", "content": "hi"}]
-            })
-        );
-
-        let grok = super::key_probe_request("https://api.x.ai/v1/chat/completions", "grok-3");
-        assert_eq!(grok.endpoint, "https://api.x.ai/v1/responses");
-        assert_eq!(
-            grok.payload,
-            serde_json::json!({
-                "model": "grok-3",
-                "input": "hi",
-                "max_output_tokens": 1
-            })
-        );
-
-        for model in [
-            "gpt-4o-mini",
-            "glm-4v-flash",
-            "deepseek-chat",
-            "custom-model",
-        ] {
-            let request = super::key_probe_request("https://provider.example/v1/", model);
-            assert_eq!(
-                request.endpoint,
-                "https://provider.example/v1/chat/completions"
-            );
-            assert_eq!(
-                request.payload,
-                serde_json::json!({
-                    "model": model,
-                    "messages": [{"role": "user", "content": "hi"}],
-                    "max_tokens": 1
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn key_probe_timeout_is_ten_seconds() {
-        assert_eq!(super::KEY_PROBE_TIMEOUT, Duration::from_secs(10));
     }
 
     #[test]

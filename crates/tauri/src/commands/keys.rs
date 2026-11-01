@@ -63,6 +63,30 @@ pub(super) fn save_settings_key(
     upsert_settings_key(&mut vault, key, url, &settings_note(model))
 }
 
+/// Syncs the Settings entry's URL and model when the user saves the settings
+/// form without re-typing the API key. Recognition reads this entry, so letting
+/// it go stale is what made form-only edits look like "the switch never took".
+/// Returns Ok(false) when there is no settings entry or nothing changed.
+pub(super) fn sync_settings_entry(vault: &mut KeyVault, url: &str, model: &str) -> Result<bool, String> {
+    if !vault.status().unlocked {
+        return Err(
+            "key vault is locked; unlock it on the Keys page before changing the API URL or model"
+                .to_string(),
+        );
+    }
+    let Some(entry) = vault.list().into_iter().find(is_settings_key) else {
+        return Ok(false);
+    };
+    let url = url.trim();
+    let model = settings_note(model);
+    if entry.url == url && entry.note == model {
+        return Ok(false);
+    }
+    let value = vault.get_value(entry.id).map_err(|error| error.to_string())?;
+    upsert_settings_key(vault, &value, url, &model)?;
+    Ok(true)
+}
+
 pub(crate) fn lock_vault_state(state: &KeyVaultState) {
     state
         .lock()
@@ -163,6 +187,8 @@ mod tests {
 
     use memopaws_keys::{KeyEntryInput, KeyVault};
 
+    use super::SETTINGS_KEY_NAME;
+
     #[test]
     fn lock_vault_state_recovers_from_a_poisoned_mutex() {
         let path = std::env::temp_dir().join(format!(
@@ -235,6 +261,75 @@ mod tests {
 
         let reloaded = KeyVault::load(&path).unwrap();
         assert_eq!(reloaded.list().len(), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sync_settings_entry_updates_url_and_model_and_keeps_the_key_value() {
+        let path = std::env::temp_dir().join(format!(
+            "memopaws-sync-update-{}.json",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let mut vault = KeyVault::load(&path).unwrap();
+        let id = vault
+            .add(KeyEntryInput {
+                name: SETTINGS_KEY_NAME.into(),
+                entry_type: "llm".into(),
+                value: "secret".into(),
+                url: "https://old.example/v1".into(),
+                url_anthropic: String::new(),
+                note: "old-model".into(),
+            })
+            .unwrap()
+            .id;
+
+        assert!(super::sync_settings_entry(&mut vault, "https://new.example/v1/", " new-model ").unwrap());
+        let entry = vault
+            .list()
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+        assert_eq!(entry.url, "https://new.example/v1/");
+        assert_eq!(entry.note, "new-model");
+        assert_eq!(vault.get_value(id).unwrap(), "secret");
+
+        // Unchanged values are a no-op, so theme-only saves never touch the vault.
+        assert!(!super::sync_settings_entry(&mut vault, "https://new.example/v1/", "new-model").unwrap());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sync_settings_entry_without_a_settings_entry_is_a_noop() {
+        let path = std::env::temp_dir().join(format!(
+            "memopaws-sync-missing-{}.json",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let mut vault = KeyVault::load(&path).unwrap();
+        assert!(!super::sync_settings_entry(&mut vault, "https://x.example/v1", "m").unwrap());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sync_settings_entry_on_a_locked_vault_requires_unlock() {
+        let path = std::env::temp_dir().join(format!(
+            "memopaws-sync-locked-{}.json",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let mut vault = KeyVault::load(&path).unwrap();
+        vault.set_master("pw").unwrap();
+        vault.lock();
+        assert!(super::sync_settings_entry(&mut vault, "https://x.example/v1", "m")
+            .unwrap_err()
+            .contains("locked"));
         let _ = std::fs::remove_file(path);
     }
 
