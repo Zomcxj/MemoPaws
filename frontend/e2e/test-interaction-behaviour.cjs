@@ -234,6 +234,31 @@ async function memoChecks(browser) {
   }
 }
 
+// Merge copy: multi-select checkboxes merge the picked memos into one
+// clipboard text with title headings and a divider between entries.
+async function memoMergeCopyChecks(browser) {
+  const { context, page } = await open(browser, '备忘录');
+  try {
+    await page.evaluate(() => {
+      window.__MERGED__ = null;
+      navigator.clipboard.writeText = text => { window.__MERGED__ = text; return Promise.resolve(); };
+    });
+    const boxes = page.locator('.memo-list input[type="checkbox"]');
+    assert.ok((await boxes.count()) >= 2, 'memo list must expose merge checkboxes');
+    await boxes.nth(0).check();
+    await boxes.nth(1).check();
+    await page.getByRole('button', { name: '合并复制 (2)' }).click();
+    await page.waitForTimeout(200);
+    const merged = await page.evaluate(() => window.__MERGED__);
+    assert.ok(merged && merged.includes('# Test Memo'), `merge must include the first title, got ${JSON.stringify(merged)}`);
+    assert.ok(merged.includes('# Second Memo'), `merge must include the second title, got ${JSON.stringify(merged)}`);
+    assert.ok(merged.includes('---'), 'merge must join the memos with a divider');
+    console.log('  memo merge copy: ok');
+  } finally {
+    await context.close();
+  }
+}
+
 async function recognizeMemoChecks(browser) {
   const { context, page } = await open(browser, '图片识别');
   try {
@@ -285,6 +310,7 @@ async function main() {
     await keysChecks(browser);
     await speedTestChecks(browser);
     await memoChecks(browser);
+    await memoMergeCopyChecks(browser);
     console.log('Interaction behaviour tests passed.');
   } finally {
     await browser.close();

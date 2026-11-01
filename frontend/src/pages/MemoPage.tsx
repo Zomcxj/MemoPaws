@@ -42,6 +42,9 @@ const copy = {
     noMatch: "没有匹配的备忘录",
     empty: "还没有备忘录，点击 + 开始记录",
     untitled: "未命名备忘录",
+    mergeCopy: (n: number) => `合并复制 (${n})`,
+    merged: "已合并复制",
+    mergePick: "选择备忘录",
     counting: "搜索中…",
     count: (n: number) => `${n} 条`,
     close: "关闭",
@@ -82,6 +85,9 @@ const copy = {
     noMatch: "No matching memos",
     empty: "No memos yet. Click + to start.",
     untitled: "Untitled memo",
+    mergeCopy: (n: number) => `Merge copy (${n})`,
+    merged: "Merged to clipboard",
+    mergePick: "Select memo",
     counting: "Searching…",
     count: (n: number) => `${n} items`,
     close: "Close",
@@ -128,6 +134,8 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
   const t = copy[language];
   const [memos, setMemos] = useState<Memo[]>([]);
   const [selected, setSelected] = useState<Memo | null>(null);
+  const [mergeSelected, setMergeSelected] = useState<number[]>([]);
+  const [merged, setMerged] = useState(false);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -275,6 +283,21 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
 
   const canDiscard = () => !dirty || window.confirm(t.unsaved);
 
+  const toggleMerge = (id: number) => {
+    setMergeSelected((ids) => (ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]));
+  };
+  const mergeCopy = async () => {
+    const picked = visibleMemos.map((result) => result.memo).filter((memo) => mergeSelected.includes(memo.id));
+    if (picked.length < 2) return;
+    const text = picked.map((memo) => `# ${memo.title || t.untitled}\n\n${memo.content}`).join("\n\n---\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setMerged(true);
+      window.setTimeout(() => setMerged(false), 1500);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
   const selectMemo = (memo: Memo) => {
     if (selected?.id === memo.id || !canDiscard()) return;
     setSelected(memo);
@@ -396,6 +419,7 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
             <button onClick={() => void createDraft()} disabled={saving}>{t.new}</button>
             <button onClick={() => fileInput.current?.click()} disabled={saving}>{t.import}</button>
             <button onClick={exportMemo} disabled={saving || !selected}>{t.export}</button>
+            <button onClick={() => void mergeCopy()} disabled={saving || merged || mergeSelected.length < 2}>{merged ? t.merged : t.mergeCopy(mergeSelected.length)}</button>
             <button className="danger" onClick={() => void remove()} disabled={saving}>{t.delete}</button>
           </div>
           <input ref={fileInput} className="memo-file-input" type="file" accept=".md,.txt,text/markdown,text/plain" multiple onChange={(event) => void importMemos(event.target.files)} />
@@ -413,15 +437,22 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
             <div className="memo-state">{query ? t.noMatch : t.empty}</div>
           )}
           {!loading && !searching && !searchError && visibleMemos.map((result) => (
-            <button
-              key={result.memo.id}
-              disabled={saving}
-              className={`memo-list-item ${selected?.id === result.memo.id ? "active" : ""}`}
-              onClick={() => selectMemo(result.memo)}
-            >
-              <strong>{result.memo.title || t.untitled}</strong>
-              <span>{result.memo.tags.map((tag) => `#${tag}`).join(" ") || result.memo.content.split("\n")[0] || ""}</span>
-            </button>
+            <div className="memo-list-row" key={result.memo.id}>
+              <input
+                type="checkbox"
+                aria-label={t.mergePick}
+                checked={mergeSelected.includes(result.memo.id)}
+                onChange={() => toggleMerge(result.memo.id)}
+              />
+              <button
+                disabled={saving}
+                className={`memo-list-item ${selected?.id === result.memo.id ? "active" : ""}`}
+                onClick={() => selectMemo(result.memo)}
+              >
+                <strong>{result.memo.title || t.untitled}</strong>
+                <span>{result.memo.tags.map((tag) => `#${tag}`).join(" ") || result.memo.content.split("\n")[0] || ""}</span>
+              </button>
+            </div>
           ))}
         </div>
         <div className="memo-count">{searching ? t.counting : t.count(visibleMemos.length)}</div>
