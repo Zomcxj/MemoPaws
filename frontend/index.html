@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MemoPaws</title>
+    <script>
+      // Paint the persisted theme before the first CSS frame: a default light
+      // frame escaping at boot, or re-presented while a window hides for
+      // capture, reads as a fullscreen flash on the dark desktop.
+      (function () {
+        try {
+          var mode = localStorage.getItem("memopaws-theme") || "dark";
+          var system = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", mode === "auto" ? system : mode);
+        } catch (error) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
