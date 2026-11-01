@@ -348,10 +348,25 @@ async function recognizeMemoChecks(browser) {
   }
 }
 
+// QR decode: importing the QR fixture and pressing the QR button fills the OCR
+// textarea with the encoded payload.
+async function recognizeQrChecks(browser) {
+  const { context, page } = await open(browser, '图片识别');
+  try {
+    await page.locator('.recognize-page input[type="file"]').setInputFiles(__dirname + '/fixtures/qr-fixture.png');
+    await page.getByRole('button', { name: '二维码' }).click();
+    await page.waitForFunction(() => document.querySelector("textarea[aria-label='AI识别']")?.value === 'MemoPaws QR test', null, { timeout: 5000 });
+    console.log('  recognize qr decode: ok');
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true });
   try {
     await recognizeMemoChecks(browser);
+    await recognizeQrChecks(browser);
     await clipboardChecks(browser);
     await keysChecks(browser);
     await speedTestChecks(browser);

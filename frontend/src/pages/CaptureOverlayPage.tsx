@@ -6,6 +6,7 @@ import { CaptureOverlay, type RegionCss } from "../components/CaptureOverlay";
 import { composePng } from "../annotation/render";
 import type { Mark } from "../annotation/model";
 import { copy } from "./RecognizePage";
+import { decodeQrImage } from "../utils/qr";
 import "./RecognizePage.css";
 
 interface TextResult { text: string }
@@ -146,6 +147,7 @@ export function CaptureOverlayPage() {
     const result = await invoke<TextResult>("local_ocr", { image: Array.from(marked), language: localLanguage });
     return result.text || "(无识别结果)";
   };
+  const qrRecognize = async (marked: Uint8Array) => decodeQrImage(marked);
   const confirmCapture = async (result: { image: Uint8Array; ocrText: string; translation: string }) => {
     // Hand the result to Rust (the hidden main window polls it — events to
     // hidden pages cannot be trusted), then end the session.
@@ -185,13 +187,14 @@ export function CaptureOverlayPage() {
     onRecognize={recognize}
     onTranslate={translate}
     onLocalRecognize={localRecognize}
+    onQr={qrRecognize}
     localLanguages={localLanguages.languages}
     localLanguage={localLanguage}
     onLocalLanguageChange={setLocalLanguage}
     onPinImage={pinImage}
     onCopyImage={copyImage}
     onSaveImage={saveImage}
-    labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX", resize: language === "zh" ? "调整结果窗口大小" : "Resize result window", toolMove: t.toolMove, toolArrow: t.toolArrow, toolRectangle: t.toolRectangle, toolPen: t.toolPen, toolText: t.toolText, toolMosaic: t.mosaic, strokeColor: t.strokeColor, strokeWidth: t.strokeWidth, undo: t.undo, redo: t.redo, textCommit: t.textCommit, textCancel: t.textCancel, localOcr: t.localOcr, localOcrLanguage: t.localOcrLanguage }}
+    labels={{ recognize: t.ocr, translate: t.translate, copyImage: t.copyImage, saveImage: t.save, confirm: language === "zh" ? "确认" : "Confirm", cancel: t.close, copied: t.copied, colorHint: language === "zh" ? "按 C 复制 HEX" : "Press C to copy HEX", resize: language === "zh" ? "调整结果窗口大小" : "Resize result window", toolMove: t.toolMove, toolArrow: t.toolArrow, toolRectangle: t.toolRectangle, toolPen: t.toolPen, toolText: t.toolText, toolMosaic: t.mosaic, strokeColor: t.strokeColor, strokeWidth: t.strokeWidth, undo: t.undo, redo: t.redo, textCommit: t.textCommit, textCancel: t.textCancel, localOcr: t.localOcr, localOcrLanguage: t.localOcrLanguage, qr: t.qr, qrEmpty: t.qrEmpty }}
     />
   </div>;
 }

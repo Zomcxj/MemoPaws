@@ -34,6 +34,8 @@ export interface CaptureLabels {
   textCancel: string;
   localOcr: string;
   localOcrLanguage: string;
+  qr: string;
+  qrEmpty: string;
 }
 
 interface Props {
@@ -46,6 +48,7 @@ interface Props {
   onRecognize?: (image: Uint8Array) => Promise<string>;
   onTranslate?: (image: Uint8Array) => Promise<{ ocrText: string; translation: string }>;
   onLocalRecognize?: (image: Uint8Array) => Promise<string>;
+  onQr?: (image: Uint8Array) => Promise<string | null>;
   localLanguages?: { tag: string; name: string }[];
   localLanguage?: string;
   onLocalLanguageChange?: (tag: string) => void;
@@ -94,6 +97,8 @@ const DEFAULT_LABELS: CaptureLabels = {
   textCancel: "Discard text",
   localOcr: "Offline OCR",
   localOcrLanguage: "Offline OCR language",
+  qr: "QR",
+  qrEmpty: "No QR code found",
 };
 
 const TOOLS: { name: Exclude<Tool, "move"> | "move"; labelKey: keyof CaptureLabels }[] = [
@@ -117,6 +122,7 @@ export function CaptureOverlay({
   onRecognize,
   onTranslate,
   onLocalRecognize,
+  onQr,
   localLanguages,
   localLanguage,
   onLocalLanguageChange,
@@ -620,6 +626,24 @@ export function CaptureOverlay({
     finally { setBusy(false); }
   };
 
+  // QR decode: same composited image and operation token; a null result is a
+  // "no code" notice, not a hard failure.
+  const runQr = async () => {
+    if (!selection || !onQr || busy) return;
+    const operationToken = ++operationTokenRef.current;
+    if (!resultWindow && defaultResultWindow) setResultWindow(defaultResultWindow);
+    setBusy(true); setResultError("");
+    try {
+      const image = await imageForSelection();
+      const code = await onQr(image);
+      if (operationTokenRef.current === operationToken) {
+        if (code) { setOcrText(code); setTranslation(""); }
+        else setResultError(text.qrEmpty);
+      }
+    } catch (reason) { setResultError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+
   const localLanguagePicker = (onLocalRecognize && localLanguages && localLanguages.length > 0 && (
     <select
       className="capture-overlay-local-language"
@@ -769,7 +793,7 @@ export function CaptureOverlay({
           <div className="capture-result-actions">
             {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
             {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
-            {onLocalRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.localOcr} onClick={() => void runLocalRecognize()} disabled={busy || !localLanguages?.length}>{text.localOcr}</button>}
+            {onLocalRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.localOcr} onClick={() => void runLocalRecognize()} disabled={busy || !localLanguages?.length}>{text.localOcr}</button>}{onQr && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.qr} onClick={() => void runQr()} disabled={busy}>{text.qr}</button>}
             {localLanguagePicker}
             {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
             {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}
@@ -804,7 +828,7 @@ export function CaptureOverlay({
           <div className="capture-overlay-actions">
             {onRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.recognize} onClick={() => void runRecognize()} disabled={busy}>{text.recognize}</button>}
             {onTranslate && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.translate} onClick={() => void runTranslate()} disabled={busy}>{text.translate}</button>}
-            {onLocalRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.localOcr} onClick={() => void runLocalRecognize()} disabled={busy || !localLanguages?.length}>{text.localOcr}</button>}
+            {onLocalRecognize && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.localOcr} onClick={() => void runLocalRecognize()} disabled={busy || !localLanguages?.length}>{text.localOcr}</button>}{onQr && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.qr} onClick={() => void runQr()} disabled={busy}>{text.qr}</button>}
             {localLanguagePicker}
             {onCopyImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.copyImage} onClick={act(onCopyImage)} disabled={busy}>{text.copyImage}</button>}
             {onSaveImage && <button className="capture-overlay-action capture-overlay-action--label" type="button" aria-label={text.saveImage} onClick={act(onSaveImage)} disabled={busy}>{text.saveImage}</button>}

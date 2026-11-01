@@ -1176,6 +1176,21 @@ async function offlineOcrOverlayFlow(browser) {
   await context.close();
 }
 
+// QR decode on the overlay: the mock screenshot is a coordinate-color pattern
+// with no code in it, so the result window must show the "no QR" notice.
+async function qrOverlayFlow(browser) {
+  const { context, page, overlay } = await openOverlayPage(browser);
+  try {
+    await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+    await overlay.getByRole("button", { name: "二维码" }).click();
+    const resultWindow = page.locator(".capture-result-window");
+    await resultWindow.waitFor();
+    await resultWindow.locator(".capture-result-error").getByText("未发现二维码").waitFor({ timeout: 5000 });
+  } finally {
+    await context.close();
+  }
+}
+
 const FLOWS = [
   ["capture overlay selection flow", captureOverlayFlow],
   ["annotation model history and pixel math", annotationModelFlow],
@@ -1194,6 +1209,7 @@ const FLOWS = [
   ["#pin window transparency and startup", pinWindowFlow],
   ["pin wheel zoom, close and cleanup", pinWheelFlow],
   ["capture_screen number[] fallback still decodes", captureFallbackFlow],
+  ["qr decode on the overlay", qrOverlayFlow],
 ];
 
 async function run() {
