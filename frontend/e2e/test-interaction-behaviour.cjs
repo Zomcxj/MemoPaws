@@ -72,6 +72,10 @@ async function memoRevisionChecks(browser) {
     await page.locator('.memo-history-row').first().waitFor({ timeout: 5000 });
     await page.locator('.memo-history-row').getByRole('button', { name: '恢复' }).first().click();
     await page.waitForFunction(() => document.querySelector('.memo-editor')?.value === '旧版本内容（恢复用）', null, { timeout: 5000 });
+    // Deleting the revision empties the panel back to the notice.
+    await page.locator('.memo-history-row').getByRole('button', { name: '删除' }).first().click();
+    await page.waitForFunction(() => document.querySelector('.memo-history')?.textContent.includes('暂无历史版本'), null, { timeout: 5000 });
+    assert.ok(await page.locator('.memo-history-row').count() === 0, 'deleted revision must leave no rows');
     console.log('  memo revision restore: ok');
   } finally {
     await context.close();

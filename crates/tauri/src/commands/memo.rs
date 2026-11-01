@@ -63,6 +63,11 @@ pub fn memo_revision_restore(id: i64, time: String, now: String) -> Result<Memo,
 }
 
 #[tauri::command]
+pub fn memo_revision_delete(id: i64, time: String) -> Result<(), String> {
+    revisions::delete_revision(&memo_dir()?, id, &time).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn memo_delete(id: i64) -> Result<(), String> {
     storage::delete_memo(&memo_dir()?, id).map_err(|error| error.to_string())
 }

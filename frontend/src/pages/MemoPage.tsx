@@ -375,6 +375,19 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
       setRestoring(false);
     }
   };
+
+  const deleteRevision = async (time: string) => {
+    if (!selected) return;
+    setRestoring(true);
+    try {
+      await invoke("memo_revision_delete", { id: selected.id, time });
+      setRevisions(await invoke<Revision[]>("memo_revision_list", { id: selected.id }));
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setRestoring(false);
+    }
+  };
   const selectMemo = (memo: Memo) => {
     if (selected?.id === memo.id || !canDiscard()) return;
     setSelected(memo);
@@ -590,6 +603,7 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
                     <span className="memo-history-time">{revision.time}</span>
                     <span className="memo-history-preview">{revision.content.split("\n")[0] || t.untitled}</span>
                     <button onClick={() => void restoreRevision(revision.time)} disabled={restoring || saving}>{t.restore}</button>
+                    <button onClick={() => void deleteRevision(revision.time)} disabled={restoring || saving}>{t.delete}</button>
                   </div>
                 ))}
               </div>

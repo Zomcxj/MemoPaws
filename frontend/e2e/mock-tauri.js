@@ -37,6 +37,8 @@
   let thumbFailOnce = null;
   // Memo save test hook: fail the next memo_create call once.
   let memoFailOnce = false;
+  // Mutable revision store so the delete flow can empty the list.
+  let memoRevisions = [{ time: "2026-10-31 10:00:00", content: "旧版本内容（恢复用）" }];
 
   // Pin-session state machine: the same rules as Rust `pinned_images::Pins` (visibility before the
   // first pin, session mutex, the three finish outcomes cancel/confirm/pin, restore only when the last pin dies).
@@ -387,7 +389,11 @@
           }
           resolve({ id: 99, title: (args && args.memo && args.memo.title) || "New", content: (args && args.memo && args.memo.content) || "", tags: [], created: new Date().toISOString(), updated: new Date().toISOString() });
         } else if (command === "memo_revision_list") {
-          resolve([{ time: "2026-10-31 10:00:00", content: "旧版本内容（恢复用）" }]);
+          resolve(memoRevisions);
+        } else if (command === "memo_revision_delete") {
+          const time = args && args.time;
+          memoRevisions = memoRevisions.filter((revision) => revision.time !== time);
+          resolve(null);
         } else if (command === "memo_revision_restore") {
           const restored = { id: (args && args.id) || 1, time: (args && args.now) || "", created: (args && args.now) || "", modified: (args && args.now) || "", title: "Test Memo", content: "旧版本内容（恢复用）", tags: [] };
           // loadMemos re-reads the list right after: keep the static list in

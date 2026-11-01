@@ -8,7 +8,7 @@ use crate::storage::MemoError;
 /// Per-memo revision history: the previous content is snapshotted before every
 /// content-changing update, newest first, capped so a chatty memo cannot grow
 /// the store without bounds.
-pub const REVISIONS_MAX: usize = 20;
+pub const REVISIONS_MAX: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Revision {
@@ -41,11 +41,25 @@ pub fn snapshot_revision(memo_dir: &Path, id: i64, previous_content: &str, time:
     }
     revisions.insert(0, Revision { time: time.to_string(), content: previous_content.to_string() });
     revisions.truncate(REVISIONS_MAX);
+    write_revisions(memo_dir, id, &revisions)
+}
+
+pub fn delete_revision(memo_dir: &Path, id: i64, time: &str) -> Result<(), MemoError> {
+    let mut revisions = list_revisions(memo_dir, id)?;
+    let before = revisions.len();
+    revisions.retain(|revision| revision.time != time);
+    if revisions.len() == before {
+        return Err(MemoError::InvalidData(format!("revision {time} not found")));
+    }
+    write_revisions(memo_dir, id, &revisions)
+}
+
+fn write_revisions(memo_dir: &Path, id: i64, revisions: &[Revision]) -> Result<(), MemoError> {
     let file = revisions_file(memo_dir, id);
     if let Some(parent) = file.parent() {
         fs::create_dir_all(parent)?;
     }
-    let serialized = serde_json::to_string(&revisions)
+    let serialized = serde_json::to_string(revisions)
         .map_err(|_| MemoError::InvalidData("revisions failed to serialize".into()))?;
     crate::storage::atomic_write_replace(&file, &serialized)
 }
@@ -83,7 +97,19 @@ mod tests {
         assert_eq!(revisions.len(), REVISIONS_MAX);
         assert_eq!(revisions[0].content, "content 24");
         assert_eq!(revisions[0].time, "t24");
-        assert_eq!(revisions.last().unwrap().content, "content 5");
+        assert_eq!(revisions.last().unwrap().content, "content 15");
+    }
+
+    #[test]
+    fn delete_revision_removes_one_entry_and_rejects_unknown_times() {
+        let dir = TempDir::new("delete");
+        snapshot_revision(&dir.0, 3, "older", "t1").unwrap();
+        snapshot_revision(&dir.0, 3, "newer", "t2").unwrap();
+        delete_revision(&dir.0, 3, "t1").unwrap();
+        let revisions = list_revisions(&dir.0, 3).unwrap();
+        assert_eq!(revisions.len(), 1);
+        assert_eq!(revisions[0].content, "newer");
+        assert!(delete_revision(&dir.0, 3, "missing").is_err());
     }
 
     #[test]
