@@ -56,6 +56,23 @@ async function memoDateChecks(browser) {
   }
 }
 
+// Revision history: the panel lists snapshot times and restoring swaps the
+// editor content to the picked revision.
+async function memoRevisionChecks(browser) {
+  const { context, page } = await open(browser, '备忘录');
+  try {
+    await page.locator('.memo-list-item').first().click();
+    await page.getByRole('button', { name: '历史版本' }).click();
+    await page.locator('.memo-history-row').first().waitFor({ timeout: 5000 });
+    assert.ok(await page.locator('.memo-history').getByText('2026-10-31 10:00:00').count() === 1, 'revision time must be listed');
+    await page.locator('.memo-history-row').getByRole('button', { name: '恢复' }).first().click();
+    await page.waitForFunction(() => document.querySelector('.memo-editor')?.value === '旧版本内容（恢复用）', null, { timeout: 5000 });
+    console.log('  memo revision restore: ok');
+  } finally {
+    await context.close();
+  }
+}
+
 async function clipboardChecks(browser) {
   const { context, page } = await open(browser, '剪切板');
   try {
@@ -341,6 +358,7 @@ async function main() {
     await memoChecks(browser);
     await memoMergeCopyChecks(browser);
     await memoDateChecks(browser);
+    await memoRevisionChecks(browser);
     console.log('Interaction behaviour tests passed.');
   } finally {
     await browser.close();

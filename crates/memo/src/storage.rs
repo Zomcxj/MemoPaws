@@ -180,6 +180,11 @@ pub fn update_memo(memo_dir: &Path, mut memo: Memo) -> Result<Memo> {
     let filename = existing.file.ok_or_else(|| MemoError::InvalidData("memo filename missing".into()))?;
     let path = safe_memo_path(memo_dir, &filename)?;
     memo.file = Some(filename);
+    // Snapshot the previous content before it is overwritten: identical content
+    // does not accumulate entries, so no-op saves stay free.
+    if existing.content != memo.content {
+        crate::revisions::snapshot_revision(memo_dir, memo.id, &existing.content, &memo.modified)?;
+    }
     atomic_write_replace(&path, &(build_frontmatter(&memo) + &memo.content))?;
     Ok(memo)
 }
@@ -233,7 +238,7 @@ fn write_temporary(path: &Path, contents: &str) -> Result<PathBuf> {
     Ok(temporary)
 }
 
-fn atomic_write_replace(path: &Path, contents: &str) -> Result<()> {
+pub(crate) fn atomic_write_replace(path: &Path, contents: &str) -> Result<()> {
     atomic_write_replace_with(path, contents, replace_file)
 }
 
@@ -318,6 +323,34 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "original");
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_memo_snapshots_the_previous_content() {
+        let root = std::env::temp_dir().join(format!(
+            "memopaws-revision-hook-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let memo = create_memo(&root, Memo { id: 9, time: "t0".into(), created: "t0".into(), modified: "t0".into(), title: "Doc".into(), content: "first".into(), tags: vec![], file: None }).unwrap();
+
+        let mut changed = memo.clone();
+        changed.content = "second".into();
+        changed.modified = "t1".into();
+        update_memo(&root, changed).unwrap();
+        let revisions = crate::revisions::list_revisions(&root, 9).unwrap();
+        assert_eq!(revisions.len(), 1);
+        assert_eq!(revisions[0].content, "first");
+        // The revision time is when it was replaced (the save time), so the
+        // panel reads "content that was live until t1".
+        assert_eq!(revisions[0].time, "t1");
+
+        // A no-op save (identical content) must not accumulate entries.
+        let mut same = read_memo(&root, 9).unwrap();
+        same.modified = "t2".into();
+        update_memo(&root, same).unwrap();
+        assert_eq!(crate::revisions::list_revisions(&root, 9).unwrap().len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 }

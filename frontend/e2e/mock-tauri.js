@@ -386,6 +386,15 @@
             return;
           }
           resolve({ id: 99, title: (args && args.memo && args.memo.title) || "New", content: (args && args.memo && args.memo.content) || "", tags: [], created: new Date().toISOString(), updated: new Date().toISOString() });
+        } else if (command === "memo_revision_list") {
+          resolve([{ time: "2026-10-31 10:00:00", content: "旧版本内容（恢复用）" }]);
+        } else if (command === "memo_revision_restore") {
+          const restored = { id: (args && args.id) || 1, time: (args && args.now) || "", created: (args && args.now) || "", modified: (args && args.now) || "", title: "Test Memo", content: "旧版本内容（恢复用）", tags: [] };
+          // loadMemos re-reads the list right after: keep the static list in
+          // sync or the restored content is reverted by the refresh.
+          const entry = MOCK_DATA.memo_list.find((memo) => memo.id === restored.id);
+          if (entry) entry.content = restored.content;
+          resolve(restored);
         } else if (command === "clipboard_get_image" || command === "capture_get_image") {
           resolve(opaquePngBytes());
         } else if (command === "clipboard_get_thumbnail") {

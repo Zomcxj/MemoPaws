@@ -21,6 +21,11 @@ interface SearchResult {
   line_number: number;
 }
 
+interface Revision {
+  time: string;
+  content: string;
+}
+
 type ViewMode = "edit" | "split" | "preview";
 
 const MIN_PREVIEW_SCALE = 0.85;
@@ -46,6 +51,10 @@ const copy = {
     merged: "已合并复制",
     mergePick: "选择备忘录",
     insertDate: "插入日期",
+    history: "历史版本",
+    noRevisions: "暂无历史版本",
+    restore: "恢复",
+    restored: "已恢复该版本",
     counting: "搜索中…",
     count: (n: number) => `${n} 条`,
     close: "关闭",
@@ -90,6 +99,10 @@ const copy = {
     merged: "Merged to clipboard",
     mergePick: "Select memo",
     insertDate: "Insert date",
+    history: "History",
+    noRevisions: "No revisions yet",
+    restore: "Restore",
+    restored: "Revision restored",
     counting: "Searching…",
     count: (n: number) => `${n} items`,
     close: "Close",
@@ -147,6 +160,9 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
   const [selected, setSelected] = useState<Memo | null>(null);
   const [mergeSelected, setMergeSelected] = useState<number[]>([]);
   const [merged, setMerged] = useState(false);
+  const [revisions, setRevisions] = useState<Revision[] | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [restored, setRestored] = useState(false);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -323,6 +339,36 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
       editor.focus();
       editor.setSelectionRange(start + stamp.length, start + stamp.length);
     });
+  };
+
+  const openHistory = async () => {
+    if (!selected) return;
+    try {
+      setRevisions(await invoke<Revision[]>("memo_revision_list", { id: selected.id }));
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const restoreRevision = async (time: string) => {
+    if (!selected) return;
+    setRestoring(true);
+    try {
+      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+      const saved = await invoke<Memo>("memo_revision_restore", { id: selected.id, time, now });
+      setSelected(saved);
+      setDirty(false);
+      setRestored(true);
+      window.setTimeout(() => setRestored(false), 1500);
+      setRevisions(await invoke<Revision[]>("memo_revision_list", { id: selected.id }));
+      searchToken.current += 1;
+      setSearchResults([]);
+      await loadMemos(saved.id);
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setRestoring(false);
+    }
   };
   const selectMemo = (memo: Memo) => {
     if (selected?.id === memo.id || !canDiscard()) return;
@@ -527,8 +573,21 @@ export function MemoPage({ language = "zh", onDirtyChange, renderTheme }: MemoPa
                   placeholder={t.tagsPh}
                 />
                 <button className="memo-date-insert" onClick={insertDate} disabled={saving || mode === "preview"}>{t.insertDate}</button>
+                <button onClick={() => void openHistory()} disabled={saving || restoring || !selected}>{restored ? t.restored : t.history}</button>
               </div>
             </div>
+            {revisions !== null && (
+              <div className="memo-history" role="list">
+                {revisions.length === 0 && <div className="memo-history-empty">{t.noRevisions}</div>}
+                {revisions.map((revision) => (
+                  <div className="memo-history-row" key={revision.time} role="listitem">
+                    <span className="memo-history-time">{revision.time}</span>
+                    <span className="memo-history-preview">{revision.content.split("\n")[0] || t.untitled}</span>
+                    <button onClick={() => void restoreRevision(revision.time)} disabled={restoring || saving}>{t.restore}</button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className={`memo-content memo-content-${mode}`}>
               {(mode === "edit" || mode === "split") && (
                 <textarea

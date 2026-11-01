@@ -2,7 +2,7 @@
 use memopaws_memo::model::Memo;
 use memopaws_memo::renderer::{render_markdown, RenderTheme};
 use memopaws_memo::search::MemoSearchResult;
-use memopaws_memo::{migrate, search, storage};
+use memopaws_memo::{migrate, revisions, search, storage};
 
 
 
@@ -40,6 +40,26 @@ pub fn memo_create(memo: Memo) -> Result<Memo, String> {
 #[tauri::command]
 pub fn memo_update(memo: Memo) -> Result<Memo, String> {
     storage::update_memo(&memo_dir()?, memo).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn memo_revision_list(id: i64) -> Result<Vec<revisions::Revision>, String> {
+    revisions::list_revisions(&memo_dir()?, id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn memo_revision_restore(id: i64, time: String, now: String) -> Result<Memo, String> {
+    let dir = memo_dir()?;
+    let revisions = revisions::list_revisions(&dir, id).map_err(|error| error.to_string())?;
+    let revision = revisions
+        .iter()
+        .find(|revision| revision.time == time)
+        .ok_or_else(|| format!("revision {time} not found"))?;
+    let mut memo = storage::read_memo(&dir, id).map_err(|error| error.to_string())?;
+    memo.content = revision.content.clone();
+    memo.modified = now;
+    // update_memo snapshots the current content, so a restore never loses data.
+    storage::update_memo(&dir, memo).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
