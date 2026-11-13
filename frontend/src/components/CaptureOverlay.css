@@ -3,11 +3,34 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: #000;
+  /* Live-screen mode: the real screen below must show through (the window is
+     transparent; nothing here paints pixels from a screenshot). */
+  background: transparent;
   cursor: crosshair;
   user-select: none;
   overflow: hidden;
   touch-action: none;
+}
+
+/* The capture-mode hint layer, before the overlay component mounts: the same
+   tone the live overlay dims with, so switching between them has no brightness
+   step at all. */
+.capture-overlay-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  background: rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+/* Dims the screen while no selection exists. Once a box is drawn, the box's own
+   100vmax shadow dims outside it instead, keeping the inside clear. */
+.capture-overlay-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.25);
+  pointer-events: none;
 }
 
 .capture-overlay img {
@@ -44,10 +67,10 @@
 
 @keyframes capture-glow {
   0%, 100% {
-    box-shadow: 0 0 6px rgba(77, 163, 255, 0.35), inset 0 0 6px rgba(77, 163, 255, 0.08);
+    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.25), 0 0 6px rgba(77, 163, 255, 0.35), inset 0 0 6px rgba(77, 163, 255, 0.08);
   }
   50% {
-    box-shadow: 0 0 18px rgba(77, 163, 255, 0.75), inset 0 0 10px rgba(77, 163, 255, 0.18);
+    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.25), 0 0 18px rgba(77, 163, 255, 0.75), inset 0 0 10px rgba(77, 163, 255, 0.18);
   }
 }
 

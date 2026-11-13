@@ -11,27 +11,35 @@ import "./RecognizePage.css";
 
 interface TextResult { text: string }
 interface LocalLanguages { languages: { tag: string; name: string }[]; preferred: string }
-// The capture overlay lives in its OWN frameless always-on-top window (the
-// WeChat/Quark/Windows-snipping architecture): the main window stays hidden for
-// the whole session and never participates, so a main-UI flash is structurally
-// impossible — there is no fullscreen dance, no saved placement, nothing to
-// restore. The window is PRE-CREATED at startup and reused for every capture:
-// this page is the entire overlay app — it fetches the screenshot from the Rust
-// session store, hosts CaptureOverlay, and every action either hits a backend
-// command or ends the session (capture_overlay_end), which hides this window
-// (kept warm) and restores the main window when the session semantics say so.
+
+// The capture overlay is its OWN frameless always-on-top window and runs in
+// LIVE-SCREEN mode (the Windows-snipping / Verta architecture): the screen below
+// stays live and nothing disturbs it — the main window is not hidden and no frame
+// is grabbed to paint with. Pixels are grabbed only when an action needs them
+// (recognize / translate / save / pin / confirm), and those pixels are what the
+// user saw: the app's own window included, because nothing moved it.
+//
+// A session arms through capture_overlay_show (Rust shows this window and emits
+// "capture-image"); this page answers by grabbing ONE frame for the loupe and
+// colour picker — a grab reads pixels and changes nothing on screen.
+type Mode = "idle" | "live" | "ending";
+
 export function CaptureOverlayPage() {
   const [language, setLanguage] = useState<Lang>("zh");
-  const [background, setBackground] = useState("");
   const [localLanguages, setLocalLanguages] = useState<LocalLanguages>({ languages: [], preferred: "" });
   const [localLanguage, setLocalLanguage] = useState("");
-  const screenshotRef = useRef<HTMLImageElement | null>(null);
+  const [mode, setMode] = useState<Mode>("idle");
+  const sampleRef = useRef<HTMLCanvasElement | null>(null);
   const t = copy[language];
   const lastGeneration = useRef(0);
   const loadInFlight = useRef(false);
-  // The overlay window is reused across sessions, so CaptureOverlay must REMOUNT
-  // per session or the previous session's selection/marks/result state would
-  // bleed into the next capture. The key bumps on every loaded image.
+  // The event and the generation poll both announce one arming; dedupe by
+  // generation so the second signal cannot remount CaptureOverlay and wipe a
+  // selection the user just made.
+  const armedGeneration = useRef(-1);
+  // The window is reused across sessions, so CaptureOverlay must REMOUNT per
+  // session or the previous session's selection/marks/result state would bleed
+  // into the next capture. The key bumps on every arm.
   const [session, setSession] = useState(0);
 
   useEffect(() => {
@@ -39,44 +47,51 @@ export function CaptureOverlayPage() {
     void invoke<Record<string, unknown>>("get_config").then((raw) => {
       if (active) setLanguage(asLang(raw.language));
     }).catch(() => {});
-    // The window is PRE-CREATED at startup and reused: each session pushes a
-    // "capture-image" event; a proactive fetch covers the very first session (the
-    // event may fire before this listener attaches). Failures are ignored — no
-    // image means nothing painted (the window stays transparent) and the Rust
-    // 3s fallback cancels a stuck session.
-    const loadFlow = async () => {
+    // One grab per arm, for the loupe/colour picker only: the overlay paints
+    // nothing from it (the screen below is live and unstyled).
+    const armSession = async () => {
       if (loadInFlight.current) return;
       loadInFlight.current = true;
+      let armed = false;
       try {
-        const result = await invoke<ArrayBuffer | number[]>("capture_overlay_image");
+        const generation = await invoke<number>("capture_overlay_generation").catch(() => 0);
+        if (generation === armedGeneration.current) return;
+        armedGeneration.current = generation;
+        armed = true;
+        const displayIndex = await invoke<number | null>("capture_overlay_display_index").catch(() => null);
+        const bytes = await invoke<ArrayBuffer | number[]>("capture_screen", { displayIndex: displayIndex ?? undefined });
         if (!active) return;
-        const bytes = result instanceof ArrayBuffer ? new Uint8Array(result) : new Uint8Array(result);
-        const screenshot = new Image();
-        screenshot.src = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-        screenshotRef.current = screenshot;
-        // Decode usually resolves in tens of milliseconds; a hidden window may
-        // defer it, so race a short timeout — the transparent window makes any
-        // not-yet-decoded frame desktop-through rather than white or black.
-        await Promise.race([screenshot.decode(), new Promise((resolve) => setTimeout(resolve, 250))]);
-        if (!active) return;
-        setBackground(screenshot.src);
-        setSession((current) => current + 1);
+        const png = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+        const bitmap = await createImageBitmap(new Blob([png], { type: "image/png" })).catch(() => null);
+        if (bitmap) {
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          sampleRef.current = canvas;
+        }
       } catch {
-        // Startup probe without an active session: stay transparent and wait.
+        // A failed loupe grab must not block the session: the overlay still works,
+        // only the magnifier stays empty.
       } finally {
+        if (active && armed) {
+          setSession((current) => current + 1);
+          setMode("live");
+        }
         loadInFlight.current = false;
       }
     };
-    void loadFlow();
-    const unlistenImage = listen("capture-image", () => { void loadFlow(); });
+    const unlistenImage = listen("capture-image", () => { void armSession(); });
     // Events to HIDDEN pages cannot be trusted (WebView2 throttles them): poll
     // the session generation as the reliable transport. The event stays as a
-    // fast path.
+    // fast path. The generation only advances when a session STARTS; armSession
+    // dedupes by generation, so both signals together arm exactly once.
     const generationTimer = setInterval(() => {
       void invoke<number>("capture_overlay_generation").then((generation) => {
         if (generation !== lastGeneration.current) {
           lastGeneration.current = generation;
-          void loadFlow();
+          void armSession();
         }
       }).catch(() => {});
     }, 120);
@@ -87,19 +102,15 @@ export function CaptureOverlayPage() {
     }).catch(() => {});
     return () => { active = false; clearInterval(generationTimer); void unlistenImage.then((stop: () => void) => stop()); };
   }, []);
-  // Reveal the window only AFTER React has committed the fresh per-session
-  // CaptureOverlay (the key bump above): invoking ready directly from loadFlow
-  // could show the window while the previous session's DOM was still mounted.
+  // The arming handshake stays explicit (a no-op once the window is already up).
   useEffect(() => {
-    if (session > 0) void invoke("capture_overlay_ready").catch(() => {});
-  }, [session]);
+    if (mode === "live") void invoke("capture_overlay_ready").catch(() => {});
+  }, [mode, session]);
 
-  // Ends the session (Rust hides this window — kept warm — and restores the main
-  // window when the outcome says so, revealing a pin after the screen is clean).
-  // CRITICAL ORDER: the painted state is cleared BEFORE the hide, so the last
-  // composited frame is transparent. A hidden window keeps presenting its cached
-  // frame when re-shown — without this, the next capture would flash this
-  // session's stale selection for a frame or two.
+  // Ends the session (Rust hides this window and settles the session).
+  // CRITICAL ORDER: nothing is painted for the brief moment before the hide, so
+  // the last composited frame is transparent — a hidden window keeps presenting
+  // its cached frame when re-shown, and a stale selection would flash.
   // A full-screen PNG as a JSON array is tens of millions of IPC elements and
   // wedges the overlay (the black-canvas lockup): images travel as base64.
   const bytesToBase64 = (bytes: Uint8Array) => {
@@ -111,8 +122,8 @@ export function CaptureOverlayPage() {
     return btoa(binary);
   };
   const endSession = (outcome: "pin" | "confirm" | "cancel", revealPin: string | null, result?: { image: Uint8Array; ocrText: string; translation: string }) => {
-    setBackground("");
-    screenshotRef.current = null;
+    setMode("ending");
+    sampleRef.current = null;
     return new Promise((resolve) => setTimeout(resolve, 60))
       .then(() => invoke<{ restored: boolean; generation: number }>("capture_overlay_end", {
         outcome,
@@ -121,18 +132,32 @@ export function CaptureOverlayPage() {
         translation: result ? result.translation : null,
         imageBase64: result ? bytesToBase64(result.image) : null,
       }))
-      // Belt-and-suspenders: capture_overlay_end already hid this window and
-      // settled the session synchronously; this only covers a survivor. The
-      // generation gates it: hidden-page IPC can be deferred for seconds, and
-      // an ungated settle+hide here raced the NEXT capture session and
-      // intermittently wedged it ("stuck on the main window").
-      .then((end) => { void invoke("capture_overlay_finish", { generation: end.generation }).catch(() => {}); });
+      .then((end) => {
+        // The window is hidden by now: back to idle unseen — unless a new session
+        // already armed this page (rapid back-to-back captures), in which case the
+        // late idle would blank the overlay the user is already looking at.
+        setMode((current) => (current === "ending" ? "idle" : current));
+        return invoke("capture_overlay_finish", { generation: end.generation }).catch(() => {});
+      });
   };
 
+  // The one seam every action goes through: grab the screen NOW, crop the
+  // selection, compose the marks. In live-screen mode there is no pre-taken frame
+  // to crop from — the grab happens here, which is exactly why the app never
+  // disturbs the screen to take a picture of it.
   const cropFromImage = async (region: RegionCss, scale: number, cornerRadius?: number, marks: Mark[] = []): Promise<Uint8Array> => {
-    const screenshot = screenshotRef.current;
-    if (!screenshot) throw new Error(t.needImage);
-    return composePng(screenshot, region, scale || window.devicePixelRatio || 1, cornerRadius || 0, marks);
+    const displayIndex = await invoke<number | null>("capture_overlay_display_index").catch(() => null);
+    const bytes = await invoke<ArrayBuffer | number[]>("capture_screen", { displayIndex: displayIndex ?? undefined });
+    const png = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+    const url = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode().catch(() => {});
+      return await composePng(image, region, scale || window.devicePixelRatio || 1, cornerRadius || 0, marks);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   };
   const recognize = async (marked: Uint8Array) => {
     const result = await invoke<TextResult>("ai_ocr", { image: Array.from(marked), keyEntryId: null });
@@ -149,8 +174,8 @@ export function CaptureOverlayPage() {
   };
   const qrRecognize = async (marked: Uint8Array) => decodeQrImage(marked);
   const confirmCapture = async (result: { image: Uint8Array; ocrText: string; translation: string }) => {
-    // Hand the result to Rust (the hidden main window polls it — events to
-    // hidden pages cannot be trusted), then end the session.
+    // Hand the result to Rust (the main window polls it — events to hidden pages
+    // cannot be trusted), then end the session.
     await endSession("confirm", null, result);
   };
   const pinImage = async (marked: Uint8Array, cornerRadius: number) => {
@@ -171,15 +196,21 @@ export function CaptureOverlayPage() {
     await invoke<string | null>("save_image_as", { image: Array.from(marked) });
   };
 
-  if (!background) {
-    // Nothing until the screenshot is ready: the first frames are pure black
-    // (window background), never app UI.
-    return <div style={{ width: "100vw", height: "100vh", background: "transparent" }} />;
+  if (mode === "idle") {
+    // Idle: the window is normally hidden, so this is only the first frame the
+    // NEXT session shows. Same 25% tone the live overlay paints, so the swap from
+    // veil to overlay has no brightness step at all.
+    return <div className="capture-overlay-veil" />;
+  }
+  if (mode === "ending") {
+    // Nothing painted for the moment before Rust hides the window: the cached
+    // frame must be transparent (see endSession).
+    return null;
   }
   return <div data-overlay-session={session}>
     <CaptureOverlay
       key={session}
-    background={background}
+    sampleCanvas={sampleRef}
     hint={t.overlay}
     onConfirm={confirmCapture}
     onCrop={cropFromImage}

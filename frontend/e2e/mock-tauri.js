@@ -45,6 +45,11 @@
   const pinSession = { next: 0, images: new Map(), captureVisible: null, restoreVisible: null };
   let lastRestore = null;
   let overlayGeneration = 0;
+  // Separate counters: overlayGeneration is the "a session started" signal the
+  // overlay page polls to arm; resultGeneration marks confirmed results. Sharing
+  // one counter made a finished session look like a new one and re-armed the
+  // overlay after it closed.
+  let resultGeneration = 0;
   function sessionBegin(visible) {
     if (pinSession.captureVisible !== null) throw new Error("capture is already active");
     pinSession.captureVisible = Boolean(visible);
@@ -252,6 +257,18 @@
         } else if (command === "capture_screen") {
           // Raw binary: invoke's return value IS the ArrayBuffer, no { image, preview } wrapper.
           resolve(capturePngBuffer());
+        } else if (command === "capture_overlay_show") {
+          // Live-screen mode: showing the overlay IS the session. The page answers
+          // by grabbing one frame for the loupe (via capture-image) and mounting
+          // the live overlay; nothing is hidden and nothing is pre-taken.
+          try {
+            if (pinSession.captureVisible === null) sessionBegin(true);
+            overlayGeneration += 1;
+            window.__MOCK_TAURI_EMIT__("capture-image", {});
+            resolve(null);
+          } catch (error) { reject(error); }
+        } else if (command === "capture_overlay_display_index") {
+          resolve(null);
         } else if (command === "capture_overlay_begin") {
           // The standalone overlay window exists only in the real backend; here the
           // #capture-overlay page is the overlay, so opening a session is implied.
@@ -277,12 +294,12 @@
             if ((args && args.outcome) === "confirm") {
               // The confirmed result reaches the hidden main window through the
               // session store, exactly like Rust: the main page polls it back.
-              overlayGeneration += 1;
+              resultGeneration += 1;
               localStorage.setItem("mock-capture-result", JSON.stringify({
                 ocrText: args.ocrText || null,
                 translation: args.translation || null,
                 imageBase64: args.imageBase64 || null,
-                resultGeneration: overlayGeneration,
+                resultGeneration: resultGeneration,
               }));
             }
             if (pinSession.captureVisible === null) lastRestore = restored;

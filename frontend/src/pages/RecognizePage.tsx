@@ -161,28 +161,23 @@ export function RecognizePage({ language = "zh" }: { language?: Lang }) {
     if (captureSessionStartedRef.current) return;
     setError("");
     try {
-      const window = getCurrentWindow();
-      // The session registers before hiding: Rust records whether the main window was visible before the capture began.
-      await invoke("capture_session_begin", { visible: await window.isVisible() });
+      // Live-screen capture: nothing is hidden and nothing is grabbed up front.
+      // The overlay goes up over the LIVE screen (the app stays exactly where it
+      // is — what you see is what gets captured), and pixels are grabbed only
+      // when an action needs them (recognize / translate / save / confirm). No
+      // window hiding, no settle wait, nothing that could flash.
+      await invoke("capture_session_begin", { visible: await getCurrentWindow().isVisible() });
       captureSessionStartedRef.current = true;
-      // The overlay is a separate frameless window now: the main window just hides
-      // and never participates in the session — no geometry dance, no fullscreen,
-      // nothing that could ever flash the app UI back on screen.
-      await window.hide();
-      // Wait for the Windows compositor to finish the hide animation, otherwise the main window leaves a ghost in the screenshot.
-      await new Promise((resolve) => setTimeout(resolve, 320));
       const display = displays.find((item) => item.index === selectedDisplay);
-      const bytes = await invoke<ArrayBuffer | number[]>("capture_screen", { displayIndex: displays.length > 1 ? selectedDisplay : undefined });
-      const png = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
-      await invoke("capture_overlay_begin", {
-        png: Array.from(png),
-        display: display ? { x: display.x, y: display.y, width: display.width, height: display.height } : null,
+      await invoke("capture_overlay_show", {
+        display: display ? { x: display.x, y: display.y, width: display.width, height: display.height, index: display.index } : null,
       });
     } catch (reason) {
-      // No overlay window exists on this path: end the session and come back.
+      // The veil may already be up (capture_overlay_show) and no image exists:
+      // take it away, then end the session and come back.
       captureSessionStartedRef.current = false;
+      try { await invoke("capture_overlay_abandon"); } catch { /* the overlay may never have shown */ }
       try { await invoke("capture_session_finish", { outcome: "cancel" }); } catch { /* keep the first error */ }
-      try { await getCurrentWindow().show(); } catch { /* nothing more we can do */ }
       setError(errorText(reason));
     }
   };

@@ -1,12 +1,12 @@
 // Focused browser regression test for editable capture selections and for the
 // save/pin flows that fan out of the capture overlay.
 //
-// Contract under test: capture_screen answers with the raw PNG bytes of the
-// screen (Tauri ipc Response), the frontend decodes them once into the overlay
-// background and crops on a native canvas — so no overlay action may call
-// image_crop, a pending save keeps the visible owner window up so the modal
-// dialog stays above the overlay, and pin sessions live in the Rust registry
-// (restore after the last pin closes).
+// Contract under test: live-screen capture. Entering capture only arms the
+// session and puts the overlay up over the LIVE screen (no window hide, no
+// pre-taken frame); pixels are grabbed per action and cropped on a native canvas
+// — so no overlay action may call image_crop, a pending save keeps the visible
+// owner window up so the modal dialog stays above the overlay, and pin sessions
+// live in the Rust registry (restore after the last pin closes).
 //
 // Usage: keep `npm --prefix frontend run dev` running on http://localhost:1420
 // (or set MEMOPAWS_BASE_URL), then
@@ -105,20 +105,13 @@ const NUMBER_ARRAY_CAPTURE_SCRIPT = `
   })();
 `;
 
-// Every flow opens the overlay the same way. A capture_screen that does not
-// hand over raw PNG bytes leaves the frontend with no background to decode, so
-// the crop and save assertions below it would silently never run.
+// Every flow opens the overlay the same way. The page arms itself (generation
+// poll / capture-image) and mounts CaptureOverlay over the LIVE screen; a loupe
+// grab whose bytes do not decode must not stop it (the magnifier stays empty).
 async function waitForOverlay(page) {
   const overlay = page.locator(".capture-overlay");
   const shown = await overlay.waitFor({ state: "visible", timeout: 10000 }).then(() => true).catch(() => false);
-  if (!shown) throw new Error("capture overlay never rendered: capture_screen must resolve raw PNG bytes instead of {image, preview}, so this flow's crop and save assertions never ran");
-  const natural = await page.evaluate(() => {
-    const image = document.querySelector(".capture-overlay img");
-    return image ? [image.naturalWidth, image.naturalHeight] : null;
-  });
-  if (!natural || natural[0] !== 1280 || natural[1] !== 720) {
-    throw new Error(`overlay background must decode to the full 1280x720 screenshot, saw ${JSON.stringify(natural)}`);
-  }
+  if (!shown) throw new Error("capture overlay never rendered: the overlay page must arm on capture_overlay_show / capture-image and mount CaptureOverlay");
   return overlay;
 }
 
@@ -234,32 +227,32 @@ async function captureOverlayFlow(browser) {
   // geometry/fullscreen dance is gone from the product, so it is gone from here.
   await page.getByRole("combobox", { name: "显示器" }).selectOption("1");
   await page.getByRole("button", { name: "截图" }).click();
-  await page.waitForFunction(() => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === "capture_overlay_begin"), null, { timeout: 15000 });
+  await page.waitForFunction(() => window.__MOCK_TAURI_COMMAND_CALLS__.some((call) => call.command === "capture_overlay_show"), null, { timeout: 15000 });
   const dance = await page.evaluate(() => {
     const calls = window.__MOCK_TAURI_COMMAND_CALLS__;
     const index = (name) => calls.findIndex((call) => call.command === name);
-    const screen = calls.find((call) => call.command === "capture_screen");
-    const begin = calls.find((call) => call.command === "capture_overlay_begin");
+    const show = calls.find((call) => call.command === "capture_overlay_show");
     return {
       session: index("capture_session_begin"),
-      screen: index("capture_screen"),
-      begin: index("capture_overlay_begin"),
-      visibleDuringCapture: screen ? screen.visible : null,
-      displayIndex: screen && screen.args ? screen.args.displayIndex : null,
-      pngLength: begin && begin.args && Array.isArray(begin.args.png) ? begin.args.png.length : 0,
-      display: begin && begin.args ? begin.args.display : null,
+      show: index("capture_overlay_show"),
+      grabs: calls.filter((call) => call.command === "capture_screen").length,
+      hides: window.__MOCK_TAURI_WINDOW_CALLS__.filter((call) => call.command === "plugin:window|hide").length,
       shownAfter: window.__MOCK_TAURI_WINDOW_CALLS__.some((call) => call.command === "plugin:window|show"),
+      display: show && show.args ? show.args.display : null,
     };
   });
   const problems = [];
-  if (dance.session < 0 || dance.screen < 0 || dance.begin < 0 || !(dance.session < dance.screen && dance.screen < dance.begin)) {
-    problems.push(`capture dance order wrong: ${JSON.stringify(dance)}`);
+  // Live-screen entering: arm the session, then put the overlay up over the LIVE
+  // screen. Nothing is hidden and nothing is grabbed up front — an uncovered
+  // desktop gap or a window-hide animation is exactly the flash that must not
+  // come back.
+  if (!(dance.session > -1 && dance.show > dance.session)) problems.push(`capture must arm the session then show the overlay: ${JSON.stringify(dance)}`);
+  if (dance.grabs) problems.push(`entering capture must not grab the screen, saw ${dance.grabs} capture_screen call(s)`);
+  if (dance.hides) problems.push(`entering capture must not hide the main window, saw ${dance.hides} hide call(s)`);
+  if (dance.shownAfter) problems.push("entering capture must not re-show the main window either");
+  if (!dance.display || dance.display.width !== 1600 || dance.display.index !== 1) {
+    problems.push(`capture_overlay_show must receive the secondary 1600x900 display with its index, saw ${JSON.stringify(dance.display)}`);
   }
-  if (dance.visibleDuringCapture !== false) problems.push(`main window was visible during capture: ${JSON.stringify(dance.visibleDuringCapture)}`);
-  if (dance.displayIndex !== 1) problems.push(`capture used display ${JSON.stringify(dance.displayIndex)}, expected 1`);
-  if (!dance.pngLength) problems.push("capture_overlay_begin received no PNG bytes");
-  if (!dance.display || dance.display.width !== 1600) problems.push(`capture_overlay_begin received display ${JSON.stringify(dance.display)}, expected the secondary 1600x900`);
-  if (dance.shownAfter) problems.push("main window was shown while the overlay owns the session");
   if (problems.length) throw new Error(problems.join("; "));
 
   // The overlay page takes over as the standalone overlay window: same
@@ -663,42 +656,22 @@ async function pinWindowFlow(browser) {
   });
 }
 
-// The postMessage IPC fallback hands capture_screen back as number[] instead of
-// an ArrayBuffer. The overlay must still open on that shape; when it does not,
-// the failure reports the exact decode error production hit.
+// The postMessage IPC fallback hands capture_screen back as number[] instead of an
+// ArrayBuffer. The overlay page grabs its own frames now (loupe + per-action
+// crop), so that shape must survive both: the overlay still arms, and an action's
+// crop still produces a decodable image.
 async function captureFallbackFlow(browser) {
   await withPage(browser, [MOCK_SCRIPT, NUMBER_ARRAY_CAPTURE_SCRIPT], async (page) => {
-    await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "截图" }).click();
-    // The postMessage fallback hands capture_screen back as number[]; the whole
-    // dance must survive it and hand a decodable PNG to the overlay window.
-    const beginArgs = await page.waitForFunction(() => {
-      const begin = window.__MOCK_TAURI_COMMAND_CALLS__.find((call) => call.command === "capture_overlay_begin");
-      return begin ? begin.args : null;
-    }, null, { timeout: 10000 }).then((handle) => handle.jsonValue()).catch(() => null);
-    if (!beginArgs || !Array.isArray(beginArgs.png) || !beginArgs.png.length) {
-      const raw = await page.evaluate(async () => {
-        const bytes = await window.__TAURI_INTERNALS__.invoke("capture_screen", {});
-        let decode;
-        try {
-          await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: "image/png" }));
-          decode = "ok";
-        } catch (reason) {
-          decode = String((reason && reason.message) || reason);
-        }
-        return { isArray: Array.isArray(bytes), decode, uiError: Array.from(document.querySelectorAll("[role=alert]")).map((node) => node.textContent).filter(Boolean).join(" | ") };
-      });
-      throw new Error(`capture_screen number[] fallback must still reach capture_overlay_begin, probe: ${JSON.stringify(raw)}`);
-    }
-    const decode = await page.evaluate(async (png) => {
-      try {
-        await createImageBitmap(new Blob([new Uint8Array(png)], { type: "image/png" }));
-        return "ok";
-      } catch (reason) {
-        return String((reason && reason.message) || reason);
-      }
-    }, beginArgs.png);
-    if (decode !== "ok") throw new Error(`forwarded fallback PNG must decode, saw ${decode}`);
+    await page.goto(`${BASE_URL}/#capture-overlay`, { waitUntil: "networkidle" });
+    const overlay = page.locator(".capture-overlay");
+    const shown = await overlay.waitFor({ state: "visible", timeout: 10000 }).then(() => true).catch(() => false);
+    if (!shown) throw new Error("overlay must still arm when capture_screen answers with number[] (postMessage fallback)");
+    await drag(page, { x: 100, y: 100 }, { x: 400, y: 300 });
+    await page.locator(".capture-overlay-rect").waitFor();
+    await overlay.getByRole("button", { name: "AI识别" }).click();
+    const ocrImage = await readOcrImage(page);
+    if (ocrImage.error) throw new Error(`${ocrImage.error} — the number[] fallback must still decode in the crop path`);
+    if (!ocrImage.width || !ocrImage.height) throw new Error("crop from the number[] fallback produced no image");
   });
 }
 
@@ -719,7 +692,7 @@ async function multiPinSessionFlow(browser) {
       // Wait for the overlay to actually REMOUNT (the session attribute bumps),
       // not just for the previous mount that is about to unmount.
       const before = await page.evaluate(() => (document.querySelector("[data-overlay-session]") || document.body).getAttribute("data-overlay-session") || "0");
-      await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("capture_overlay_begin", { png: [], display: null }));
+      await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("capture_overlay_show", { display: null }));
       await page.waitForFunction((prev) => (document.querySelector("[data-overlay-session]") || document.body).getAttribute("data-overlay-session") !== prev, before, { timeout: 10000 });
       await page.locator(".capture-overlay").waitFor({ timeout: 10000 });
     };

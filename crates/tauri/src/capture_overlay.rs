@@ -10,6 +10,9 @@ use crate::pinned_images::{main_only, PinState};
 pub struct CaptureOverlayState {
     image: Option<Vec<u8>>,
     shown: bool,
+    /// Which display the session's overlay covers: the overlay page grabs the
+    /// screen itself now (live-screen mode), and it must grab the one it sits on.
+    display_index: Option<usize>,
     /// Bumped on every state transition (session start / end): the overlay page
     /// polls this because WebView2 event delivery to HIDDEN windows is unreliable
     /// (a missed "capture-image" once stalled a whole session).
@@ -36,6 +39,10 @@ pub struct DisplayRect {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    /// Index into the monitor list, so the overlay page can grab the display it
+    /// covers. Optional: older callers pass geometry only.
+    #[serde(default)]
+    pub index: Option<usize>,
 }
 
 fn overlay_only(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -46,13 +53,40 @@ fn overlay_only(window: &tauri::WebviewWindow) -> Result<(), String> {
     }
 }
 
+/// Asks the system to leave this window out of screen grabs.
+///
+/// Display affinity is a property, not a race: the window is never part of a
+/// capture, whoever is grabbing. That is what lets the overlay stay ON SCREEN
+/// while `capture_screen` runs — the grab happens behind the veil instead of in
+/// the open (see `capture_overlay_show`). Input is unaffected; only capture APIs
+/// skip the window. Needs Windows 10 2004; on older builds the call fails and
+/// the caller's hiding still keeps the veil out of the pixels.
+#[cfg(windows)]
+fn exclude_from_capture(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+    let Ok(handle) = window.hwnd() else {
+        return;
+    };
+    let _ = unsafe { SetWindowDisplayAffinity(handle.0 as _, WDA_EXCLUDEFROMCAPTURE) };
+}
+
+#[cfg(not(windows))]
+fn exclude_from_capture(_: &tauri::WebviewWindow) {}
+
 /// Returns the overlay window, creating it (hidden) on first use. The window is
 /// PRE-CREATED at app startup and REUSED for every capture: WebView2 cold start
 /// and page boot would otherwise cost 1-3s per capture. transparent(true) so any
 /// frame that slips out before the page paints shows the desktop through — never
-/// white, never black.
+/// white, never black. Every path applies display affinity, so a reused window
+/// keeps the exclusion too.
 fn ensure_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
     if let Some(existing) = app.get_webview_window("capture-overlay") {
+        exclude_from_capture(&existing);
+        // See the builder below: a reused window must lose the undecorated shadow
+        // too, or the veil stays inset by the frame thickness.
+        let _ = existing.set_shadow(false);
         return Ok(existing);
     }
     let created = tauri::WebviewWindowBuilder::new(app, "capture-overlay", tauri::WebviewUrl::App("index.html#capture-overlay".into()))
@@ -64,9 +98,19 @@ fn ensure_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String>
         .minimizable(false)
         .skip_taskbar(true)
         .transparent(true)
+        // NO undecorated shadow. tao's shadow for a decorations(false) window keeps
+        // WS_THICKFRAME so DWM can draw the drop shadow, and the client area is then
+        // inset by the frame thickness (SM_CXSIZEFRAME + SM_CXPADDEDBORDER: 8px at
+        // 100%, 10px at 125%) — a window sized to the monitor then paints its content
+        // shifted inward, leaving an undimmed strip at the left/top edge and rounded
+        // corners on Windows 11. The overlay must cover the screen edge to edge, so
+        // the shadow goes (Verta does the same).
+        .shadow(false)
         .visible(false)
-        .build();
-    created.map_err(|error| format!("capture overlay window creation failed: {error}"))
+        .build()
+        .map_err(|error| format!("capture overlay window creation failed: {error}"))?;
+    exclude_from_capture(&created);
+    Ok(created)
 }
 
 /// Startup hook: pre-create the hidden overlay window so the first capture is as
@@ -75,11 +119,122 @@ pub fn precreate(app: &tauri::AppHandle) {
     let _ = ensure_window(app);
 }
 
-/// Stores the screenshot and shows the overlay on the requested display. The
-/// overlay is a REAL separate window (the WeChat / Quark / Windows-snipping
-/// architecture): the main window stays hidden for the whole session and never
-/// participates, so there is no fullscreen dance, no saved placement to restore,
-/// and no main-UI flash is structurally possible.
+/// Puts the overlay on screen over the LIVE screen and arms a capture session.
+///
+/// Live-screen mode: nothing is hidden and nothing is grabbed here. The overlay
+/// is a transparent always-on-top window laid over the monitor; the page paints a
+/// 25% dim, grabs ONE frame for the loupe/colour picker, and pixels for the
+/// actual result are taken only when an action needs them. That is what makes
+/// capture flash-free: no window hide, no settle wait, no frozen frame swap.
+/// The window is also excluded from captures, so the dim layer never lands in the
+/// grabbed pixels.
+#[tauri::command]
+pub async fn capture_overlay_show(
+    window: tauri::WebviewWindow,
+    display: Option<DisplayRect>,
+) -> Result<(), String> {
+    main_only(&window)?;
+    let app = window.app_handle().clone();
+    // Same main-thread rule as capture_overlay_begin: window creation pumps the
+    // event loop, so it must not run on the main thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Mutex<CaptureOverlayState>>();
+        {
+            let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if guard.shown {
+                return Err("capture overlay is already open".into());
+            }
+            // Claim the session before any window work: a second show must not
+            // race this one.
+            guard.shown = true;
+            guard.display_index = display.as_ref().and_then(|rect| rect.index);
+        }
+        let overlay = match ensure_window(&app) {
+            Ok(overlay) => overlay,
+            Err(error) => {
+                let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.shown = false;
+                return Err(error);
+            }
+        };
+        let position = display.as_ref().map(|rect| tauri::PhysicalPosition::new(rect.x, rect.y)).unwrap_or(tauri::PhysicalPosition::new(0, 0));
+        let size = display.as_ref().map(|rect| tauri::PhysicalSize::new(rect.width, rect.height)).unwrap_or(tauri::PhysicalSize::new(800, 600));
+        if let Err(error) = overlay.set_position(position).and_then(|_| overlay.set_size(size)) {
+            let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.shown = false;
+            return Err(format!("capture overlay window setup failed: {error}"));
+        }
+        if let Err(error) = overlay.show().and_then(|()| overlay.set_focus()) {
+            let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.shown = false;
+            let _ = overlay.hide();
+            return Err(format!("capture overlay show failed: {error}"));
+        }
+        // Session armed: bump the generation and tell the page. It answers by
+        // grabbing one screen frame for the loupe/colour picker (a grab changes
+        // nothing on screen) and switching from the veil to the live overlay.
+        #[cfg(debug_assertions)]
+        if let (Ok(outer), Ok(inner)) = (overlay.outer_position(), overlay.inner_size()) {
+            eprintln!(
+                "[capture] overlay outer {},{} inner {}x{} / monitor {},{} {}x{}",
+                outer.x, outer.y, inner.width, inner.height,
+                position.x, position.y, size.width, size.height
+            );
+        }
+        {
+            let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.generation += 1;
+        }
+        let _ = app.emit_to("capture-overlay", "capture-image", {});
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("capture overlay task failed: {error}"))?
+}
+
+/// The display the current session covers.
+///
+/// In live-screen mode the overlay page owns the grab (the screen stays live
+/// while the user selects; the backend only reports geometry). The grab must
+/// target the display the overlay sits on, which the page cannot know by itself.
+#[tauri::command]
+pub fn capture_overlay_display_index(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Mutex<CaptureOverlayState>>,
+) -> Result<Option<usize>, String> {
+    overlay_only(&window)?;
+    Ok(state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .display_index)
+}
+
+/// Failure-path cleanup for the main window: `capture_overlay_show` put the veil
+/// on screen and the session then failed before any image existed (grab error,
+/// window setup error). Takes the veil away and clears the session state so the
+/// next capture starts from a clean slate.
+#[tauri::command]
+pub fn capture_overlay_abandon(window: tauri::WebviewWindow) -> Result<(), String> {
+    main_only(&window)?;
+    let app = window.app_handle().clone();
+    if let Some(overlay) = app.get_webview_window("capture-overlay") {
+        let _ = overlay.hide();
+    }
+    let state = app.state::<Mutex<CaptureOverlayState>>();
+    let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.image = None;
+    guard.shown = false;
+    guard.display_index = None;
+    Ok(())
+}
+
+/// Arms the session with a pre-taken screenshot (legacy / test path).
+///
+/// Live-screen mode does not need this: `capture_overlay_show` starts a session
+/// whose pixels are grabbed per action. Scripts and native e2e still arm a
+/// session with an image directly, so this stays and behaves the same — it
+/// stores the PNG for `capture_overlay_image` and shows the overlay if the show
+/// step was skipped.
 #[tauri::command]
 pub async fn capture_overlay_begin(
     window: tauri::WebviewWindow,
@@ -95,11 +250,11 @@ pub async fn capture_overlay_begin(
         let state = app.state::<Mutex<CaptureOverlayState>>();
         {
             let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            if guard.shown {
-                return Err("capture overlay is already open".into());
+            if guard.image.is_some() {
+                return Err("capture overlay session is already armed".into());
             }
             guard.image = Some(png);
-            guard.shown = false;
+            guard.display_index = display.as_ref().and_then(|rect| rect.index);
             guard.generation += 1;
         }
         // The 8s fallback must only cancel ITS OWN session: a normal end()
@@ -123,10 +278,25 @@ pub async fn capture_overlay_begin(
             guard.generation += 1;
             return Err(format!("capture overlay window setup failed: {error}"));
         }
+        // Normally capture_overlay_show already put the veil on screen before the
+        // grab; this is the fallback for callers that arm the session directly
+        // (tests, native e2e), where nothing is visible yet.
+        let armed_visible = {
+            let guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.shown
+        };
+        if !armed_visible {
+            if let Err(error) = overlay.show().and_then(|()| overlay.set_focus()) {
+                let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.image = None;
+                guard.generation += 1;
+                return Err(format!("capture overlay show failed: {error}"));
+            }
+            let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.shown = true;
+        }
         // The page fetches the image (proactively on boot, or via this event for
-        // reused windows), paints, then signals capture_overlay_ready — only then
-        // does the window appear, so the user goes desktop -> complete overlay
-        // with no white/black intermediate frames.
+        // reused windows) and paints it over the veil.
         let _ = app.emit_to("capture-overlay", "capture-image", {});
         let app_for_fallback = app.clone();
         std::thread::spawn(move || {
@@ -136,9 +306,11 @@ pub async fn capture_overlay_begin(
             let state = app_for_fallback.state::<Mutex<CaptureOverlayState>>();
             let should_recover = {
                 let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                let should = !guard.shown && guard.generation == session_generation;
+                let should = guard.image.is_some() && guard.generation == session_generation;
                 if should {
                     guard.image = None;
+                    guard.shown = false;
+                    guard.display_index = None;
                     guard.generation += 1;
                 }
                 should
@@ -243,7 +415,10 @@ pub fn capture_overlay_end(
         }
         guard.image = None;
         guard.shown = false;
-        guard.generation += 1;
+        guard.display_index = None;
+        // No generation bump here: the generation marks "a session STARTED", and
+        // the page polls it to arm. Bumping on end would make the poll arm a new
+        // overlay for a session that is over.
     }
     // Tell the main page the session is over (fast path; it also polls status).
     let _ = app.emit("capture-ended", {});

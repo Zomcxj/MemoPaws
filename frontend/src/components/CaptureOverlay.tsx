@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { type History, type Mark, type Tool, addMark, emptyHistory, imagePoint, redo, undo } from "../annotation/model";
 import { drawMarks } from "../annotation/render";
 import "./CaptureOverlay.css";
@@ -39,7 +39,9 @@ export interface CaptureLabels {
 }
 
 interface Props {
-  background: string;
+  /** Pixels grabbed once per session, for the loupe/colour picker only — the
+   * overlay itself paints nothing from it (live-screen mode). */
+  sampleCanvas?: RefObject<HTMLCanvasElement | null>;
   hint: string;
   onConfirm: (result: { image: Uint8Array; ocrText: string; translation: string }) => Promise<void> | void;
   // Single composition entry: every action first obtains the "marked full PNG" through it, then dispatches.
@@ -114,7 +116,7 @@ const toHex = (r: number, g: number, b: number) =>
   `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
 
 export function CaptureOverlay({
-  background,
+  sampleCanvas,
   hint,
   onConfirm,
   onCrop,
@@ -133,9 +135,7 @@ export function CaptureOverlay({
   labels,
 }: Props) {
   const text = { ...DEFAULT_LABELS, ...labels };
-  const imgRef = useRef<HTMLImageElement>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
-  const sampleRef = useRef<HTMLCanvasElement | null>(null);
   const magnifierRef = useRef<HTMLCanvasElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [cornerRadius, setCornerRadius] = useState(12);
@@ -168,27 +168,22 @@ export function CaptureOverlay({
   const operationTokenRef = useRef(0);
   const cancelSelection = useCallback(() => { operationTokenRef.current += 1; onCancel(); }, [onCancel]);
 
-  // Geometry shared by preview sampling and region math: the image is object-fit: contain.
+  // Geometry for live-screen mode: the window IS the screen, 1:1 in CSS pixels,
+  // so the "image" these maths refer to is the window at device-pixel scale — no
+  // contain maths, no letterboxing, nothing to letterbox against. Keeping the
+  // same shape means every caller (selection, clamping, sampling) is unchanged.
   const layout = useCallback(() => {
-    const img = imgRef.current;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const nw = img?.naturalWidth || 0;
-    const nh = img?.naturalHeight || 0;
-    if (nw <= 0 || nh <= 0) {
-      return { nw: 0, nh: 0, offsetX: 0, offsetY: 0, renderedW: vw, renderedH: vh, scale: window.devicePixelRatio || 1 };
-    }
-    const cssScale = Math.min(vw / nw, vh / nh);
-    const renderedW = nw * cssScale;
-    const renderedH = nh * cssScale;
+    const dpr = window.devicePixelRatio || 1;
     return {
-      nw,
-      nh,
-      offsetX: (vw - renderedW) / 2,
-      offsetY: (vh - renderedH) / 2,
-      renderedW,
-      renderedH,
-      scale: renderedW > 0 ? nw / renderedW : window.devicePixelRatio || 1,
+      nw: Math.round(vw * dpr),
+      nh: Math.round(vh * dpr),
+      offsetX: 0,
+      offsetY: 0,
+      renderedW: vw,
+      renderedH: vh,
+      scale: dpr,
     };
   }, []);
 
@@ -217,22 +212,9 @@ export function CaptureOverlay({
     [layout],
   );
 
-  // Offscreen copy of the screenshot so we can read pixels for the loupe and picker.
-  useEffect(() => {
-    const image = new Image();
-    image.src = background;
-    image.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
-      canvas.getContext("2d")?.drawImage(image, 0, 0);
-      sampleRef.current = canvas;
-    };
-  }, [background]);
-
   const sampleAt = useCallback(
     (clientX: number, clientY: number) => {
-      const canvas = sampleRef.current;
+      const canvas = sampleCanvas?.current;
       const { offsetX, offsetY, scale } = layout();
       if (!canvas) return null;
       const ix = Math.round((clientX - offsetX) * scale);
@@ -656,26 +638,25 @@ export function CaptureOverlay({
     </select>
   )) || null;
 
-  // Preview canvas: backing store = original image pixels, CSS size = the contain layout rectangle.
-  // Shares drawMarks with the exporter (preview is what you export); rAF coalesces same-frame invalidations.
+  // Annotation layer: marks only. There is no screenshot drawn underneath —
+  // what is under the overlay is the live screen itself.
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const canvas = previewCanvasRef.current;
-      const img = imgRef.current;
-      if (!canvas || !img || !img.naturalWidth) return;
-      if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
+      if (!canvas) return;
+      const { nw, nh } = layout();
+      if (canvas.width !== nw || canvas.height !== nh) {
+        canvas.width = nw;
+        canvas.height = nh;
       }
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
       drawMarks(ctx, history.marks);
       if (draft) drawMarks(ctx, [draft]);
     });
     return () => cancelAnimationFrame(frame);
-  }, [background, history.marks, draft]);
+  }, [history.marks, draft, layout]);
 
   // The two-row toolbar's real size is unknown up front: measure it, then clamp the left edge and flip
   // above the selection when near the bottom.
@@ -756,7 +737,10 @@ export function CaptureOverlay({
 
   return (
     <div className={`capture-overlay${visualHidden ? " is-hidden" : ""}`} role="dialog" aria-modal="true" onMouseDown={handleMouseDown} onPointerDown={handlePointerDown}>
-      <img ref={imgRef} src={background} alt="" draggable={false} />
+      {/* Capture-mode hint layer: the screen below stays live and unstyled, this
+          is the only thing dimming it. Once a box exists, the selection's own
+          huge shadow dims outside it instead, keeping the inside clear. */}
+      {rectStyle ? null : <div className="capture-overlay-dim" aria-hidden="true" />}
       <canvas
         ref={previewCanvasRef}
         className="capture-overlay-annotations"
