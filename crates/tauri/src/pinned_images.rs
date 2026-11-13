@@ -35,9 +35,12 @@ impl Pins {
         self.restore_visible.get_or_insert(self.capture_visible.unwrap_or(false));
         self.images.insert(label, data);
     }
+    /// Convenience for tests: mint a fresh label and register the pin in one
+    /// step. Production mints the label with `next_label` before the image is
+    /// written, so the two steps stay apart there — hence test-only.
+    #[cfg(test)]
     fn insert(&mut self, data: PinData) -> String {
-        self.next += 1;
-        let label = format!("pin-{}", self.next);
+        let label = self.next_label();
         self.insert_with_label(label.clone(), data);
         label
     }
